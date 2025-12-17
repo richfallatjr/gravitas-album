@@ -5,6 +5,122 @@ enum AlbumCurvedWallNavDirection: Sendable {
     case next
 }
 
+struct AlbumCurvedWallPanelAttachmentView: View {
+    let assetID: String
+    let viewHeightPoints: Double
+
+    @EnvironmentObject private var model: AlbumModel
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.openWindow) private var openWindow
+
+    @State private var image: AlbumImage? = nil
+    @State private var isLoading: Bool = false
+
+    private let panelWidthPoints: CGFloat = 620
+    private let horizontalPaddingPoints: CGFloat = 4
+    private let verticalPaddingPoints: CGFloat = 4
+    private let actionRowHeightPoints: CGFloat = 44
+    private let actionRowSpacingPoints: CGFloat = 4
+    private let cornerRadius: CGFloat = 16
+
+    var body: some View {
+        let isSelected = model.currentAssetID == assetID
+        let innerWidth = max(panelWidthPoints - (horizontalPaddingPoints * 2), 240)
+        let contentHeight = max(1, CGFloat(viewHeightPoints) - (verticalPaddingPoints * 2))
+        let mediaHeight = max(1, contentHeight - actionRowHeightPoints - actionRowSpacingPoints)
+
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color(.sRGB, white: 0.04, opacity: 0.95))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(isSelected ? Color.accentColor.opacity(0.9) : Color.white.opacity(0.14), lineWidth: isSelected ? 2 : 1)
+                )
+
+            VStack(alignment: .center, spacing: actionRowSpacingPoints) {
+                ZStack {
+                    if let image {
+#if canImport(UIKit)
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+#elseif canImport(AppKit)
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+#else
+                        Color.black.opacity(0.10)
+#endif
+                    } else {
+                        Color.white.opacity(0.06)
+                        if isLoading {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "photo")
+                                .font(.system(size: 36, weight: .light))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(width: innerWidth, height: mediaHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                actionStrip(width: innerWidth)
+            }
+            .padding(.horizontal, horizontalPaddingPoints)
+            .padding(.vertical, verticalPaddingPoints)
+        }
+        .frame(width: panelWidthPoints, height: CGFloat(viewHeightPoints))
+        .task(id: assetID) {
+            await loadThumbnail(innerWidth: innerWidth, mediaHeight: mediaHeight)
+        }
+    }
+
+    @MainActor
+    private func loadThumbnail(innerWidth: CGFloat, mediaHeight: CGFloat) async {
+        guard model.asset(for: assetID) != nil else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        let requestPoints = CGSize(width: innerWidth, height: mediaHeight)
+        image = await model.requestThumbnail(assetID: assetID, targetSize: requestPoints, displayScale: displayScale)
+    }
+
+    @ViewBuilder
+    private func actionStrip(width: CGFloat) -> some View {
+        HStack(spacing: 6) {
+            actionButton(icon: "hand.thumbsup.fill", fill: Color(red: 169.0/255.0, green: 220.0/255.0, blue: 118.0/255.0)) {
+                model.sendThumb(.up, assetID: assetID)
+            }
+
+            actionButton(icon: "hand.thumbsdown.fill", fill: Color(red: 255.0/255.0, green: 216.0/255.0, blue: 102.0/255.0)) {
+                model.sendThumb(.down, assetID: assetID)
+            }
+
+            actionButton(icon: "trash.fill", fill: Color(red: 255.0/255.0, green: 97.0/255.0, blue: 136.0/255.0)) {
+                model.hideAsset(assetID)
+            }
+
+            actionButton(icon: "rectangle.on.rectangle", fill: Color(red: 120.0/255.0, green: 220.0/255.0, blue: 232.0/255.0)) {
+                openWindow(value: AlbumPopOutPayload(assetID: assetID))
+                model.appendPoppedAsset(assetID)
+            }
+        }
+        .frame(width: width, height: actionRowHeightPoints, alignment: .center)
+    }
+
+    private func actionButton(icon: String, fill: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.90))
+                .frame(width: 44, height: 44)
+                .background(fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct AlbumCurvedWallTileAttachmentView: View {
     let assetID: String
 
@@ -151,6 +267,7 @@ struct AlbumCurvedWallTileAttachmentView: View {
 struct AlbumCurvedWallNavCardAttachmentView: View {
     let direction: AlbumCurvedWallNavDirection
     let enabled: Bool
+    let action: @MainActor () -> Void
 
     private let sizePoints = CGSize(width: 240, height: 110)
     private let cornerRadius: CGFloat = 18
@@ -159,49 +276,58 @@ struct AlbumCurvedWallNavCardAttachmentView: View {
         let label = direction == .prev ? "Prev" : "Next"
         let icon = direction == .prev ? "chevron.left" : "chevron.right"
 
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.title2.weight(.semibold))
+        Button {
+            guard enabled else { return }
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.title2.weight(.semibold))
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(label)
-                    .font(.headline)
-                Text(enabled ? "Page" : "End")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label)
+                        .font(.headline)
+                    Text(enabled ? "Page" : "End")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
             }
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, 16)
+            .frame(width: sizePoints.width, height: sizePoints.height)
         }
-        .padding(.horizontal, 16)
-        .frame(width: sizePoints.width, height: sizePoints.height)
+        .buttonStyle(.plain)
         .glassBackground(cornerRadius: cornerRadius)
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(.white.opacity(0.12), lineWidth: 1)
         )
         .opacity(enabled ? 1.0 : 0.35)
-        .allowsHitTesting(false)
     }
 }
 
 struct AlbumCurvedWallCloseAttachmentView: View {
+    let action: @MainActor () -> Void
+
     private let sizePoints = CGSize(width: 240, height: 110)
     private let cornerRadius: CGFloat = 18
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "xmark.circle.fill")
-                .font(.title2)
-            Text("Close Layout")
-                .font(.headline)
+        Button(action: action) {
+            VStack(spacing: 10) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title2)
+                Text("Close Layout")
+                    .font(.headline)
+            }
+            .frame(width: sizePoints.width, height: sizePoints.height)
         }
-        .frame(width: sizePoints.width, height: sizePoints.height)
+        .buttonStyle(.plain)
         .glassBackground(cornerRadius: cornerRadius)
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(.white.opacity(0.12), lineWidth: 1)
         )
-        .allowsHitTesting(false)
     }
 }

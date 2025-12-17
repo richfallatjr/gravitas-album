@@ -15,6 +15,8 @@ public struct AlbumControlView: View {
     public init() {}
 
     public var body: some View {
+        let palette = model.palette
+
         ZStack(alignment: .bottomTrailing) {
             VStack(spacing: 18) {
                 header
@@ -30,7 +32,16 @@ public struct AlbumControlView: View {
             bottomRightButtons
         }
         .padding(14)
-        .glassBackground(cornerRadius: 28)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(palette.panelBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(palette.cardBorder.opacity(0.75), lineWidth: 1)
+        )
+        .preferredColorScheme(model.theme == .dark ? .dark : .light)
+        .foregroundStyle(palette.panelPrimaryText)
         .onDisappear {
             AlbumLog.ui.info("AlbumControlView disappeared (main control panel closed); closing all scenes")
             let popoutIDs = model.poppedAssetIDs
@@ -56,7 +67,9 @@ public struct AlbumControlView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let palette = model.palette
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 Text("Gravitas Album")
                     .font(.title2.weight(.semibold))
@@ -80,13 +93,15 @@ public struct AlbumControlView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(palette.readButtonColor)
+                    .foregroundStyle(palette.buttonLabelOnColor)
                 }
             }
 
             if let immersiveOpenStatus {
                 Text(immersiveOpenStatus)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.panelSecondaryText)
                     .lineLimit(2)
             }
 
@@ -98,6 +113,7 @@ public struct AlbumControlView: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.bordered)
+                .tint(palette.historyButtonColor)
 
                 Stepper("Limit \(assetLimit)", value: $assetLimit, in: 50...300, step: 50)
                     .labelsHidden()
@@ -107,6 +123,7 @@ public struct AlbumControlView: View {
                     Task { await model.loadItems(limit: assetLimit, query: model.selectedQuery) }
                 }
                 .buttonStyle(.bordered)
+                .tint(palette.copyButtonFill)
 
                 Spacer(minLength: 0)
 
@@ -115,6 +132,7 @@ public struct AlbumControlView: View {
                     Text("MEMORIES").tag(AlbumPanelMode.memories)
                 }
                 .pickerStyle(.segmented)
+                .tint(palette.toggleFillColor)
                 .frame(maxWidth: 360)
             }
             .font(.footnote)
@@ -125,6 +143,8 @@ public struct AlbumControlView: View {
 
     @ViewBuilder
     private var authorizationStatus: some View {
+        let palette = model.palette
+
         let status = model.libraryAuthorization
         let accessLabel: String = {
             switch status {
@@ -144,16 +164,16 @@ public struct AlbumControlView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Dataset: \(model.datasetSource == .demo ? "Demo" : "Photos") • \(model.items.count) items")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.panelSecondaryText)
 
             if model.datasetSource == .photos {
                 Text("Fetched: \(model.lastAssetFetchCount) • Hidden: \(model.hiddenIDs.count) • \(accessLabel)")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.panelSecondaryText)
             } else {
                 Text("Photos access: \(accessLabel)")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.panelSecondaryText)
             }
 
             switch status {
@@ -163,32 +183,34 @@ public struct AlbumControlView: View {
                         ProgressView()
                         Text("Loading…")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.panelSecondaryText)
                     }
                 } else if model.items.isEmpty, model.lastAssetLoadError == nil, model.datasetSource == .photos {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("No Photos returned. If you’re on Simulator, add photos to the simulator Photos library (or run on device).")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.panelSecondaryText)
                             .fixedSize(horizontal: false, vertical: true)
 
                         Button("Load Demo Items") {
                             model.loadDemoItems(count: assetLimit)
                         }
                         .buttonStyle(.bordered)
+                        .tint(palette.historyButtonColor)
                     }
                 }
 
             case .notDetermined:
                 Text("Library: permission not requested yet")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.panelSecondaryText)
 
                 if model.items.isEmpty, !model.isLoadingItems {
                     Button("Load Demo Items") {
                         model.loadDemoItems(count: assetLimit)
                     }
                     .buttonStyle(.bordered)
+                    .tint(palette.historyButtonColor)
                 }
 
             case .denied, .restricted:
@@ -197,29 +219,34 @@ public struct AlbumControlView: View {
                     Text("Enable Photos access in Settings to load your library.")
                 }
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.panelSecondaryText)
 
                 if model.items.isEmpty, !model.isLoadingItems {
                     Button("Load Demo Items") {
                         model.loadDemoItems(count: assetLimit)
                     }
                     .buttonStyle(.bordered)
+                    .tint(palette.historyButtonColor)
                 }
             }
 
             if let err = model.lastAssetLoadError, !err.isEmpty {
                 Text("Load error: \(err)")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.panelSecondaryText)
                     .lineLimit(2)
             }
         }
     }
 
     private var controlsRow: some View {
-        HStack(spacing: 12) {
+        let palette = model.palette
+
+        return HStack(spacing: 12) {
             Button(model.isPaused ? "Play" : "Pause") { model.isPaused.toggle() }
                 .buttonStyle(.borderedProminent)
+                .tint(palette.toggleFillColor)
+                .foregroundStyle(palette.buttonLabelOnColor)
 
             HStack(spacing: 10) {
                 Text("Absorb every")
@@ -228,6 +255,7 @@ public struct AlbumControlView: View {
                 Text("\(Int(model.absorbInterval))s")
                 Button("Absorb Now") { model.requestAbsorbNow() }
                     .buttonStyle(.bordered)
+                    .tint(palette.copyButtonFill)
             }
             .font(.footnote)
 
@@ -236,25 +264,27 @@ public struct AlbumControlView: View {
             Button {
                 openWindow(id: "album-scene-manager")
             } label: {
-                Label("Scenes", systemImage: "star.fill")
-                    .labelStyle(.titleAndIcon)
+                    Label("Scenes", systemImage: "star.fill")
+                        .labelStyle(.titleAndIcon)
             }
             .buttonStyle(.bordered)
-            .tint(.yellow)
+            .tint(palette.historyButtonColor)
         }
     }
 
     @ViewBuilder
     private var modePanel: some View {
+        let palette = model.palette
+
         switch model.panelMode {
         case .recommends:
             HStack(spacing: 12) {
                 if model.neighborsReady {
                     Label("Neighbors ready", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(palette.readButtonColor)
                 } else {
                     Label("Neighbors not ready", systemImage: "circle")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette.panelSecondaryText)
                 }
 
                 Spacer(minLength: 0)
@@ -263,6 +293,7 @@ public struct AlbumControlView: View {
                     model.refreshRecommends()
                 }
                 .buttonStyle(.bordered)
+                .tint(palette.historyButtonColor)
                 .disabled(model.currentAssetID == nil)
             }
             .font(.footnote)
@@ -272,15 +303,17 @@ public struct AlbumControlView: View {
                 Button("Prev") { model.memoryPrevPage() }
                     .buttonStyle(.bordered)
                     .disabled(!model.memoryPrevEnabled)
+                    .tint(palette.copyButtonFill)
 
                 Text(model.memoryLabel.isEmpty ? " " : model.memoryLabel)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.panelSecondaryText)
                     .lineLimit(1)
 
                 Button("Next") { model.memoryNextPage() }
                     .buttonStyle(.bordered)
                     .disabled(!model.memoryNextEnabled)
+                    .tint(palette.copyButtonFill)
 
                 Spacer(minLength: 0)
             }
@@ -288,11 +321,22 @@ public struct AlbumControlView: View {
     }
 
     private var mainBody: some View {
-        HStack(alignment: .top, spacing: 16) {
+        let palette = model.palette
+
+        return HStack(alignment: .top, spacing: 16) {
             AlbumMediaPane(assetID: model.currentAssetID)
-            .frame(minHeight: 380)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .layoutPriority(1)
+                .padding(16)
+                .frame(minHeight: 380)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(palette.cardBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(palette.cardBorder.opacity(0.65), lineWidth: 1)
+                )
+                .layoutPriority(1)
 
             AlbumHistoryList(
                 historyAssetIDs: model.historyAssetIDs,
@@ -304,12 +348,23 @@ public struct AlbumControlView: View {
                     model.currentAssetID = assetID
                 }
             )
-            .frame(width: 260)
+            .padding(14)
+            .frame(width: 280)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(palette.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(palette.cardBorder.opacity(0.65), lineWidth: 1)
+            )
         }
     }
 
     private var bottomRightButtons: some View {
-        HStack(spacing: 12) {
+        let palette = model.palette
+
+        return HStack(spacing: 12) {
             Button {
                 let current = self.model.currentAssetID ?? "nil"
                 let anchor = self.model.recommendAnchorID ?? "nil"
@@ -320,7 +375,9 @@ public struct AlbumControlView: View {
                     .labelStyle(.titleAndIcon)
                     .padding(.horizontal, 14)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
+            .tint(palette.copyButtonFill)
+            .foregroundStyle(palette.buttonLabelOnColor)
             .disabled(!layoutEnabled)
 
             Button {
@@ -333,7 +390,9 @@ public struct AlbumControlView: View {
                     .labelStyle(.titleAndIcon)
                     .padding(.horizontal, 14)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
+            .tint(palette.openButtonColor)
+            .foregroundStyle(palette.buttonLabelOnColor)
             .disabled(model.currentAssetID == nil)
         }
         .padding(.bottom, 26)

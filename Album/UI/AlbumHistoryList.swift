@@ -7,6 +7,7 @@ public struct AlbumHistoryList: View {
     public let feedbackByAssetID: [String: AlbumThumbFeedback]
     public let currentAssetID: String?
     public let onSelect: (String) -> Void
+    @EnvironmentObject private var model: AlbumModel
 
     public init(
         historyAssetIDs: [String],
@@ -25,6 +26,8 @@ public struct AlbumHistoryList: View {
     }
 
     public var body: some View {
+        let palette = model.palette
+
         VStack(alignment: .leading, spacing: 10) {
             Text("History")
                 .font(.headline)
@@ -60,16 +63,18 @@ public struct AlbumHistoryList: View {
                 .padding(.vertical, 4)
             }
         }
+        .foregroundStyle(palette.panelPrimaryText)
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private struct SectionHeader: View {
         let title: String
+        @EnvironmentObject private var model: AlbumModel
 
         var body: some View {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(model.palette.panelSecondaryText)
                 .padding(.top, 6)
         }
     }
@@ -92,17 +97,19 @@ public struct AlbumHistoryList: View {
         private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
         private var indicatorColor: Color? {
+            let palette = model.palette
             switch feedback {
             case .up:
-                return Color.green
+                return palette.readButtonColor
             case .down:
-                return Color.red
+                return palette.toggleFillColor
             case nil:
                 return nil
             }
         }
 
         var body: some View {
+            let palette = model.palette
             Button(action: onSelect) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(model.semanticHandle(for: assetID))
@@ -118,13 +125,13 @@ public struct AlbumHistoryList: View {
                         }
                     }
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.panelSecondaryText)
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
                     shape
-                        .fill(isActive ? Color.accentColor.opacity(0.18) : Color.black.opacity(0.05))
+                        .fill(isActive ? palette.copyButtonFill.opacity(0.18) : palette.navBackground)
                         .overlay {
                             if kind == .history, let indicatorColor {
                                 shape.fill(indicatorColor.opacity(0.10))
@@ -136,17 +143,21 @@ public struct AlbumHistoryList: View {
                         shape.strokeBorder(strokeColor, lineWidth: 2)
                     }
                     if kind == .recommendation {
-                        shape.strokeBorder(Color.purple.opacity(0.8), style: StrokeStyle(lineWidth: 2, dash: [7, 4]))
+                        shape.strokeBorder(palette.historyButtonColor.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [7, 4]))
                     }
                 }
                 .overlay(alignment: .topTrailing) {
                     if isAINext {
                         Text("AI")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.panelSecondaryText)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(.thinMaterial, in: Capsule(style: .continuous))
+                            .background(palette.navBackground, in: Capsule(style: .continuous))
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(palette.navBorder.opacity(0.7), lineWidth: 1)
+                            )
                             .padding(8)
                     }
                 }
@@ -155,4 +166,3 @@ public struct AlbumHistoryList: View {
         }
     }
 }
-

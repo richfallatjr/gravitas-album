@@ -45,28 +45,37 @@ public struct AlbumImmersiveRootView: View {
     public var body: some View {
         RealityView { content, attachments in
             scene.ensureBuilt(in: content, model: sim, anchorOffset: anchorOffset)
-            scene.syncCurvedWall(in: content, using: attachments, model: sim, visibleAssetIDs: curvedWallVisibleAssetIDs)
+            scene.syncCurvedWall(in: content, using: attachments, model: sim, panels: curvedWallVisiblePanels)
         } update: { content, attachments in
-            scene.syncCurvedWall(in: content, using: attachments, model: sim, visibleAssetIDs: curvedWallVisibleAssetIDs)
+            scene.syncCurvedWall(in: content, using: attachments, model: sim, panels: curvedWallVisiblePanels)
         } attachments: {
             if sim.curvedCanvasEnabled {
-                ForEach(curvedWallVisibleAssetIDs, id: \.self) { assetID in
-                    Attachment(id: AlbumCurvedWallAttachmentID.tile(assetID)) {
-                        AlbumCurvedWallTileAttachmentView(assetID: assetID)
+                ForEach(curvedWallVisiblePanels, id: \.id) { panel in
+                    Attachment(id: AlbumCurvedWallAttachmentID.tile(panel.assetID)) {
+                        AlbumCurvedWallPanelAttachmentView(assetID: panel.assetID, viewHeightPoints: panel.viewHeightPoints)
                             .environmentObject(sim)
                     }
                 }
 
                 Attachment(id: AlbumCurvedWallAttachmentID.prev) {
-                    AlbumCurvedWallNavCardAttachmentView(direction: .prev, enabled: sim.curvedWallCanPageBack)
+                    AlbumCurvedWallNavCardAttachmentView(direction: .prev, enabled: sim.curvedWallCanPageBack) {
+                        AlbumLog.immersive.info("CurvedWall nav prev pressed (enabled=\(self.sim.curvedWallCanPageBack))")
+                        sim.curvedWallPageBack()
+                    }
                 }
 
                 Attachment(id: AlbumCurvedWallAttachmentID.next) {
-                    AlbumCurvedWallNavCardAttachmentView(direction: .next, enabled: sim.curvedWallCanPageForward)
+                    AlbumCurvedWallNavCardAttachmentView(direction: .next, enabled: sim.curvedWallCanPageForward) {
+                        AlbumLog.immersive.info("CurvedWall nav next pressed (enabled=\(self.sim.curvedWallCanPageForward))")
+                        sim.curvedWallPageForward()
+                    }
                 }
 
                 Attachment(id: AlbumCurvedWallAttachmentID.close) {
-                    AlbumCurvedWallCloseAttachmentView()
+                    AlbumCurvedWallCloseAttachmentView {
+                        AlbumLog.immersive.info("CurvedWall close pressed")
+                        sim.curvedCanvasEnabled = false
+                    }
                 }
             }
         }
@@ -102,22 +111,22 @@ public struct AlbumImmersiveRootView: View {
             AlbumLog.immersive.info("Pause state changed: \(newValue ? "paused" : "playing", privacy: .public)")
         }
         .onChange(of: sim.curvedCanvasEnabled) { _, newValue in
-            AlbumLog.immersive.info("Curved wall toggled: \(newValue ? "enabled" : "disabled", privacy: .public) mode=\(self.sim.panelMode.rawValue, privacy: .public) items=\(self.curvedWallVisibleAssetIDs.count)")
+            AlbumLog.immersive.info("Curved wall toggled: \(newValue ? "enabled" : "disabled", privacy: .public) mode=\(self.sim.panelMode.rawValue, privacy: .public) panels=\(self.curvedWallVisiblePanels.count)")
         }
         .onDisappear {
             scene.stop()
         }
     }
 
-    private var curvedWallVisibleAssetIDs: [String] {
-        let raw = sim.curvedWallVisibleAssetIDs
+    private var curvedWallVisiblePanels: [AlbumModel.CurvedWallPanel] {
+        let raw = sim.curvedWallVisiblePanels
         guard !raw.isEmpty else { return [] }
-        return raw.compactMap { id in
-            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            guard !sim.hiddenIDs.contains(trimmed) else { return nil }
-            guard sim.item(for: trimmed) != nil else { return nil }
-            return trimmed
+        return raw.filter { panel in
+            let trimmed = panel.assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return false }
+            guard !sim.hiddenIDs.contains(trimmed) else { return false }
+            guard sim.item(for: trimmed) != nil else { return false }
+            return true
         }
     }
 }
@@ -131,6 +140,7 @@ private final class AlbumImmersiveSceneState {
     private var balls: [ModelEntity] = []
     private var frameTask: Task<Void, Never>?
     private var lastCurvedWallLogSignature: String?
+    private var lastCurvedWallAttachmentLogSignature: String?
 
     private var lastTs: Date = Date()
     private var accum: Float = 0
@@ -242,22 +252,6 @@ private final class AlbumImmersiveSceneState {
     func handleTap(on entity: Entity, model: AlbumModel) {
         var cursor: Entity? = entity
         while let current = cursor {
-            if current.name == AlbumCurvedWallAttachmentID.close {
-                AlbumLog.immersive.info("Tap close curved wall")
-                model.curvedCanvasEnabled = false
-                return
-            }
-            if current.name == AlbumCurvedWallAttachmentID.prev {
-                AlbumLog.immersive.info("Tap curved wall prev")
-                model.curvedWallPageBack()
-                return
-            }
-            if current.name == AlbumCurvedWallAttachmentID.next {
-                AlbumLog.immersive.info("Tap curved wall next")
-                model.curvedWallPageForward()
-                return
-            }
-
             if let assetID = current.components[AlbumAssetIDComponent.self]?.assetID,
                !assetID.isEmpty {
                 AlbumLog.immersive.info("Tap select assetID=\(assetID, privacy: .public)")
@@ -378,8 +372,8 @@ private final class AlbumImmersiveSceneState {
         return CurvedWallArcLayout(radius: radius, step: slotStep, angles: angles)
     }
 
-    func syncCurvedWall(in content: RealityViewContent, using attachments: RealityViewAttachments, model: AlbumModel, visibleAssetIDs: [String]) {
-        let signature = "enabled=\(model.curvedCanvasEnabled) mode=\(model.panelMode.rawValue) visible=\(visibleAssetIDs.count) first=\(visibleAssetIDs.first ?? "-") last=\(visibleAssetIDs.last ?? "-") dump=\(model.curvedWallDumpIndex)/\(model.curvedWallDumpPages.count) mem=\(model.memoryPageStartIndex)/\(model.memoryWindowItems.count)"
+    func syncCurvedWall(in content: RealityViewContent, using attachments: RealityViewAttachments, model: AlbumModel, panels: [AlbumModel.CurvedWallPanel]) {
+        let signature = "enabled=\(model.curvedCanvasEnabled) mode=\(model.panelMode.rawValue) panels=\(panels.count) first=\(panels.first?.assetID ?? "-") last=\(panels.last?.assetID ?? "-") dump=\(model.curvedWallDumpIndex)/\(model.curvedWallDumpPages.count) mem=\(model.memoryPageStartIndex)/\(model.memoryWindowItems.count)"
         if signature != lastCurvedWallLogSignature {
             lastCurvedWallLogSignature = signature
             AlbumLog.immersive.info("CurvedWall sync \(signature, privacy: .public)")
@@ -397,49 +391,71 @@ private final class AlbumImmersiveSceneState {
         let root = ensureCurvedWallAnchor(in: content, model: model)
 
         let pointsPerMeter: Float = 780
-        let tileWidthPoints: Float = 260
-        let neighborGapMeters: Float = 0.015
+        let panelWidthPoints: Float = 620
+        let neighborGapMeters: Float = 0.0005
         let panelDepthOffset: Float = 0.03
-        let arcSpacingRadians: Float = .pi / 18
+        let pageSpacing: Float = 0.001
+        let columnMaxHeight: Float = 2.4
 
-        let tileWidthMeters = tileWidthPoints / pointsPerMeter
-        let desiredChord = tileWidthMeters + neighborGapMeters
-        let layout = curvedWallArcLayout(count: visibleAssetIDs.count, desiredChord: desiredChord)
+        let pages = panels
+        let layoutColumns = curvedWallColumns(for: pages, maxColumnHeight: columnMaxHeight, pageSpacing: pageSpacing)
+        let columns = layoutColumns.columns
+        let heights = layoutColumns.heights
 
-        let validTileAttachmentIDs = Set(visibleAssetIDs.map { AlbumCurvedWallAttachmentID.tile($0) })
-        let yMid: Float = 0.0
+        let columnCount = columns.count
 
-        for (index, assetID) in visibleAssetIDs.enumerated() {
-            let attachmentID = AlbumCurvedWallAttachmentID.tile(assetID)
-            guard let panel = attachments.entity(for: attachmentID) else { continue }
+        let panelWidthMeters = panelWidthPoints / pointsPerMeter
+        let desiredChord = panelWidthMeters + neighborGapMeters
+        let layout = curvedWallArcLayout(count: columnCount, desiredChord: desiredChord)
 
-            let angle = index < layout.angles.count ? layout.angles[index] : (Float(index) * layout.step)
+        let validTileAttachmentIDs = Set(pages.map { AlbumCurvedWallAttachmentID.tile($0.assetID) })
+        var tilesFound = 0
+
+        for (columnIndex, column) in columns.enumerated() {
+            let angle = columnIndex < layout.angles.count ? layout.angles[columnIndex] : (Float(columnIndex) * layout.step)
             let sine = sinf(angle)
             let cosine = cosf(angle)
             let horizontalOffset = sine * layout.radius
             let depthOffset = -cosine * layout.radius - panelDepthOffset
+            let totalHeight = columnIndex < heights.count ? heights[columnIndex] : 0
 
-            let forward = normalize(SIMD3<Float>(-horizontalOffset, 0, -depthOffset))
-            let right = normalize(cross(SIMD3<Float>(0, 1, 0), forward))
-            let up = cross(forward, right)
+            var yCursor = -totalHeight / 2
 
-            var transform = panel.transform
-            transform.translation = [horizontalOffset, yMid, depthOffset]
-            transform.rotation = simd_quatf(float3x3(columns: (right, up, forward)))
-            transform.scale = SIMD3<Float>(repeating: 1 / pointsPerMeter)
-            panel.transform = transform
-            panel.name = attachmentID
-            panel.components.set(AlbumAssetIDComponent(assetID: assetID))
+            for (itemOffset, pageIndex) in column.enumerated() {
+                guard pageIndex >= 0, pageIndex < pages.count else { continue }
+                let page = pages[pageIndex]
+                let attachmentID = AlbumCurvedWallAttachmentID.tile(page.assetID)
+                guard let panel = attachments.entity(for: attachmentID) else { continue }
+                tilesFound += 1
 
-            if panel.components[InputTargetComponent.self] == nil {
-                panel.components.set(InputTargetComponent())
-            }
-            if panel.components[CollisionComponent.self] == nil {
-                panel.generateCollisionShapes(recursive: true)
-            }
+                let yMid = yCursor + page.heightMeters / 2
 
-            if panel.parent != root {
-                root.addChild(panel)
+                let forward = normalize(SIMD3<Float>(-horizontalOffset, 0, -depthOffset))
+                let right = normalize(cross(SIMD3<Float>(0, 1, 0), forward))
+                let up = cross(forward, right)
+
+                var transform = panel.transform
+                transform.translation = [horizontalOffset, yMid, depthOffset]
+                transform.rotation = simd_quatf(float3x3(columns: (right, up, forward)))
+                panel.transform = transform
+                panel.name = attachmentID
+                panel.components.set(AlbumAssetIDComponent(assetID: page.assetID))
+
+                if panel.components[InputTargetComponent.self] == nil {
+                    panel.components.set(InputTargetComponent())
+                }
+                if panel.components[CollisionComponent.self] == nil {
+                    panel.generateCollisionShapes(recursive: true)
+                }
+
+                if panel.parent != root {
+                    root.addChild(panel)
+                }
+
+                yCursor = yMid + page.heightMeters / 2
+                if itemOffset != column.count - 1 {
+                    yCursor += pageSpacing
+                }
             }
         }
 
@@ -449,11 +465,11 @@ private final class AlbumImmersiveSceneState {
             child.removeFromParent()
         }
 
-        if visibleAssetIDs.isEmpty {
+        if pages.isEmpty {
             removeTileChildren(from: root)
         }
 
-        let stepForNav = max(layout.step, arcSpacingRadians) * 1.05
+        let stepForNav = layout.step > 0 ? layout.step : (.pi / 18)
         let firstAngle = layout.angles.first ?? 0
         let lastAngle = layout.angles.last ?? 0
 
@@ -468,7 +484,6 @@ private final class AlbumImmersiveSceneState {
             y: -0.32,
             radius: layout.radius,
             panelDepthOffset: panelDepthOffset,
-            pointsPerMeter: pointsPerMeter,
             attachments: attachments,
             root: root
         )
@@ -480,7 +495,6 @@ private final class AlbumImmersiveSceneState {
             y: -0.32,
             radius: layout.radius,
             panelDepthOffset: panelDepthOffset,
-            pointsPerMeter: pointsPerMeter,
             attachments: attachments,
             root: root
         )
@@ -492,10 +506,63 @@ private final class AlbumImmersiveSceneState {
             y: -0.32,
             radius: layout.radius,
             panelDepthOffset: panelDepthOffset,
-            pointsPerMeter: pointsPerMeter,
             attachments: attachments,
             root: root
         )
+
+        let attachmentSignature = "tiles=\(pages.count) found=\(tilesFound) prev=\(attachments.entity(for: AlbumCurvedWallAttachmentID.prev) != nil) next=\(attachments.entity(for: AlbumCurvedWallAttachmentID.next) != nil) close=\(attachments.entity(for: AlbumCurvedWallAttachmentID.close) != nil)"
+        if attachmentSignature != lastCurvedWallAttachmentLogSignature {
+            lastCurvedWallAttachmentLogSignature = attachmentSignature
+            AlbumLog.immersive.info("CurvedWall attachments \(attachmentSignature, privacy: .public)")
+        }
+    }
+
+    private struct CurvedWallColumnLayout: Sendable {
+        var columns: [[Int]]
+        var heights: [Float]
+    }
+
+    private func curvedWallColumns(
+        for pages: [AlbumModel.CurvedWallPanel],
+        maxColumnHeight: Float,
+        pageSpacing: Float
+    ) -> CurvedWallColumnLayout {
+        guard !pages.isEmpty else { return CurvedWallColumnLayout(columns: [], heights: []) }
+
+        var columns: [[Int]] = []
+        var heights: [Float] = []
+        columns.reserveCapacity(6)
+        heights.reserveCapacity(6)
+
+        var currentColumn: [Int] = []
+        var currentHeight: Float = 0
+
+        for (index, page) in pages.enumerated() {
+            let pageHeight = max(0, page.heightMeters)
+            if currentColumn.isEmpty {
+                currentColumn = [index]
+                currentHeight = pageHeight
+                continue
+            }
+
+            let proposed = currentHeight + pageSpacing + pageHeight
+            if proposed > maxColumnHeight {
+                columns.append(currentColumn)
+                heights.append(currentHeight)
+                currentColumn = [index]
+                currentHeight = pageHeight
+            } else {
+                currentColumn.append(index)
+                currentHeight = proposed
+            }
+        }
+
+        if !currentColumn.isEmpty {
+            columns.append(currentColumn)
+            heights.append(currentHeight)
+        }
+
+        return CurvedWallColumnLayout(columns: columns, heights: heights)
     }
 
     private func ensureCurvedWallAnchor(in content: RealityViewContent, model: AlbumModel) -> AnchorEntity {
@@ -550,7 +617,6 @@ private final class AlbumImmersiveSceneState {
         y: Float,
         radius: Float,
         panelDepthOffset: Float,
-        pointsPerMeter: Float,
         attachments: RealityViewAttachments,
         root: Entity
     ) {
@@ -568,7 +634,6 @@ private final class AlbumImmersiveSceneState {
         var transform = card.transform
         transform.translation = [x, y, z]
         transform.rotation = simd_quatf(float3x3(columns: (right, up, forward)))
-        transform.scale = SIMD3<Float>(repeating: 1 / pointsPerMeter)
         card.transform = transform
         card.name = name
 

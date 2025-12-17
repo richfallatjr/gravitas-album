@@ -40,7 +40,7 @@ public struct AlbumMediaPane: View {
                 Text("Absorbed asset appears here")
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(model.palette.panelSecondaryText)
             }
         }
     }
@@ -94,7 +94,9 @@ public struct AlbumMediaPane: View {
     }
 
     private func metaCard(asset: AlbumAsset) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let palette = model.palette
+
+        return VStack(alignment: .leading, spacing: 8) {
             Text(model.semanticHandle(for: asset))
                 .font(.footnote)
                 .multilineTextAlignment(.leading)
@@ -109,7 +111,7 @@ public struct AlbumMediaPane: View {
                 }
             }
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(palette.panelSecondaryText)
 
             thumbStatus
 
@@ -117,12 +119,20 @@ public struct AlbumMediaPane: View {
         }
         .padding(12)
         .frame(maxWidth: 420, alignment: .leading)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(palette.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(palette.cardBorder.opacity(0.65), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
     private func nextUpRow(currentAssetID: String) -> some View {
+        let palette = model.palette
+
         if let nextID = model.recommendedAssetID?.trimmingCharacters(in: .whitespacesAndNewlines),
            !nextID.isEmpty,
            nextID != currentAssetID,
@@ -133,7 +143,7 @@ public struct AlbumMediaPane: View {
                 HStack(spacing: 10) {
                     Text("Next Up")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette.panelSecondaryText)
 
                     Text(model.semanticHandle(for: nextID))
                         .font(.caption)
@@ -144,12 +154,16 @@ public struct AlbumMediaPane: View {
 
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette.panelSecondaryText)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(palette.navBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(palette.navBorder.opacity(0.7), lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
         }
@@ -157,47 +171,51 @@ public struct AlbumMediaPane: View {
 
     @ViewBuilder
     private var thumbStatus: some View {
+        let palette = model.palette
+
         if let startedAt = model.thumbThinkingSince,
            let feedback = model.thumbThinkingFeedback {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let elapsed = max(0, Int(context.date.timeIntervalSince(startedAt)))
                 Text("\(feedback == .up ? "👍" : "👎") Thinking… \(elapsed)s")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.panelSecondaryText)
                     .lineLimit(1)
             }
         } else if let message = model.thumbStatusMessage {
             Text(message)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.panelSecondaryText)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
     }
 
     private func thumbButtons(assetID: String) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        let palette = model.palette
+
+        return HStack(alignment: .center, spacing: 10) {
             Button {
                 model.sendThumb(.up, assetID: assetID)
             } label: {
                 Image(systemName: "hand.thumbsup")
                     .font(.title3)
-                    .padding(10)
+                    .foregroundStyle(palette.buttonLabelOnColor)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
-            .background(.thinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(palette.readButtonColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             Button {
                 model.sendThumb(.down, assetID: assetID)
             } label: {
                 Image(systemName: "hand.thumbsdown")
                     .font(.title3)
-                    .padding(10)
+                    .foregroundStyle(palette.buttonLabelOnColor)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
-            .background(.thinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(palette.toggleFillColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
