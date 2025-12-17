@@ -4,9 +4,11 @@ public struct AlbumControlView: View {
     @EnvironmentObject private var model: AlbumModel
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @Environment(\.dismissWindow) private var dismissWindow
 
     @State private var launched = false
-    @State private var assetLimit: Int = 600
+    @State private var assetLimit: Int = 300
     @State private var isQueryPickerPresented: Bool = false
     @State private var immersiveOpenStatus: String? = nil
 
@@ -29,6 +31,20 @@ public struct AlbumControlView: View {
         }
         .padding(14)
         .glassBackground(cornerRadius: 28)
+        .onDisappear {
+            AlbumLog.ui.info("AlbumControlView disappeared (main control panel closed); closing all scenes")
+            let popoutIDs = model.poppedAssetIDs
+            Task { @MainActor in
+                let result = await dismissImmersiveSpace()
+                AlbumLog.immersive.info("dismissImmersiveSpace result: \(String(describing: result), privacy: .public)")
+
+                dismissWindow(id: "album-scene-manager")
+
+                for assetID in popoutIDs {
+                    dismissWindow(value: AlbumPopOutPayload(assetID: assetID))
+                }
+            }
+        }
         .task {
             AlbumLog.ui.info("AlbumControlView task: loadItemsIfNeeded(limit: \(self.assetLimit))")
             await model.loadItemsIfNeeded(limit: assetLimit)
@@ -87,7 +103,7 @@ public struct AlbumControlView: View {
                 }
                 .buttonStyle(.bordered)
 
-                Stepper("Limit \(assetLimit)", value: $assetLimit, in: 200...1000, step: 100)
+                Stepper("Limit \(assetLimit)", value: $assetLimit, in: 50...300, step: 50)
                     .labelsHidden()
 
                 Button("Reload") {

@@ -17,16 +17,12 @@ public struct AlbumLayoutSheet: View {
                 } else {
                     AlbumCurvedLayoutView(
                         items: curvedItems,
+                        mode: model.panelMode == .memories ? .memories : .recommends,
                         selectedID: $model.currentAssetID,
-                        mode: model.panelMode,
+                        metrics: .init(baseRadius: 640, minRadius: 280, itemSize: CGSize(width: 190, height: 190), itemSpacing: 24),
                         pageLabel: model.panelMode == .memories ? model.memoryLabel : nil,
-                        onPrev: model.panelMode == .memories ? { model.memoryPrevPage() } : nil,
-                        onNext: model.panelMode == .memories ? { model.memoryNextPage() } : nil,
-                        prevEnabled: model.panelMode == .memories ? model.memoryPrevEnabled : true,
-                        nextEnabled: model.panelMode == .memories ? model.memoryNextEnabled : true,
-                        thumbnailProvider: { id in
-                            await model.requestThumbnail(assetID: id, targetSize: CGSize(width: 220, height: 220))
-                        },
+                        onPrevPage: model.panelMode == .memories && model.memoryPrevEnabled ? { model.memoryPrevPage() } : nil,
+                        onNextPage: model.panelMode == .memories && model.memoryNextEnabled ? { model.memoryNextPage() } : nil,
                         onSelect: { id in
                             model.currentAssetID = id
                         },
@@ -34,14 +30,19 @@ public struct AlbumLayoutSheet: View {
                             openWindow(value: AlbumPopOutPayload(assetID: id))
                             model.appendPoppedAsset(id)
                         },
-                        onThumbUp: { id in
-                            model.sendThumb(.up, assetID: id)
-                        },
-                        onThumbDown: { id in
-                            model.sendThumb(.down, assetID: id)
-                        },
                         onHide: { id in
                             model.hideAsset(id)
+                        },
+                        onThumb: { feedback, id in
+                            switch feedback {
+                            case .up:
+                                model.sendThumb(.up, assetID: id)
+                            case .down:
+                                model.sendThumb(.down, assetID: id)
+                            }
+                        },
+                        thumbnailViewProvider: { item in
+                            AnyView(AlbumCurvedThumbnailView(assetID: item.id))
                         }
                     )
                 }
@@ -69,10 +70,53 @@ public struct AlbumLayoutSheet: View {
         layoutItems.map { asset in
             AlbumCurvedLayoutItem(
                 id: asset.id,
-                mediaType: asset.mediaType,
                 title: model.semanticHandle(for: asset),
-                isFavorite: asset.isFavorite
+                subtitle: model.createdYearMonth(for: asset),
+                isVideo: asset.mediaType == .video,
+                duration: asset.duration
             )
+        }
+    }
+}
+
+private struct AlbumCurvedThumbnailView: View {
+    let assetID: String
+
+    @EnvironmentObject private var model: AlbumModel
+    @Environment(\.displayScale) private var displayScale
+    @State private var image: AlbumImage? = nil
+    @State private var isLoadingImage: Bool = true
+
+    private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+
+    var body: some View {
+        ZStack {
+            if let image {
+#if canImport(UIKit)
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+#elseif canImport(AppKit)
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+#endif
+            } else {
+                shape.fill(.black.opacity(0.06))
+                if isLoadingImage {
+                    ProgressView()
+                } else {
+                    Image(systemName: "photo")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task(id: assetID) {
+            isLoadingImage = true
+            image = nil
+            image = await model.requestThumbnail(assetID: assetID, targetSize: CGSize(width: 360, height: 360), displayScale: displayScale)
+            isLoadingImage = false
         }
     }
 }

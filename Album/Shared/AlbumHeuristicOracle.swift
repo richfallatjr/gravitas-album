@@ -4,11 +4,11 @@ public struct AlbumHeuristicOracle: AlbumOracle {
     public init() {}
 
     public func recommendThumbUp(snapshot: AlbumOracleSnapshot, requestID: UUID) async -> AlbumRecOutcome {
-        AlbumRecOutcome(response: buildResponse(snapshot: snapshot, allowNextPick: true), errorDescription: nil)
+        AlbumRecOutcome(backend: .heuristic, response: buildResponse(snapshot: snapshot, allowNextPick: true), errorDescription: nil)
     }
 
     public func recommendThumbDown(snapshot: AlbumOracleSnapshot, requestID: UUID) async -> AlbumRecOutcome {
-        AlbumRecOutcome(response: buildResponse(snapshot: snapshot, allowNextPick: false), errorDescription: nil)
+        AlbumRecOutcome(backend: .heuristic, response: buildResponse(snapshot: snapshot, allowNextPick: false), errorDescription: nil)
     }
 
     private func buildResponse(snapshot: AlbumOracleSnapshot, allowNextPick: Bool) -> AlbumRecResponse {
@@ -79,4 +79,3 @@ public struct AlbumHeuristicOracle: AlbumOracle {
         return union > 0 ? Double(intersection) / Double(union) : 0
     }
 }
-

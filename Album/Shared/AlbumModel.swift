@@ -139,7 +139,7 @@ public final class AlbumModel: ObservableObject {
     public init(
         assetProvider: (any AlbumAssetProvider)? = nil,
         sidecarStore: AlbumSidecarStore = AlbumSidecarStore(),
-        oracle: AlbumOracle = AlbumHeuristicOracle()
+        oracle: AlbumOracle = AlbumAutoOracle()
     ) {
         self.assetProvider = assetProvider ?? PhotosAlbumAssetProvider()
         self.sidecarStore = sidecarStore
@@ -152,6 +152,7 @@ public final class AlbumModel: ObservableObject {
         self.hiddenIDs = loaded.hiddenLocalIdentifiers
         self.scenes = AlbumSceneStore.load()
         self.libraryAuthorization = self.assetProvider.authorizationStatus()
+        AlbumLog.model.info("AlbumModel init oracle: \(String(describing: type(of: self.oracle)), privacy: .public)")
     }
 
     public func requestAbsorbNow() {
@@ -277,7 +278,9 @@ public final class AlbumModel: ObservableObject {
         let auth = assetProvider.authorizationStatus()
         libraryAuthorization = auth
         let q = query ?? selectedQuery
-        AlbumLog.photos.info("loadItems(query: \(q.id, privacy: .public), limit: \(limit ?? -1)) auth: \(String(describing: auth), privacy: .public)")
+        let rawLimit = limit ?? 300
+        let cappedLimit = min(max(1, rawLimit), 300)
+        AlbumLog.photos.info("loadItems(query: \(q.id, privacy: .public), limit: \(cappedLimit)) auth: \(String(describing: auth), privacy: .public)")
 
         let effectiveAuth: AlbumLibraryAuthorizationStatus
         if auth == .notDetermined {
@@ -294,7 +297,7 @@ public final class AlbumModel: ObservableObject {
         }
 
         do {
-            let fetched = try await assetProvider.fetchAssets(limit: limit ?? 600, query: q)
+            let fetched = try await assetProvider.fetchAssets(limit: cappedLimit, query: q, sampling: .random)
             lastAssetFetchCount = fetched.count
             items = fetched.filter { !hiddenIDs.contains($0.id) }
             AlbumLog.photos.info("loadItems fetched: \(fetched.count) filtered: \(self.items.count) hiddenIDs: \(self.hiddenIDs.count)")
@@ -336,7 +339,7 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
-    public func requestThumbnail(assetID: String, targetSize: CGSize) async -> AlbumImage? {
+    public func requestThumbnail(assetID: String, targetSize: CGSize, displayScale: CGFloat = 1) async -> AlbumImage? {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }
 
@@ -345,7 +348,9 @@ public final class AlbumModel: ObservableObject {
             return AlbumDemoLibrary.requestThumbnail(localIdentifier: id, targetSize: targetSize, mediaType: mediaType)
         }
 
-        return await assetProvider.requestThumbnail(localIdentifier: id, targetSize: targetSize)
+        let scale = max(1, displayScale)
+        let pixelSize = CGSize(width: max(1, targetSize.width * scale), height: max(1, targetSize.height * scale))
+        return await assetProvider.requestThumbnail(localIdentifier: id, targetSize: pixelSize)
     }
 
     public func requestVideoURL(assetID: String) async -> URL? {
@@ -563,7 +568,16 @@ public final class AlbumModel: ObservableObject {
         }
 
         applyOracleResult(feedback: feedback, snapshot: snapshot, result: result)
-        thumbStatusMessage = "\(feedback == .up ? "👍" : "👎") Neighbors ready (\(recommendItems.count))"
+
+        var status = "\(feedback == .up ? "👍" : "👎") Neighbors ready (\(recommendItems.count)) • \(outcome.backend.rawValue)"
+        if let note = outcome.note?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !note.isEmpty {
+            let capped = note.count > 140 ? "\(note.prefix(140))…" : note
+            status.append(" (\(capped))")
+        }
+
+        AlbumLog.model.info("Thumb outcome backend: \(outcome.backend.rawValue, privacy: .public) neighbors: \(self.recommendItems.count)")
+        thumbStatusMessage = status
     }
 
     private func buildOracleSnapshot(thumbed: AlbumItem) -> AlbumOracleSnapshot {

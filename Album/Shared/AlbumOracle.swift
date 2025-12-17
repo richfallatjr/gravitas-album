@@ -25,6 +25,29 @@ public struct AlbumRecNeighbor: Sendable, Decodable {
         self.id = id
         self.similarity = similarity
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case similarity
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+
+        if let value = try? container.decode(Double.self, forKey: .similarity) {
+            similarity = value
+        } else if let value = try? container.decode(Float.self, forKey: .similarity) {
+            similarity = Double(value)
+        } else if let value = try? container.decode(Int.self, forKey: .similarity) {
+            similarity = Double(value)
+        } else if let raw = try? container.decode(String.self, forKey: .similarity),
+                  let value = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            similarity = value
+        } else {
+            similarity = 0
+        }
+    }
 }
 
 public struct AlbumRecResponse: Sendable, Decodable {
@@ -37,13 +60,22 @@ public struct AlbumRecResponse: Sendable, Decodable {
     }
 }
 
+public enum AlbumOracleBackend: String, Sendable {
+    case foundationModels = "FoundationModels"
+    case heuristic = "Heuristic"
+}
+
 public struct AlbumRecOutcome: Sendable {
+    public let backend: AlbumOracleBackend
     public let response: AlbumRecResponse?
     public let errorDescription: String?
+    public let note: String?
 
-    public init(response: AlbumRecResponse?, errorDescription: String?) {
+    public init(backend: AlbumOracleBackend, response: AlbumRecResponse?, errorDescription: String?, note: String? = nil) {
+        self.backend = backend
         self.response = response
         self.errorDescription = errorDescription
+        self.note = note
     }
 }
 
@@ -97,4 +129,3 @@ public protocol AlbumOracle: Sendable {
     func recommendThumbUp(snapshot: AlbumOracleSnapshot, requestID: UUID) async -> AlbumRecOutcome
     func recommendThumbDown(snapshot: AlbumOracleSnapshot, requestID: UUID) async -> AlbumRecOutcome
 }
-

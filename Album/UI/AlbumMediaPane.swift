@@ -5,6 +5,7 @@ public struct AlbumMediaPane: View {
     public let assetID: String?
 
     @EnvironmentObject private var model: AlbumModel
+    @Environment(\.displayScale) private var displayScale
 
     @State private var image: AlbumImage? = nil
     @State private var player: AVPlayer? = nil
@@ -170,7 +171,7 @@ public struct AlbumMediaPane: View {
         player = nil
         image = nil
         isLoadingPreview = true
-        image = await model.requestThumbnail(assetID: asset.localIdentifier, targetSize: CGSize(width: 900, height: 720))
+        image = await model.requestThumbnail(assetID: asset.localIdentifier, targetSize: CGSize(width: 1200, height: 960), displayScale: displayScale)
 
         if asset.mediaType == .video {
             if let url = await model.requestVideoURL(assetID: asset.localIdentifier) {

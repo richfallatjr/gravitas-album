@@ -1,0 +1,447 @@
+Gravitas Fright — Blueprint (with code): LLM + “Vision” (Images)
+===============================================================
+
+This is the working blueprint we’ve used successfully in this repo to get:
+- LLM text generation working via Apple Intelligence (`FoundationModels`)
+- Image generation working via Image Playground (`ImagePlayground` / `ImageCreator`)
+- A production-safe fallback path when either one is unavailable
+
+Reference implementation in this repo:
+- `Gravitas Fright/Gravitas Fright/Sources/GravitasFright/Engine/GFEngines.swift`
+  - `GFAppleStoryGenerator` (LLM)
+  - `ImagePlaygroundGenerator` (Images)
+  - `GFStubStoryGenerator` + `GFStubImageGenerator` (fallback)
+- `Gravitas Fright/Gravitas Fright/Sources/GravitasFright/Engine/GFRunController.swift`
+  - Orchestration (generate text → generate images sequentially → persist → update UI)
+  - “Apple Intelligence unavailable” notice logic
+
+What “Vision” means here
+------------------------
+This blueprint covers “Vision” in the sense of *image generation* (Image Playground), not the Apple `Vision` framework.
+If you meant “OpenAI Vision / multimodal image understanding”, tell me and I’ll produce a separate OpenAI-based blueprint.
+
+
+1) Requirements / gotchas (the “why it works” checklist)
+--------------------------------------------------------
+
+SDK + OS:
+- You need SDKs that include `FoundationModels` + `ImagePlayground` (iOS 18 / macOS 15 / visionOS 2).
+- Gate code with both compile-time and runtime checks:
+  - `#if canImport(FoundationModels)` / `#if canImport(ImagePlayground)`
+  - `@available(iOS 18, macOS 15, visionOS 2, *)`
+  - `if case .available = SystemLanguageModel.default.availability { … }`
+
+Runtime availability:
+- LLM can be “unavailable” even on new OS if Apple Intelligence is disabled or the device doesn’t support it.
+- Image Playground creation can fail if the scene is inactive (`backgroundCreationForbidden`).
+- Image generation is much more reliable when:
+  - You generate images sequentially (not in parallel)
+  - Prompts/concepts are short and concrete
+
+App architecture:
+- Always keep a fallback generator so the app runs on all devices:
+  - `GFStubStoryGenerator` for text
+  - `GFStubImageGenerator` for images
+
+
+2) Abstractions (keep the app always functional)
+------------------------------------------------
+
+Use tiny protocols and factories so the app can swap implementations safely:
+
+```swift
+protocol GFStoryGenerator {
+    func generateFirstPage(context: GFStoryContext) async throws -> (GFGameState, GFPageSpec)
+    func generateNextPage(context: GFStoryContext, state: GFGameState, lastChoice: GFChoiceOption?) async throws -> (GFGameState, GFPageSpec)
+}
+
+protocol GFImageGenerator {
+    func generateImage(for panel: GFPanelSpec, context: GFStoryContext) async throws -> URL
+}
+
+enum GFStoryGeneratorFactory {
+    static func makeDefault() -> GFStoryGenerator {
+        #if canImport(FoundationModels)
+        if case .available = SystemLanguageModel.default.availability,
+           GFAppleStoryGenerator.isSupportedLanguage() {
+            return GFAppleStoryGenerator()
+        }
+        #endif
+        return GFStubStoryGenerator()
+    }
+}
+
+enum GFImageGeneratorFactory {
+    static func makeDefault() -> GFImageGenerator {
+        #if canImport(ImagePlayground)
+        if #available(iOS 18, macOS 15, visionOS 2, *) {
+            return ImagePlaygroundGenerator()
+        }
+        #endif
+        return GFStubImageGenerator()
+    }
+}
+```
+
+
+3) LLM (FoundationModels) — robust JSON-only prompting + parsing
+---------------------------------------------------------------
+
+Key patterns that made it reliable:
+- Tell the model “JSON only, nothing else”
+- Provide an explicit JSON schema
+- Accept that replies may come wrapped in code fences or embedded inside response objects
+- Parse defensively:
+  - Extract any “text-ish” fields from the reply via `Mirror`
+  - Strip code fences (```json … ```)
+  - Attempt `JSONDecoder` on each candidate string
+- Validate decoded output and fall back if empty / malformed
+
+3.1 Error detection helper (refusal / explicit error markers)
+
+```swift
+fileprivate func containsError(_ text: String) -> Bool {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let upper = trimmed.uppercased()
+    if upper.hasPrefix("ERROR:") { return true }
+    let lower = trimmed.lowercased()
+    let refusalHints = [
+        "cannot fulfill",
+        "cannot comply",
+        "cannot assist",
+        "cannot help",
+        "i apologize, but i cannot",
+        "sorry, i cannot",
+        "sorry, i can't",
+        "as an llm developed by apple"
+    ]
+    return refusalHints.contains(where: { lower.contains($0) })
+}
+```
+
+3.2 JSON extraction utilities (works with `LanguageModelSession.respond` replies)
+
+```swift
+fileprivate func stripJSONFences(from text: String) -> String {
+    var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if let start = trimmed.range(of: "```json", options: .caseInsensitive),
+       let end = trimmed.range(of: "```", range: start.upperBound..<trimmed.endIndex) {
+        let inner = trimmed[start.upperBound..<end.lowerBound]
+        return inner.trimmingCharacters(in: .whitespacesAndNewlines)
+    } else if trimmed.hasPrefix("```") {
+        let afterFence = trimmed.index(trimmed.startIndex, offsetBy: 3)
+        if let end = trimmed.range(of: "```", range: afterFence..<trimmed.endIndex) {
+            let inner = trimmed[afterFence..<end.lowerBound]
+            return inner.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+    return trimmed
+}
+
+fileprivate func flattenStrings(from value: Any) -> [String] {
+    if let str = value as? String { return [str] }
+    if let arr = value as? [String] { return arr }
+    var results: [String] = []
+    let mirror = Mirror(reflecting: value)
+    for child in mirror.children {
+        results.append(contentsOf: flattenStrings(from: child.value))
+    }
+    return results
+}
+
+fileprivate func stringFields(from reply: Any) -> [String] {
+    var results: [String] = []
+    if let str = reply as? String { results.append(str) }
+    if let desc = (reply as? CustomStringConvertible)?.description { results.append(desc) }
+
+    let mirror = Mirror(reflecting: reply)
+    for child in mirror.children {
+        let key = child.label?.lowercased() ?? ""
+        if key.contains("content") || key.contains("rawcontent") || key.contains("output") || key.contains("text") {
+            if let str = child.value as? String {
+                results.append(str)
+            } else if let arr = child.value as? [String] {
+                results.append(contentsOf: arr)
+            }
+        }
+    }
+    if results.isEmpty {
+        results = flattenStrings(from: reply)
+    }
+    return results
+}
+
+fileprivate func decodeJSON<T: Decodable>(_ type: T.Type, from reply: Any) -> T? {
+    let candidates = stringFields(from: reply)
+    for candidate in candidates {
+        let raw = stripJSONFences(from: candidate)
+        guard let data = raw.data(using: .utf8) else { continue }
+        if let decoded = try? JSONDecoder().decode(T.self, from: data) {
+            return decoded
+        }
+    }
+    return nil
+}
+```
+
+3.3 Minimal “JSON-only” LLM session wrapper
+
+```swift
+#if canImport(FoundationModels)
+import FoundationModels
+
+@available(iOS 18, macOS 15, visionOS 2, *)
+struct AppleJSONLLM {
+    let session: LanguageModelSession
+
+    init?(instructions: String) {
+        guard case .available = SystemLanguageModel.default.availability else { return nil }
+        session = LanguageModelSession(model: SystemLanguageModel.default,
+                                       instructions: instructions)
+    }
+
+    func respondJSON<T: Decodable>(_ type: T.Type, prompt: String) async -> T? {
+        guard let reply = try? await session.respond(to: prompt) else { return nil }
+        return decodeJSON(T.self, from: reply)
+    }
+}
+#endif
+```
+
+
+4) “Vision” (Images) — Image Playground generation that doesn’t implode
+------------------------------------------------------------------------
+
+Key patterns that made it reliable:
+- Always handle `ImageCreator()` failing (models not ready / unavailable)
+- Generate sequentially (no parallel `images(for:)` streams)
+- Keep concepts short and concrete; long prompts are often rejected
+- When you detect likely prompt rejection (often `.creationFailed` / NS code 16):
+  - Retry with shorter prompts and/or an extra safety suffix (“Make it more PG”)
+- Persist results defensively:
+  - A stream result may contain `URL`, `Data`, or a `CGImage`-like payload
+
+4.1 Minimal Image Playground generator (adapted from `ImagePlaygroundGenerator`)
+
+```swift
+#if canImport(ImagePlayground)
+import ImagePlayground
+import Foundation
+import UniformTypeIdentifiers
+import CoreGraphics
+#if canImport(ImageIO)
+import ImageIO
+#endif
+
+@available(iOS 18, macOS 15, visionOS 2, *)
+final class ImagePlaygroundGenerator: GFImageGenerator {
+    private struct AttemptOutcome {
+        let url: URL?
+        let error: Error?
+    }
+
+    private let cacheRoot: URL = {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("generated", isDirectory: true)
+    }()
+
+    func generateImage(for panel: GFPanelSpec, context: GFStoryContext) async throws -> URL {
+        guard let creator = try? await ImageCreator() else {
+            throw ImageCreator.Error.unavailable
+        }
+
+        let styles = creator.availableStyles
+        let style = styles.first(where: { $0.id == "illustration" }) ?? styles.first ?? .illustration
+
+        let concept = sanitizeConcept(GFIPPromptBuilder.makeSafeConcept(panel: panel, context: context), maxLength: 240)
+        let compact = sanitizeConcept(GFIPPromptBuilder.makeCompactConcept(panel: panel, context: context), maxLength: 160)
+        let title = sanitizeTitle(panel.imageTitle) ?? "Untitled"
+
+        let attempts: [(String, String)] = [
+            (concept, "safe"),
+            (compact, "compact")
+        ]
+
+        var outcomes: [AttemptOutcome] = []
+        for (conceptAttempt, label) in attempts {
+            let outcome = await attemptGenerate(concept: conceptAttempt,
+                                                title: title,
+                                                style: style,
+                                                creator: creator,
+                                                label: label)
+            if let url = outcome.url { return url }
+            outcomes.append(outcome)
+        }
+
+        if outcomes.compactMap(\.error).contains(where: isLikelyPromptRejection) {
+            // Safety suffix retry (often helps with content filters)
+            for suffix in ["Make it more PG", "Make it more G-rated"] {
+                for (conceptAttempt, label) in attempts {
+                    let softened = sanitizeConcept("\(conceptAttempt). \(suffix)", maxLength: 240)
+                    let outcome = await attemptGenerate(concept: softened,
+                                                        title: title,
+                                                        style: style,
+                                                        creator: creator,
+                                                        label: "\(label)+\(suffix)")
+                    if let url = outcome.url { return url }
+                }
+            }
+        }
+
+        throw ImageCreator.Error.creationFailed
+    }
+
+    private func attemptGenerate(concept: String,
+                                 title: String,
+                                 style: ImagePlaygroundStyle,
+                                 creator: ImageCreator,
+                                 label: String) async -> AttemptOutcome {
+        let payload = ImagePlaygroundConcept.extracted(from: concept, title: title)
+        do {
+            let stream = creator.images(for: [payload], style: style, limit: 1)
+            for try await result in stream {
+                if let url = try persistResult(result) {
+                    return AttemptOutcome(url: url, error: nil)
+                }
+            }
+        } catch {
+            return AttemptOutcome(url: nil, error: error)
+        }
+        return AttemptOutcome(url: nil, error: ImageCreator.Error.creationFailed)
+    }
+
+    private func isLikelyPromptRejection(_ error: Error) -> Bool {
+        if let e = error as? ImageCreator.Error, e == .creationFailed { return true }
+        let nsError = error as NSError
+        return nsError.code == 16
+    }
+
+    private func sanitizeConcept(_ text: String, maxLength: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= maxLength { return trimmed }
+        let idx = trimmed.index(trimmed.startIndex, offsetBy: maxLength)
+        return String(trimmed[..<idx]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sanitizeTitle(_ text: String?) -> String? {
+        let t = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+    private func persistResult(_ result: Any) throws -> URL? {
+        // ImagePlayground stream results may contain URL/Data/CGImage-like payloads.
+        if let url = result as? URL { return copyToCache(url: url) }
+        if let data = result as? Data { return try writeDataToCache(data: data) }
+
+        let mirror = Mirror(reflecting: result)
+        for child in mirror.children {
+            if let url = child.value as? URL { return copyToCache(url: url) }
+            if let data = child.value as? Data { return try writeDataToCache(data: data) }
+            if let cg = extractCGImage(from: child.value) { return try writeCGImageToCache(cg) }
+        }
+        return nil
+    }
+
+    private func extractCGImage(from value: Any) -> CGImage? {
+        guard let cf = value as? CFTypeRef, CFGetTypeID(cf) == CGImage.typeID else { return nil }
+        return unsafeBitCast(cf, to: CGImage.self)
+    }
+
+    private func writeCGImageToCache(_ image: CGImage) throws -> URL {
+        try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
+        let dest = cacheRoot.appendingPathComponent(UUID().uuidString + ".png")
+        guard let destination = CGImageDestinationCreateWithURL(dest as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+            throw NSError(domain: "ImagePlaygroundGenerator", code: -1)
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw NSError(domain: "ImagePlaygroundGenerator", code: -2)
+        }
+        return dest
+    }
+
+    private func copyToCache(url: URL) -> URL? {
+        do {
+            try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
+            let dest = cacheRoot.appendingPathComponent(url.lastPathComponent)
+            if FileManager.default.fileExists(atPath: dest.path) { return dest }
+            try FileManager.default.copyItem(at: url, to: dest)
+            return dest
+        } catch {
+            return nil
+        }
+    }
+
+    private func writeDataToCache(data: Data) throws -> URL {
+        try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
+        let dest = cacheRoot.appendingPathComponent(UUID().uuidString + ".png")
+        try data.write(to: dest, options: .atomic)
+        return dest
+    }
+}
+#endif
+```
+
+
+5) Orchestration (the part that actually makes it “work”)
+---------------------------------------------------------
+
+The main orchestration rules (as implemented in `GFRunController`):
+- Generate story text first (`GFStoryGenerator`)
+- Then generate images *sequentially* for each panel (`GFImageGenerator`)
+- If Image Playground becomes unavailable mid-run, immediately switch to placeholder images and show a notice
+
+The exact working sequential pattern:
+
+```swift
+func generateImages(for page: GFPageSpec, context: GFStoryContext) async throws -> [UUID: URL] {
+    var urls: [UUID: URL] = [:]
+    let placeholderGenerator = GFStubImageGenerator()
+    var imagePlaygroundUnavailable = false
+
+    for panel in page.panels {
+        if imagePlaygroundUnavailable {
+            urls[panel.id] = try? await placeholderGenerator.generateImage(for: panel, context: context)
+            continue
+        }
+        do {
+            urls[panel.id] = try await imageGenerator.generateImage(for: panel, context: context)
+        } catch {
+            if isAppleIntelligenceUnavailable(error) {
+                imagePlaygroundUnavailable = true
+                appleIntelligenceNotice = appleIntelligenceNotice ?? "Apple Intelligence isn’t available…"
+                urls[panel.id] = try? await placeholderGenerator.generateImage(for: panel, context: context)
+            } else {
+                // Retry once with a simpler prompt, then give up.
+                let fallbackPanel = GFPanelSpec(id: panel.id,
+                                                captionText: panel.captionText,
+                                                prompt: panel.prompt,
+                                                narratorText: panel.narratorText,
+                                                imageDirection: simpleImagePrompt(for: context),
+                                                imageTitle: panel.imageTitle)
+                urls[panel.id] = try? await imageGenerator.generateImage(for: fallbackPanel, context: context)
+            }
+        }
+    }
+    return urls
+}
+```
+
+
+6) Practical troubleshooting (when it “suddenly stops working”)
+---------------------------------------------------------------
+
+LLM shows as unavailable:
+- Confirm: `SystemLanguageModel.default.availability` prints `.available`
+- Confirm Apple Intelligence is enabled (device settings) and the device supports it
+- Ensure language is supported (we gate to English in `isSupportedLanguage()`)
+
+Image creation fails:
+- If you see `.backgroundCreationForbidden`: your scene/window isn’t active; generate while visible/foreground
+- If you see `.creationFailed` or NS code 16:
+  - Shorten concepts dramatically (≤160 chars)
+  - Remove “horror”, “blood”, humans, faces, etc.
+  - Retry with “Make it more PG”
+  - Ensure images are generated sequentially, not parallel
+

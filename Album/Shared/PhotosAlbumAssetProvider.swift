@@ -38,29 +38,37 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
     }
 
     public func fetchAssets(limit: Int, query: AlbumQuery) async throws -> [AlbumAsset] {
+        try await fetchAssets(limit: limit, query: query, sampling: .recent)
+    }
+
+    public func fetchAssets(limit: Int, query: AlbumQuery, sampling: AlbumAssetSampling) async throws -> [AlbumAsset] {
+        let cappedLimit = max(0, limit)
+
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+
+        if sampling == .recent {
+            fetchOptions.fetchLimit = cappedLimit
+        } else {
+            fetchOptions.fetchLimit = 0
+        }
 
         let result: PHFetchResult<PHAsset>
         switch query {
         case .allPhotos:
-            fetchOptions.fetchLimit = max(0, limit)
             result = PHAsset.fetchAssets(with: fetchOptions)
 
         case .favorites:
-            fetchOptions.fetchLimit = max(0, limit)
             fetchOptions.predicate = NSPredicate(format: "favorite == YES")
             result = PHAsset.fetchAssets(with: fetchOptions)
 
         case .recents(let days):
-            fetchOptions.fetchLimit = max(0, limit)
             if days > 0, let cutoff = Calendar(identifier: .gregorian).date(byAdding: .day, value: -days, to: Date()) {
                 fetchOptions.predicate = NSPredicate(format: "creationDate >= %@", cutoff as NSDate)
             }
             result = PHAsset.fetchAssets(with: fetchOptions)
 
         case .year(let year):
-            fetchOptions.fetchLimit = max(0, limit)
             let cal = Calendar(identifier: .gregorian)
             let startComps = DateComponents(year: year, month: 1, day: 1)
             let endComps = DateComponents(year: year + 1, month: 1, day: 1)
@@ -70,7 +78,6 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
             result = PHAsset.fetchAssets(with: fetchOptions)
 
         case .day(let year, let month, let day):
-            fetchOptions.fetchLimit = max(0, limit)
             let cal = Calendar(identifier: .gregorian)
             let startComps = DateComponents(year: year, month: month, day: day)
             if let start = cal.date(from: startComps), let end = cal.date(byAdding: .day, value: 1, to: start) {
@@ -81,17 +88,23 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
         case .userAlbum(let album):
             let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [album.id], options: nil)
             guard let collection = collections.firstObject else { return [] }
-            fetchOptions.fetchLimit = max(0, limit)
             result = PHAsset.fetchAssets(in: collection, options: fetchOptions)
         }
 
-        var phAssets: [PHAsset] = []
-        phAssets.reserveCapacity(min(result.count, max(0, limit)))
-        result.enumerateObjects { asset, _, stop in
-            phAssets.append(asset)
-            if limit > 0, phAssets.count >= limit {
-                stop.pointee = true
+        let phAssets: [PHAsset]
+        switch sampling {
+        case .random:
+            phAssets = randomSample(from: result, limit: cappedLimit)
+        case .recent:
+            var out: [PHAsset] = []
+            out.reserveCapacity(min(result.count, cappedLimit))
+            result.enumerateObjects { asset, _, stop in
+                out.append(asset)
+                if cappedLimit > 0, out.count >= cappedLimit {
+                    stop.pointee = true
+                }
             }
+            phAssets = out
         }
 
         return mapAlbumAssets(phAssets)
@@ -121,18 +134,21 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
         guard let asset = assets.firstObject else { return nil }
 
+        let pixelTargetSize = CGSize(width: max(1, targetSize.width), height: max(1, targetSize.height))
+
         let options = PHImageRequestOptions()
         options.isNetworkAccessAllowed = true
-        options.deliveryMode = .opportunistic
-        options.resizeMode = .fast
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .exact
+        options.version = .current
         options.isSynchronous = false
 
         return await withCheckedContinuation { continuation in
             var didResume = false
             PHImageManager.default().requestImage(
                 for: asset,
-                targetSize: targetSize,
-                contentMode: .aspectFill,
+                targetSize: pixelTargetSize,
+                contentMode: .aspectFit,
                 options: options
             ) { image, info in
                 guard !didResume else { return }
@@ -145,18 +161,13 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
                     return
                 }
 
-                if let image {
-                    didResume = true
-                    continuation.resume(returning: image)
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if isDegraded {
                     return
                 }
 
-                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if !isDegraded {
-                    didResume = true
-                    continuation.resume(returning: nil)
-                }
-
+                didResume = true
+                continuation.resume(returning: image)
             }
         }
     }
