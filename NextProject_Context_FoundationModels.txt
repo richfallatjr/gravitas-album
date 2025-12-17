@@ -1,0 +1,274 @@
+Gravitas Reader — FoundationModels “LLM as a function” Quick Start (Snippets)
+================================================================================
+
+These are small, production-used excerpts from this repo showing how we:
+- Gate FoundationModels usage by platform + availability
+- Create an on-device session with system instructions
+- Send a single prompt and decode strict JSON output
+- Run many “LLM function calls” in parallel with a concurrency cap (8)
+
+
+0) Compile-time gating
+----------------------
+
+We gate FoundationModels behind a flag + availability checks.
+
+Example pattern (from `Sources/GravitasReader/DiscoverAgent.swift`):
+
+    #if GR_USE_FOUNDATION_MODELS && compiler(>=6.0) && canImport(FoundationModels)
+    import FoundationModels
+    ...
+    #endif
+
+
+1) Runtime availability + session creation
+------------------------------------------
+
+Example (from `Sources/GravitasReader/ResearchAssistantService.swift`):
+
+    private static func chooseBackend() -> Backend {
+        if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
+            switch SystemLanguageModel.default.availability {
+            case .available:
+                log("Using SystemLanguageModel.default")
+                return .foundation
+            case .unavailable(let reason):
+                log("SystemLanguageModel unavailable: \(reason)")
+                return .unavailable
+            @unknown default:
+                log("SystemLanguageModel unavailable: unknown reason")
+                return .unavailable
+            }
+        }
+        log("SystemLanguageModel unavailable on this device/runtime")
+        return .unavailable
+    }
+
+    static func makeFoundationSession(system: String) -> LanguageModelSession? {
+        if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
+            let model = SystemLanguageModel.default
+            switch model.availability {
+            case .available:
+                return LanguageModelSession(model: model, instructions: system)
+            case .unavailable(let reason):
+                log("SystemLanguageModel unavailable: \(reason)")
+                return nil
+            @unknown default:
+                log("SystemLanguageModel unavailable: unknown reason")
+                return nil
+            }
+        } else {
+            log("Foundation models require visionOS 2 / iOS 18 / macOS 15")
+            return nil
+        }
+    }
+
+
+2) “LLM as formatter function”: strict JSON output
+--------------------------------------------------
+
+We use a system prompt that forces JSON-only output and returns empty results
+when the input is not confidently tabular.
+
+Excerpt (from `Sources/GravitasReader/ArticleExtractor.swift`, `TableFinderService`):
+
+    final class TableFinderService: @unchecked Sendable {
+        static let shared = TableFinderService()
+        private let instructions: String?
+        var hasSession: Bool { instructions != nil }
+
+        private init() {
+            if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
+                let systemPrompt = """
+    You are formatting extracted PDF table candidate text into a structured table for reliable rendering.
+
+    Input:
+    - The text is a candidate region extracted from a PDF. It may be a real table OR it may be running prose (e.g. two-column paper text, figure captions, bibliography).
+    - Rows are separated by newlines.
+    - Columns are usually separated by TAB characters (\\t). If tabs are missing, infer columns only if the alignment is unambiguous.
+
+    Task:
+    Convert the input into JSON matching this schema EXACTLY (JSON only, no markdown/code fences):
+    {"tables":[{"headers":[...]} or null,"rows":[["r1c1","r1c2",...],...],"caption":null or "..."}]}
+
+    Rules:
+    - If the input contains TABs, treat TABs as the ONLY column boundaries. Do NOT split cells into columns based on spaces.
+    - If the input contains TABs, do not merge or split rows. Each input line must become exactly one output row (after an optional header line).
+    - Do NOT create more columns than appear in the input. The output column count must match the maximum TAB-separated field count on any input row.
+    - If the input looks like running prose (e.g. two-column paper text with long sentences in both columns) or otherwise non-tabular, return {"tables":[]} instead of forcing a table.
+    - Do not invent, summarize, normalize, or rewrite values. Copy cell text verbatim (trim only leading/trailing whitespace).
+    - Preserve row order.
+    - Every row must have the same number of columns. Pad missing trailing cells with "".
+    - If the table has merged/spanning cells, put the content in the leftmost/topmost logical cell and use "" for the spanned cells (no colspan/rowspan support).
+    - Do not include markdown fences. Do not use trailing commas. Do not emit null inside rows; use "" instead.
+    - If a cell contains tabs/newlines, escape them as \\t and \\n within the JSON string.
+    - If you are not confident this is a genuine table with at least 2 rows and 2 columns, respond with {"tables":[]}.
+    """
+                GRLog.p("TableFinder", "Instructions loaded. SystemLanguageModel available=\(SystemLanguageModel.default.availability == .available)")
+                if case .available = SystemLanguageModel.default.availability {
+                    self.instructions = systemPrompt
+                } else {
+                    self.instructions = nil
+                }
+            } else {
+                self.instructions = nil
+            }
+        }
+    }
+
+Session creation + single request:
+
+    private struct TableFinderSessionHandle {
+        let id: UUID
+        let session: LanguageModelSession
+    }
+
+    extension TableFinderService {
+        private func newSession() -> TableFinderSessionHandle? {
+            guard let instructions else { return nil }
+            guard case .available = SystemLanguageModel.default.availability else { return nil }
+            let session = LanguageModelSession(model: SystemLanguageModel.default, instructions: instructions)
+            let handle = TableFinderSessionHandle(id: UUID(), session: session)
+            GRLog.p("TableFinder", "Created new LLM session \(handle.id.uuidString)")
+            return handle
+        }
+    }
+
+    func extractTables(from pageText: String, pageIndex: Int, candidateID: Int? = nil) async -> [ArticleTable] {
+        guard let sessionHandle = newSession() else { return [] }
+
+        let trimmed = pageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let maxInputChars = 4096
+        let capped = trimmed.count > maxInputChars ? String(trimmed.prefix(maxInputChars)) : trimmed
+
+        let prompt = """
+        PDF page \(pageIndex). Candidate TSV for a single region.
+        If this is not a real table, respond with {"tables":[]}.
+        Text:
+        \"\"\"\(capped)\"\"\"
+        """
+
+        let reply = try await sessionHandle.session.respond(to: prompt)
+        let content = reply.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        ...
+    }
+
+
+3) Parallelism: run N LLM calls with a concurrency cap (8)
+----------------------------------------------------------
+
+We convert many independent table candidates concurrently.
+
+Excerpt (from `Sources/GravitasReader/ArticleExtractor.swift`, `PDFTableConversionCoordinator`):
+
+    private actor PDFTableConversionCoordinator {
+        private let jobs: [TableCandidateJob]
+        private let maxConcurrency: Int
+        private var nextIndex: Int = 0
+        private var inflight: [Int: Task<Void, Never>] = [:]
+        private var continuation: AsyncStream<TableConversionTaskResult>.Continuation?
+        private var stopped = false
+
+        init(jobs: [TableCandidateJob], maxConcurrency: Int) {
+            self.jobs = jobs
+            self.maxConcurrency = maxConcurrency
+        }
+
+        func resultsStream() -> AsyncStream<TableConversionTaskResult> {
+            AsyncStream { continuation in
+                Task { await self.attachContinuationAndStart(continuation) }
+            }
+        }
+
+        func stop() {
+            guard !stopped else { return }
+            stopped = true
+            for task in inflight.values { task.cancel() }
+            inflight.removeAll()
+            continuation?.finish()
+            continuation = nil
+        }
+
+        private func launchMoreIfNeeded() {
+            guard !stopped else { return }
+            while inflight.count < maxConcurrency, nextIndex < jobs.count {
+                let job = jobs[nextIndex]
+                nextIndex += 1
+                let task = Task.detached(priority: .userInitiated) { [job, coordinator = self] in
+                    if Task.isCancelled { return }
+                    let result = await PDFTableConversionCoordinator.convert(job: job)
+                    await coordinator.didFinish(jobID: job.id, result: result)
+                }
+                inflight[job.id] = task
+            }
+            if inflight.isEmpty, nextIndex >= jobs.count {
+                continuation?.finish()
+                continuation = nil
+            }
+        }
+        ...
+    }
+
+
+4) Tool-using agent pattern (optional)
+--------------------------------------
+
+The Discover flow uses a higher-level chat abstraction that can call tools.
+
+Excerpt (from `Sources/GravitasReader/DiscoverAgent.swift`):
+
+    final class DiscoverAgent {
+        private let providers: Providers
+        private let chat: Chat
+
+        init(providers: Providers = Providers()) {
+            self.providers = providers
+            let model = FoundationModels.Model.defaultOnDevice
+            self.chat = Chat(model: model, system: Self.systemPrompt)
+            registerTools()
+        }
+
+        func run(query: String, preferred: DiscoverIntent? = nil, limit: Int = 12) async throws -> DiscoverResultSet {
+            let userPrompt = preferred.map { "Intent=\($0.rawValue). Find up to \(limit) results for: \(query)" }
+                ?? "Find up to \(limit) results for: \(query)"
+            let result: DiscoverResultSet = try await chat.generate(userPrompt, as: DiscoverResultSet.self)
+            return result
+        }
+        ...
+    }
+
+
+5) Defensive output sanitization (common)
+----------------------------------------
+
+You will see occasional code fences in model replies. We strip them before use.
+
+Excerpt (from `Sources/GravitasReader/ResearchSummaryService.swift`):
+
+    func sanitizeSummaryString(_ summary: String) -> String {
+        let defenced: String = {
+            guard summary.contains("```") else { return summary }
+            let lines = summary.split(separator: "\n", omittingEmptySubsequences: false)
+            guard let first = lines.first else { return summary }
+            var trimmedLines = lines
+            if first.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("```") {
+                trimmedLines.removeFirst()
+            }
+            if let last = trimmedLines.last,
+               last.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("```") {
+                trimmedLines.removeLast()
+            }
+            let rebuilt = trimmedLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            return rebuilt.isEmpty ? summary : rebuilt
+        }()
+
+        if let data = defenced.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let inner = json["summary"] as? String,
+           !inner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return inner.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return defenced
+    }
+

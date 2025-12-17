@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/master.swiftdeps"
+  },
+  "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedCanvasView.swift": {
+    "dependencies": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedCanvasView.d",
+    "object": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedCanvasView.swift.o",
+    "swiftmodule": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedCanvasView~partial.swiftmodule",
+    "swift-dependencies": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedCanvasView.swiftdeps",
+    "diagnostics": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedCanvasView.dia"
+  },
+  "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedLayoutMath.swift": {
+    "dependencies": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedLayoutMath.d",
+    "object": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedLayoutMath.swift.o",
+    "swiftmodule": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedLayoutMath~partial.swiftmodule",
+    "swift-dependencies": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedLayoutMath.swiftdeps",
+    "diagnostics": "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedLayoutMath.dia"
+  }
+}

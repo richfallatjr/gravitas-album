@@ -1,0 +1,214 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.CurvedLayoutKit-arm64-apple-xros1.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/sources",
+      "importPath" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedCanvasView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedLayoutMath.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "CurvedLayoutKit",
+      "moduleOutputPath" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/Modules/CurvedLayoutKit.swiftmodule",
+      "objects" : [
+        "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedCanvasView.swift.o",
+        "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedLayoutMath.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-xros1.010.13",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/include/CurvedLayoutKit-Swift.h",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/XROS.platform/Developer/SDKs/XROS26.1.sdk",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/XROS.platform/Developer/SDKs/XROS26.1.sdk",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "curvedlayoutkit"
+      ],
+      "outputFileMapPath" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedCanvasView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/CurvedLayoutMath.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/Modules/CurvedLayoutKit.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedCanvasView.swift",
+        "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedLayoutMath.swift"
+      ],
+      "tempsPath" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "CurvedLayoutKit" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "CurvedLayoutKit",
+      "-package-name",
+      "curvedlayoutkit",
+      "-c",
+      "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedCanvasView.swift",
+      "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedLayoutMath.swift",
+      "-I",
+      "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/Modules",
+      "-target",
+      "arm64-apple-xros1.010.13",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/include/CurvedLayoutKit-Swift.h",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/XROS.platform/Developer/SDKs/XROS26.1.sdk",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/XROS.platform/Developer/SDKs/XROS26.1.sdk",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "curvedlayoutkit",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "CurvedLayoutKit" : [
+
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedCanvasView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit/CurvedLayoutMath.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/CurvedLayoutKit.build/sources"
+    },
+    "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/richardfallat/Projects/dev/gravitas-album/Album/CurvedLayout/CurvedLayoutKit/.build/arm64-apple-xros1.0/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}

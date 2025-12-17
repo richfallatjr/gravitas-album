@@ -1,0 +1,43 @@
+name: GravitasAlbum
+
+options:
+  bundleIdPrefix: com.gravitas
+
+settings:
+  base:
+    SWIFT_VERSION: 5.9
+
+targets:
+  GravitasAlbum:
+    type: application
+    platform: visionOS
+    deploymentTarget: "1.0"
+    sources:
+      - path: Album
+        excludes:
+          - CurvedLayout/CurvedLayoutKit/**
+          - Assets.xcassets
+          - README.md
+    resources:
+      - path: Album/Assets.xcassets
+    dependencies:
+      - target: CurvedLayoutKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.gravitas.GravitasAlbum
+        MARKETING_VERSION: 0.1
+        CURRENT_PROJECT_VERSION: 1
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Gravitas Album needs access to your photo library to display and curate your memories."
+
+  CurvedLayoutKit:
+    type: framework
+    platform: visionOS
+    deploymentTarget: "1.0"
+    sources:
+      - path: Album/CurvedLayout/CurvedLayoutKit/Sources/CurvedLayoutKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        DEFINES_MODULE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.gravitas.CurvedLayoutKit
