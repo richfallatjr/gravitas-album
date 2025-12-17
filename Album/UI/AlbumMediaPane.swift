@@ -9,6 +9,7 @@ public struct AlbumMediaPane: View {
     @State private var image: AlbumImage? = nil
     @State private var player: AVPlayer? = nil
     @State private var currentVideoURL: URL? = nil
+    @State private var isLoadingPreview: Bool = false
 
     public init(assetID: String?) {
         self.assetID = assetID
@@ -61,7 +62,19 @@ public struct AlbumMediaPane: View {
 #endif
             } else {
                 Color.black.opacity(0.06)
-                ProgressView()
+                if isLoadingPreview {
+                    ProgressView()
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: asset.mediaType == .video ? "video" : "photo")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+
+                        Text("No preview available")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             if model.visionPendingAssetIDs.contains(asset.localIdentifier) {
@@ -151,18 +164,22 @@ public struct AlbumMediaPane: View {
         }
     }
 
+    @MainActor
     private func loadPreview(for asset: AlbumAsset) async {
         currentVideoURL = nil
         player = nil
-        image = await model.assetProvider.requestThumbnail(localIdentifier: asset.localIdentifier, targetSize: CGSize(width: 900, height: 720))
+        image = nil
+        isLoadingPreview = true
+        image = await model.requestThumbnail(assetID: asset.localIdentifier, targetSize: CGSize(width: 900, height: 720))
 
         if asset.mediaType == .video {
-            if let url = await model.assetProvider.requestVideoURL(localIdentifier: asset.localIdentifier) {
+            if let url = await model.requestVideoURL(assetID: asset.localIdentifier) {
                 currentVideoURL = url
                 player = AVPlayer(url: url)
                 player?.play()
             }
         }
+        isLoadingPreview = false
     }
 
     private func formatDuration(_ duration: TimeInterval) -> String {

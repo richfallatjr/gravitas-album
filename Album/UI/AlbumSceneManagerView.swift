@@ -74,7 +74,7 @@ public struct AlbumSceneManagerView: View {
                 }
             }
         }
-        .frame(width: 420, height: 460)
+        .frame(width: 630, height: 690)
     }
 
     private func saveScene() {
@@ -100,4 +100,3 @@ public struct AlbumSceneManagerView: View {
         model.updateScene(scene)
     }
 }
-

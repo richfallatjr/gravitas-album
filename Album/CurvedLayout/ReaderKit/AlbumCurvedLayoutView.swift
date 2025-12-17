@@ -120,6 +120,7 @@ private struct AlbumCurvedLayoutCard: View {
     let onHide: (String) -> Void
 
     @State private var image: AlbumImage? = nil
+    @State private var isLoadingImage: Bool = true
 
     private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
@@ -139,7 +140,13 @@ private struct AlbumCurvedLayoutCard: View {
 #endif
             } else {
                 shape.fill(.black.opacity(0.08))
-                ProgressView()
+                if isLoadingImage {
+                    ProgressView()
+                } else {
+                    Image(systemName: item.mediaType == .video ? "video" : "photo")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .overlay(alignment: .topLeading) {
@@ -182,7 +189,10 @@ private struct AlbumCurvedLayoutCard: View {
             Button("Hide", role: .destructive) { onHide(item.id) }
         }
         .task(id: item.id) {
+            isLoadingImage = true
+            image = nil
             image = await thumbnailProvider(item.id)
+            isLoadingImage = false
         }
     }
 }

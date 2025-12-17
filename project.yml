@@ -24,11 +24,11 @@ targets:
       - target: CurvedLayoutKit
     settings:
       base:
-        GENERATE_INFOPLIST_FILE: YES
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.gravitas.GravitasAlbum
         MARKETING_VERSION: 0.1
         CURRENT_PROJECT_VERSION: 1
-        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Gravitas Album needs access to your photo library to display and curate your memories."
 
   CurvedLayoutKit:
     type: framework

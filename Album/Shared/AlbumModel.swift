@@ -1,6 +1,11 @@
 import SwiftUI
 import CoreGraphics
 
+public enum AlbumDatasetSource: String, Sendable, Codable, CaseIterable {
+    case photos
+    case demo
+}
+
 @MainActor
 public final class AlbumModel: ObservableObject {
     public let assetProvider: AlbumAssetProvider
@@ -75,6 +80,9 @@ public final class AlbumModel: ObservableObject {
     @Published public var absorbInterval: Double = 10
     @Published public var absorbNowRequestID: UUID = UUID()
 
+    @Published public private(set) var datasetSource: AlbumDatasetSource = .photos
+    @Published public private(set) var lastAssetFetchCount: Int = 0
+
     @Published public private(set) var libraryAuthorization: AlbumLibraryAuthorizationStatus = .notDetermined
     @Published public private(set) var items: [AlbumItem] = []
     @Published public private(set) var lastAssetLoadError: String? = nil
@@ -119,6 +127,8 @@ public final class AlbumModel: ObservableObject {
     @Published public var visionPendingAssetIDs: Set<String> = []
 
     @Published public var curvedCanvasEnabled: Bool = false
+
+    @Published public private(set) var isLoadingItems: Bool = false
 
     private var sidecar: AlbumSidecar
     private var saveSidecarTask: Task<Void, Never>? = nil
@@ -211,9 +221,15 @@ public final class AlbumModel: ObservableObject {
     }
 
     public func loadAssets(limit: Int = 600, mode: AlbumSamplingMode = .recent) async {
+        guard !isLoadingItems else { return }
+        isLoadingItems = true
+        defer { isLoadingItems = false }
+
+        datasetSource = .photos
         lastAssetLoadError = nil
         let auth = assetProvider.authorizationStatus()
         libraryAuthorization = auth
+        AlbumLog.photos.info("loadAssets(mode: \(mode.rawValue, privacy: .public), limit: \(limit)) auth: \(String(describing: auth), privacy: .public)")
 
         let effectiveAuth: AlbumLibraryAuthorizationStatus
         if auth == .notDetermined {
@@ -222,6 +238,7 @@ public final class AlbumModel: ObservableObject {
             effectiveAuth = auth
         }
         libraryAuthorization = effectiveAuth
+        AlbumLog.photos.info("loadAssets effectiveAuth: \(String(describing: effectiveAuth), privacy: .public)")
 
         guard effectiveAuth == .authorized || effectiveAuth == .limited else {
             items = []
@@ -230,14 +247,18 @@ public final class AlbumModel: ObservableObject {
 
         do {
             let fetched = try await assetProvider.fetchAssets(limit: limit, mode: mode)
+            lastAssetFetchCount = fetched.count
             items = fetched.filter { !hiddenIDs.contains($0.id) }
+            AlbumLog.photos.info("loadAssets fetched: \(fetched.count) filtered: \(self.items.count) hiddenIDs: \(self.hiddenIDs.count)")
             if let id = currentAssetID, let item = item(for: id) {
                 currentItem = item
             }
             history = historyAssetIDs.compactMap { item(for: $0) }
         } catch {
             lastAssetLoadError = String(describing: error)
+            lastAssetFetchCount = 0
             items = []
+            AlbumLog.photos.error("loadAssets error: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -247,9 +268,16 @@ public final class AlbumModel: ObservableObject {
     }
 
     public func loadItems(limit: Int? = nil, query: AlbumQuery? = nil) async {
+        guard !isLoadingItems else { return }
+        isLoadingItems = true
+        defer { isLoadingItems = false }
+
+        datasetSource = .photos
         lastAssetLoadError = nil
         let auth = assetProvider.authorizationStatus()
         libraryAuthorization = auth
+        let q = query ?? selectedQuery
+        AlbumLog.photos.info("loadItems(query: \(q.id, privacy: .public), limit: \(limit ?? -1)) auth: \(String(describing: auth), privacy: .public)")
 
         let effectiveAuth: AlbumLibraryAuthorizationStatus
         if auth == .notDetermined {
@@ -258,6 +286,7 @@ public final class AlbumModel: ObservableObject {
             effectiveAuth = auth
         }
         libraryAuthorization = effectiveAuth
+        AlbumLog.photos.info("loadItems effectiveAuth: \(String(describing: effectiveAuth), privacy: .public)")
 
         guard effectiveAuth == .authorized || effectiveAuth == .limited else {
             items = []
@@ -265,9 +294,10 @@ public final class AlbumModel: ObservableObject {
         }
 
         do {
-            let q = query ?? selectedQuery
             let fetched = try await assetProvider.fetchAssets(limit: limit ?? 600, query: q)
+            lastAssetFetchCount = fetched.count
             items = fetched.filter { !hiddenIDs.contains($0.id) }
+            AlbumLog.photos.info("loadItems fetched: \(fetched.count) filtered: \(self.items.count) hiddenIDs: \(self.hiddenIDs.count)")
             if let id = currentAssetID, let item = item(for: id) {
                 currentItem = item
             }
@@ -277,8 +307,56 @@ public final class AlbumModel: ObservableObject {
             }
         } catch {
             lastAssetLoadError = String(describing: error)
+            lastAssetFetchCount = 0
             items = []
+            AlbumLog.photos.error("loadItems error: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    public func loadDemoItems(count: Int = 240) {
+        AlbumLog.model.info("loadDemoItems(count: \(count))")
+        let fetched = AlbumDemoLibrary.makeAssets(count: count)
+        lastAssetFetchCount = fetched.count
+        datasetSource = .demo
+        lastAssetLoadError = nil
+
+        items = fetched.filter { !hiddenIDs.contains($0.id) }
+        AlbumLog.model.info("loadDemoItems loaded: \(self.items.count) hiddenIDs: \(self.hiddenIDs.count)")
+
+        if let id = currentAssetID, let item = item(for: id) {
+            currentItem = item
+        } else {
+            currentAssetID = nil
+            currentItem = nil
+        }
+
+        history = historyAssetIDs.compactMap { item(for: $0) }
+        if panelMode == .memories {
+            rebuildMemoryWindow(resetToAnchor: memoryWindowItems.isEmpty)
+        }
+    }
+
+    public func requestThumbnail(assetID: String, targetSize: CGSize) async -> AlbumImage? {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return nil }
+
+        if datasetSource == .demo || AlbumDemoLibrary.isDemoID(id) {
+            let mediaType = asset(for: id)?.mediaType
+            return AlbumDemoLibrary.requestThumbnail(localIdentifier: id, targetSize: targetSize, mediaType: mediaType)
+        }
+
+        return await assetProvider.requestThumbnail(localIdentifier: id, targetSize: targetSize)
+    }
+
+    public func requestVideoURL(assetID: String) async -> URL? {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return nil }
+
+        if datasetSource == .demo || AlbumDemoLibrary.isDemoID(id) {
+            return nil
+        }
+
+        return await assetProvider.requestVideoURL(localIdentifier: id)
     }
 
     public func refreshRecommends() {
@@ -406,6 +484,11 @@ public final class AlbumModel: ObservableObject {
 
         if visionSummaryByAssetID[id] != nil { return }
         if visionPendingAssetIDs.contains(id) { return }
+
+        if datasetSource == .demo || AlbumDemoLibrary.isDemoID(id) {
+            visionSummaryByAssetID[id] = AlbumDemoLibrary.placeholderTitle(for: id, mediaType: asset(for: id)?.mediaType)
+            return
+        }
 
         visionPendingAssetIDs.insert(id)
 

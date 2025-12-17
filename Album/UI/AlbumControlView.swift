@@ -8,6 +8,7 @@ public struct AlbumControlView: View {
     @State private var launched = false
     @State private var assetLimit: Int = 600
     @State private var isQueryPickerPresented: Bool = false
+    @State private var immersiveOpenStatus: String? = nil
 
     public init() {}
 
@@ -29,6 +30,7 @@ public struct AlbumControlView: View {
         .padding(14)
         .glassBackground(cornerRadius: 28)
         .task {
+            AlbumLog.ui.info("AlbumControlView task: loadItemsIfNeeded(limit: \(self.assetLimit))")
             await model.loadItemsIfNeeded(limit: assetLimit)
         }
         .sheet(isPresented: $isQueryPickerPresented) {
@@ -52,13 +54,28 @@ public struct AlbumControlView: View {
                 if !launched {
                     Button("Run Simulation") {
                         Task { @MainActor in
-                            if case .opened = await openImmersiveSpace(id: "album-space") {
+                            AlbumLog.immersive.info("Run Simulation pressed; requesting immersive space open")
+                            immersiveOpenStatus = nil
+                            immersiveOpenStatus = "Opening immersive space…"
+                            let result = await openImmersiveSpace(id: "album-space")
+                            AlbumLog.immersive.info("openImmersiveSpace result: \(String(describing: result), privacy: .public)")
+                            if case .opened = result {
                                 launched = true
+                                immersiveOpenStatus = nil
+                            } else {
+                                immersiveOpenStatus = "Immersive open failed: \(String(describing: result))"
                             }
                         }
                     }
                     .buttonStyle(.borderedProminent)
                 }
+            }
+
+            if let immersiveOpenStatus {
+                Text(immersiveOpenStatus)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
 
             HStack(spacing: 12) {
@@ -74,6 +91,7 @@ public struct AlbumControlView: View {
                     .labelsHidden()
 
                 Button("Reload") {
+                    AlbumLog.ui.info("Reload pressed; loadItems(limit: \(self.assetLimit), query: \(self.model.selectedQuery.id, privacy: .public))")
                     Task { await model.loadItems(limit: assetLimit, query: model.selectedQuery) }
                 }
                 .buttonStyle(.bordered)
@@ -96,31 +114,93 @@ public struct AlbumControlView: View {
     @ViewBuilder
     private var authorizationStatus: some View {
         let status = model.libraryAuthorization
-        switch status {
-        case .authorized, .limited:
-            Text("Library: \(model.items.count) items loaded (\(status == .limited ? "Limited Access" : "Full Access"))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-        case .notDetermined:
-            Text("Library: permission not requested yet")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-        case .denied, .restricted:
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Library access is blocked (\(status == .denied ? "Denied" : "Restricted")).")
-                Text("Enable Photos access in Settings to load your library.")
+        let accessLabel: String = {
+            switch status {
+            case .authorized:
+                return "Full Access"
+            case .limited:
+                return "Limited Access"
+            case .notDetermined:
+                return "Not Determined"
+            case .denied:
+                return "Denied"
+            case .restricted:
+                return "Restricted"
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
+        }()
 
-        if let err = model.lastAssetLoadError, !err.isEmpty {
-            Text("Load error: \(err)")
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Dataset: \(model.datasetSource == .demo ? "Demo" : "Photos") • \(model.items.count) items")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if model.datasetSource == .photos {
+                Text("Fetched: \(model.lastAssetFetchCount) • Hidden: \(model.hiddenIDs.count) • \(accessLabel)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Photos access: \(accessLabel)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            switch status {
+            case .authorized, .limited:
+                if model.isLoadingItems {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Loading…")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if model.items.isEmpty, model.lastAssetLoadError == nil, model.datasetSource == .photos {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("No Photos returned. If you’re on Simulator, add photos to the simulator Photos library (or run on device).")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Button("Load Demo Items") {
+                            model.loadDemoItems(count: assetLimit)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+            case .notDetermined:
+                Text("Library: permission not requested yet")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                if model.items.isEmpty, !model.isLoadingItems {
+                    Button("Load Demo Items") {
+                        model.loadDemoItems(count: assetLimit)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+            case .denied, .restricted:
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Library access is blocked (\(status == .denied ? "Denied" : "Restricted")).")
+                    Text("Enable Photos access in Settings to load your library.")
+                }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+
+                if model.items.isEmpty, !model.isLoadingItems {
+                    Button("Load Demo Items") {
+                        model.loadDemoItems(count: assetLimit)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            if let err = model.lastAssetLoadError, !err.isEmpty {
+                Text("Load error: \(err)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
         }
     }
 

@@ -68,7 +68,7 @@ public struct AlbumImmersiveRootView: View {
     private let baseDnRadius: Float = 0.02
     private let maxDnScaleMultiplier: Float = 2.5
 
-    private let simulationOrigin = SIMD3<Float>(0, 1.5, -2.5)
+    private let anchorOffset = SIMD3<Float>(0, 0, -3.0)
 
     public init() {}
 
@@ -83,6 +83,7 @@ public struct AlbumImmersiveRootView: View {
         )
         .onChange(of: sim.absorbNowRequestID) {
             Task { @MainActor in
+                AlbumLog.immersive.info("AbsorbNow requested")
                 accum = 0
                 absorbOne()
             }
@@ -90,11 +91,13 @@ public struct AlbumImmersiveRootView: View {
         .onChange(of: sim.tuningDeltaRequest) {
             guard let req = sim.tuningDeltaRequest else { return }
             Task { @MainActor in
+                AlbumLog.immersive.info("Applying tuning deltas: \(req.deltas.count)")
                 applyTuningDeltas(req.deltas)
             }
         }
         .onChange(of: sim.assets) {
             Task { @MainActor in
+                AlbumLog.immersive.info("Assets changed; respawning entities. assets=\(self.sim.assets.count)")
                 respawnFromCurrentAssets()
             }
         }
@@ -104,7 +107,8 @@ public struct AlbumImmersiveRootView: View {
 
     @MainActor
     private func buildScene(in content: RealityViewContent) {
-        let world = AnchorEntity(world: simulationOrigin)
+        AlbumLog.immersive.info("Building immersive scene")
+        let world = AnchorEntity(world: anchorOffset)
         anchor = world
         content.add(world)
 
@@ -134,6 +138,7 @@ public struct AlbumImmersiveRootView: View {
         assetIDByEntity.removeAll(keepingCapacity: true)
 
         let assets = sim.assets
+        AlbumLog.immersive.info("Respawn requested. assets=\(assets.count)")
         guard !assets.isEmpty else { return }
 
         let dates = assets.compactMap(\.creationDate).sorted()
@@ -153,6 +158,7 @@ public struct AlbumImmersiveRootView: View {
             let normalized = Float(max(0, min(1, t)))
             spawn(asset, basePosition: slot.basePosition, recency: normalized, root: root)
         }
+        AlbumLog.immersive.info("Respawn complete. entities=\(self.balls.count)")
     }
 
     @MainActor
@@ -196,6 +202,7 @@ public struct AlbumImmersiveRootView: View {
     @MainActor
     private func handleTap(on entity: Entity) {
         if let assetID = assetIDByEntity[ObjectIdentifier(entity)] {
+            AlbumLog.immersive.info("Tap select assetID=\(assetID, privacy: .public)")
             sim.currentAssetID = assetID
         }
 

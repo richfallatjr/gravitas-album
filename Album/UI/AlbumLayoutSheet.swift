@@ -25,7 +25,7 @@ public struct AlbumLayoutSheet: View {
                         prevEnabled: model.panelMode == .memories ? model.memoryPrevEnabled : true,
                         nextEnabled: model.panelMode == .memories ? model.memoryNextEnabled : true,
                         thumbnailProvider: { id in
-                            await model.assetProvider.requestThumbnail(localIdentifier: id, targetSize: CGSize(width: 220, height: 220))
+                            await model.requestThumbnail(assetID: id, targetSize: CGSize(width: 220, height: 220))
                         },
                         onSelect: { id in
                             model.currentAssetID = id

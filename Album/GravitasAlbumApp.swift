@@ -9,7 +9,7 @@ struct GravitasAlbumApp: App {
             AlbumControlView()
                 .environmentObject(model)
         }
-        .defaultSize(width: 720, height: 760)
+        .defaultSize(width: 1080, height: 1140)
         .windowResizability(.contentSize)
 
         WindowGroup(for: AlbumPopOutPayload.self) { binding in
@@ -21,13 +21,13 @@ struct GravitasAlbumApp: App {
                     .environmentObject(model)
             }
         }
-        .defaultSize(width: 720, height: 520)
+        .defaultSize(width: 1080, height: 780)
 
         WindowGroup(id: "album-scene-manager") {
             AlbumSceneManagerView()
                 .environmentObject(model)
         }
-        .defaultSize(width: 420, height: 460)
+        .defaultSize(width: 630, height: 690)
 
         ImmersiveSpace(id: "album-space") {
             AlbumImmersiveRootView()
