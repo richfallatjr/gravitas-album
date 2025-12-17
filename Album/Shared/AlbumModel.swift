@@ -42,14 +42,12 @@ public final class AlbumModel: ObservableObject {
             ensureVisionSummary(for: item.id, reason: "current_item")
             appendToHistory(assetID: item.id)
 
-            neighborsReady = false
-            recommendAnchorID = item.id
-            recommendItems = []
-
             if panelMode == .memories {
                 memoryAnchorID = item.id
                 rebuildMemoryWindow(resetToAnchor: true)
             }
+
+            restoreCachedRecommendsIfAvailable(for: item.id)
         }
     }
     @Published public var history: [AlbumItem] = []
@@ -76,7 +74,21 @@ public final class AlbumModel: ObservableObject {
     // Immersive tuning requests (model decides; immersive applies)
     @Published public var tuningDeltaRequest: AlbumTuningDeltaRequest? = nil
 
-    @Published public var isPaused: Bool = false
+    @Published public var isPaused: Bool = false {
+        didSet {
+            guard isPaused != oldValue else { return }
+            AlbumLog.model.info("Pause toggled: \(self.isPaused ? "paused" : "playing", privacy: .public)")
+
+            if isPaused {
+                latestThumbRequestID = nil
+                thumbTask?.cancel()
+                thumbTask = nil
+                thumbThinkingSince = nil
+                thumbThinkingFeedback = nil
+                thumbStatusMessage = "Paused"
+            }
+        }
+    }
     @Published public var absorbInterval: Double = 10
     @Published public var absorbNowRequestID: UUID = UUID()
 
@@ -127,6 +139,8 @@ public final class AlbumModel: ObservableObject {
     @Published public var visionPendingAssetIDs: Set<String> = []
 
     @Published public var curvedCanvasEnabled: Bool = false
+    @Published public private(set) var curvedWallDumpPages: [CurvedWallDumpPage] = []
+    @Published public private(set) var curvedWallDumpIndex: Int = 0
 
     @Published public private(set) var isLoadingItems: Bool = false
 
@@ -135,6 +149,22 @@ public final class AlbumModel: ObservableObject {
     private var thumbTask: Task<Void, Never>? = nil
     private var latestThumbRequestID: UUID? = nil
     private var isSyncingSelection: Bool = false
+    private var recommendsCacheByAnchorID: [String: AlbumRecResponse] = [:]
+    private var recommendsFeedbackByAnchorID: [String: AlbumThumbFeedback] = [:]
+
+    public struct CurvedWallDumpPage: Identifiable, Sendable, Equatable {
+        public let id: UUID
+        public let anchorID: String
+        public let neighborIDs: [String]
+        public let createdAt: Date
+
+        public init(anchorID: String, neighborIDs: [String], createdAt: Date = Date(), id: UUID = UUID()) {
+            self.id = id
+            self.anchorID = anchorID
+            self.neighborIDs = neighborIDs
+            self.createdAt = createdAt
+        }
+    }
 
     public init(
         assetProvider: (any AlbumAssetProvider)? = nil,
@@ -370,6 +400,104 @@ public final class AlbumModel: ObservableObject {
         sendThumb(feedback, assetID: id)
     }
 
+    public var curvedWallCanPageBack: Bool {
+        guard panelMode == .recommends else { return memoryPrevEnabled }
+        return curvedWallDumpIndex > 0
+    }
+
+    public var curvedWallCanPageForward: Bool {
+        guard panelMode == .recommends else { return memoryNextEnabled }
+        return (curvedWallDumpIndex + 1) < curvedWallDumpPages.count
+    }
+
+    public var curvedWallVisibleAssetIDs: [String] {
+        switch panelMode {
+        case .recommends:
+            guard curvedWallDumpIndex >= 0, curvedWallDumpIndex < curvedWallDumpPages.count else { return [] }
+            return curvedWallDumpPages[curvedWallDumpIndex].neighborIDs
+        case .memories:
+            return memoryWindowItems.map(\.id)
+        }
+    }
+
+    public func dumpFocusedNeighborsToCurvedWall() {
+        guard panelMode == .recommends else {
+            AlbumLog.model.info("CurvedWall dump (memories): open anchor=\(self.memoryAnchorID ?? "nil", privacy: .public) window=\(self.memoryWindowItems.count) start=\(self.memoryPageStartIndex) label=\(self.memoryLabel, privacy: .public)")
+            curvedCanvasEnabled = true
+            return
+        }
+
+        guard let anchorID = currentAssetID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !anchorID.isEmpty else {
+            thumbStatusMessage = "No focused asset"
+            return
+        }
+
+        if recommendAnchorID != anchorID {
+            restoreCachedRecommendsIfAvailable(for: anchorID)
+        }
+
+        guard recommendAnchorID == anchorID else {
+            thumbStatusMessage = "No neighbors for focused asset"
+            return
+        }
+
+        let neighborIDs = recommendItems.map(\.id)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != anchorID && !hiddenIDs.contains($0) }
+
+        guard !neighborIDs.isEmpty else {
+            thumbStatusMessage = "No neighbors for focused asset"
+            return
+        }
+
+        let capped = Array(neighborIDs.prefix(20))
+        let newPage = CurvedWallDumpPage(anchorID: anchorID, neighborIDs: capped)
+
+        let maxStoredPages = 10
+
+        if let last = curvedWallDumpPages.last, last.anchorID == anchorID {
+            curvedWallDumpPages[curvedWallDumpPages.count - 1] = newPage
+            curvedWallDumpIndex = curvedWallDumpPages.count - 1
+        } else {
+            curvedWallDumpPages.append(newPage)
+            if curvedWallDumpPages.count > maxStoredPages {
+                let overflow = curvedWallDumpPages.count - maxStoredPages
+                curvedWallDumpPages.removeFirst(overflow)
+            }
+            curvedWallDumpIndex = max(0, curvedWallDumpPages.count - 1)
+        }
+
+        AlbumLog.model.info("CurvedWall dump anchor=\(anchorID, privacy: .public) neighbors=\(capped.count) pages=\(self.curvedWallDumpPages.count) index=\(self.curvedWallDumpIndex)")
+        curvedCanvasEnabled = true
+    }
+
+    public func curvedWallPageBack() {
+        if panelMode == .memories {
+            AlbumLog.model.info("CurvedWall pageBack (memories)")
+            memoryPrevPage()
+            return
+        }
+
+        guard curvedWallDumpIndex > 0 else { return }
+        curvedWallDumpIndex -= 1
+        AlbumLog.model.info("CurvedWall pageBack index=\(self.curvedWallDumpIndex)")
+        curvedCanvasEnabled = true
+    }
+
+    public func curvedWallPageForward() {
+        if panelMode == .memories {
+            AlbumLog.model.info("CurvedWall pageForward (memories)")
+            memoryNextPage()
+            return
+        }
+
+        guard (curvedWallDumpIndex + 1) < curvedWallDumpPages.count else { return }
+        curvedWallDumpIndex += 1
+        AlbumLog.model.info("CurvedWall pageForward index=\(self.curvedWallDumpIndex)")
+        curvedCanvasEnabled = true
+    }
+
     public func memoryPrevPage() {
         shiftMemoryPage(delta: -1)
     }
@@ -385,6 +513,13 @@ public final class AlbumModel: ObservableObject {
         thumbFeedbackByAssetID[id] = feedback
         scheduleSidecarSave()
 
+        guard !isPaused else {
+            thumbThinkingSince = nil
+            thumbThinkingFeedback = nil
+            thumbStatusMessage = "Paused (rating saved)"
+            return
+        }
+
         thumbThinkingSince = Date()
         thumbThinkingFeedback = feedback
         thumbStatusMessage = nil
@@ -393,7 +528,7 @@ public final class AlbumModel: ObservableObject {
         latestThumbRequestID = requestID
 
         thumbTask?.cancel()
-        thumbTask = Task { [weak self] in
+        thumbTask = Task(priority: .userInitiated) { [weak self] in
             await self?.processThumb(feedback: feedback, assetID: id, requestID: requestID)
         }
     }
@@ -548,14 +683,13 @@ public final class AlbumModel: ObservableObject {
         let snapshot = buildOracleSnapshot(thumbed: thumbed)
         let oracle = self.oracle
 
-        let outcome: AlbumRecOutcome = await Task.detached(priority: .userInitiated) {
-            switch feedback {
-            case .up:
-                return await oracle.recommendThumbUp(snapshot: snapshot, requestID: requestID)
-            case .down:
-                return await oracle.recommendThumbDown(snapshot: snapshot, requestID: requestID)
-            }
-        }.value
+        let outcome: AlbumRecOutcome
+        switch feedback {
+        case .up:
+            outcome = await oracle.recommendThumbUp(snapshot: snapshot, requestID: requestID)
+        case .down:
+            outcome = await oracle.recommendThumbDown(snapshot: snapshot, requestID: requestID)
+        }
 
         guard latestThumbRequestID == requestID else { return }
 
@@ -610,20 +744,134 @@ public final class AlbumModel: ObservableObject {
     }
 
     private func applyOracleResult(feedback: AlbumThumbFeedback, snapshot: AlbumOracleSnapshot, result: AlbumRecResponse) {
-        recommendAnchorID = snapshot.thumbedAssetID
+        let anchorID = snapshot.thumbedAssetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        recommendAnchorID = anchorID
 
-        let neighborIDs: [String] = result.neighbors.prefix(20).compactMap { neighbor in
-            let id = neighbor.id.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !id.isEmpty else { return nil }
-            return id
-        }
+        let pruned = pruneRecommendsResponse(anchorID: anchorID, raw: result)
+        recommendsCacheByAnchorID[anchorID] = pruned
+        recommendsFeedbackByAnchorID[anchorID] = feedback
 
-        recommendItems = neighborIDs.compactMap { item(for: $0) }
-            .filter { $0.id != snapshot.thumbedAssetID && !hiddenIDs.contains($0.id) }
-
+        recommendItems = pruned.neighbors.compactMap { item(for: $0.id) }
+            .filter { $0.id != anchorID && !hiddenIDs.contains($0.id) }
         neighborsReady = !recommendItems.isEmpty
 
-        tuningDeltaRequest = AlbumTuningDeltaRequest(deltas: computeTuningDeltas(feedback: feedback, anchorID: snapshot.thumbedAssetID, neighbors: result.neighbors))
+        switch feedback {
+        case .up:
+            let nextUpID = chooseNextUpAssetID(snapshot: snapshot, pruned: pruned)
+            recommendedAssetID = nextUpID
+            if let nextUpID {
+                aiNextAssetIDs = [nextUpID]
+                pushRecommendedAsset(nextUpID)
+            } else {
+                aiNextAssetIDs.removeAll()
+            }
+        case .down:
+            recommendedAssetID = nil
+            aiNextAssetIDs.removeAll()
+        }
+
+        tuningDeltaRequest = AlbumTuningDeltaRequest(deltas: computeTuningDeltas(feedback: feedback, anchorID: anchorID, neighbors: pruned.neighbors))
+    }
+
+    private func pruneRecommendsResponse(anchorID: String, raw: AlbumRecResponse) -> AlbumRecResponse {
+        let trimmedAnchor = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let prunedNextID: String? = {
+            guard let rawNext = raw.nextID?.trimmingCharacters(in: .whitespacesAndNewlines), !rawNext.isEmpty else { return nil }
+            guard rawNext != trimmedAnchor else { return nil }
+            guard !hiddenIDs.contains(rawNext) else { return nil }
+            guard item(for: rawNext) != nil else { return nil }
+            return rawNext
+        }()
+
+        var seen = Set<String>()
+        seen.insert(trimmedAnchor)
+
+        var neighbors: [AlbumRecNeighbor] = []
+        neighbors.reserveCapacity(20)
+
+        for n in raw.neighbors {
+            if neighbors.count >= 20 { break }
+            let id = n.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else { continue }
+            guard !seen.contains(id) else { continue }
+            guard id != trimmedAnchor else { continue }
+            guard !hiddenIDs.contains(id) else { continue }
+            guard item(for: id) != nil else { continue }
+            seen.insert(id)
+            neighbors.append(n)
+        }
+
+        return AlbumRecResponse(nextID: prunedNextID, neighbors: neighbors)
+    }
+
+    private func chooseNextUpAssetID(snapshot: AlbumOracleSnapshot, pruned: AlbumRecResponse) -> String? {
+        let anchorID = snapshot.thumbedAssetID.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let orderedCandidates = [pruned.nextID].compactMap { $0 } + pruned.neighbors.map(\.id)
+
+        for id in orderedCandidates {
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard trimmed != anchorID else { continue }
+            guard !hiddenIDs.contains(trimmed) else { continue }
+            guard item(for: trimmed) != nil else { continue }
+            guard !snapshot.alreadySeenKeys.contains(trimmed) else { continue }
+            return trimmed
+        }
+
+        for id in orderedCandidates {
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard trimmed != anchorID else { continue }
+            guard !hiddenIDs.contains(trimmed) else { continue }
+            guard item(for: trimmed) != nil else { continue }
+            return trimmed
+        }
+
+        return nil
+    }
+
+    private func restoreCachedRecommendsIfAvailable(for assetID: String) {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        guard let cached = recommendsCacheByAnchorID[id] else { return }
+
+        recommendAnchorID = id
+
+        recommendItems = cached.neighbors.compactMap { item(for: $0.id) }
+            .filter { $0.id != id && !hiddenIDs.contains($0.id) }
+        neighborsReady = !recommendItems.isEmpty
+
+        guard recommendsFeedbackByAnchorID[id] == .up else {
+            recommendedAssetID = nil
+            aiNextAssetIDs.removeAll()
+            return
+        }
+
+        let nextUp: String? = {
+            if let next = cached.nextID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !next.isEmpty,
+               next != id,
+               !hiddenIDs.contains(next),
+               item(for: next) != nil {
+                return next
+            }
+            if let firstNeighbor = cached.neighbors.first?.id,
+               !hiddenIDs.contains(firstNeighbor),
+               firstNeighbor != id,
+               item(for: firstNeighbor) != nil {
+                return firstNeighbor
+            }
+            return nil
+        }()
+
+        recommendedAssetID = nextUp
+        if let nextUp {
+            aiNextAssetIDs = [nextUp]
+        } else {
+            aiNextAssetIDs.removeAll()
+        }
     }
 
     private func computeTuningDeltas(feedback: AlbumThumbFeedback, anchorID: String, neighbors: [AlbumRecNeighbor]) -> [AlbumItemTuningDelta] {

@@ -112,11 +112,47 @@ public struct AlbumMediaPane: View {
             .foregroundStyle(.secondary)
 
             thumbStatus
+
+            nextUpRow(currentAssetID: asset.localIdentifier)
         }
         .padding(12)
         .frame(maxWidth: 420, alignment: .leading)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func nextUpRow(currentAssetID: String) -> some View {
+        if let nextID = model.recommendedAssetID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !nextID.isEmpty,
+           nextID != currentAssetID,
+           model.asset(for: nextID) != nil {
+            Button {
+                model.currentAssetID = nextID
+            } label: {
+                HStack(spacing: 10) {
+                    Text("Next Up")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(model.semanticHandle(for: nextID))
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     @ViewBuilder

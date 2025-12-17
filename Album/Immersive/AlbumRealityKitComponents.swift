@@ -21,3 +21,10 @@ public struct AlbumDataNodeTuningComponent: Component, Codable {
     }
 }
 
+public struct AlbumAssetIDComponent: Component, Codable {
+    public var assetID: String
+
+    public init(assetID: String) {
+        self.assetID = assetID
+    }
+}

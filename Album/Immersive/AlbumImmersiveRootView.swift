@@ -11,10 +11,10 @@ private enum AlbumSlot: CaseIterable {
 
     var basePosition: SIMD3<Float> {
         switch self {
-        case .recent:    return SIMD3<Float>( 0.0,  0.20, 0)
+        case .recent:    return SIMD3<Float>(0.0, 0.20, 0)
         case .favorites: return SIMD3<Float>(-0.35, 0.00, 0)
-        case .videos:    return SIMD3<Float>( 0.35, 0.00, 0)
-        case .random:    return SIMD3<Float>( 0.0, -0.20, 0)
+        case .videos:    return SIMD3<Float>(0.35, 0.00, 0)
+        case .random:    return SIMD3<Float>(0.0, -0.20, 0)
         }
     }
 
@@ -26,17 +26,115 @@ private enum AlbumSlot: CaseIterable {
     }
 }
 
+private enum AlbumCurvedWallAttachmentID {
+    static func tile(_ assetID: String) -> String { "album-curved-wall-tile|\(assetID)" }
+
+    static let close = "album-curved-wall-close"
+    static let prev = "album-curved-wall-prev"
+    static let next = "album-curved-wall-next"
+}
+
 public struct AlbumImmersiveRootView: View {
     @EnvironmentObject private var sim: AlbumModel
+    @State private var scene = AlbumImmersiveSceneState()
 
-    @State private var anchor: AnchorEntity?
-    @State private var pmns = [ModelEntity]()
-    @State private var balls = [ModelEntity]()
-    @State private var assetIDByEntity: [ObjectIdentifier: String] = [:]
+    private let anchorOffset = SIMD3<Float>(0, 1.524, -3.0)
 
-    @State private var lastTs: Date = .init()
-    @State private var accum: Float = 0
-    @State private var nextPMN: Int = 0
+    public init() {}
+
+    public var body: some View {
+        RealityView { content, attachments in
+            scene.ensureBuilt(in: content, model: sim, anchorOffset: anchorOffset)
+            scene.syncCurvedWall(in: content, using: attachments, model: sim, visibleAssetIDs: curvedWallVisibleAssetIDs)
+        } update: { content, attachments in
+            scene.syncCurvedWall(in: content, using: attachments, model: sim, visibleAssetIDs: curvedWallVisibleAssetIDs)
+        } attachments: {
+            if sim.curvedCanvasEnabled {
+                ForEach(curvedWallVisibleAssetIDs, id: \.self) { assetID in
+                    Attachment(id: AlbumCurvedWallAttachmentID.tile(assetID)) {
+                        AlbumCurvedWallTileAttachmentView(assetID: assetID)
+                            .environmentObject(sim)
+                    }
+                }
+
+                Attachment(id: AlbumCurvedWallAttachmentID.prev) {
+                    AlbumCurvedWallNavCardAttachmentView(direction: .prev, enabled: sim.curvedWallCanPageBack)
+                }
+
+                Attachment(id: AlbumCurvedWallAttachmentID.next) {
+                    AlbumCurvedWallNavCardAttachmentView(direction: .next, enabled: sim.curvedWallCanPageForward)
+                }
+
+                Attachment(id: AlbumCurvedWallAttachmentID.close) {
+                    AlbumCurvedWallCloseAttachmentView()
+                }
+            }
+        }
+        .simultaneousGesture(
+            TapGesture()
+                .targetedToAnyEntity()
+                .onEnded { value in scene.handleTap(on: value.entity, model: sim) }
+        )
+        .onChange(of: sim.absorbNowRequestID) {
+            Task { @MainActor in
+                guard !sim.isPaused else {
+                    AlbumLog.immersive.info("AbsorbNow ignored (paused)")
+                    return
+                }
+                AlbumLog.immersive.info("AbsorbNow requested")
+                scene.absorbNow(model: sim)
+            }
+        }
+        .onChange(of: sim.tuningDeltaRequest) {
+            guard let req = sim.tuningDeltaRequest else { return }
+            Task { @MainActor in
+                AlbumLog.immersive.info("Applying tuning deltas: \(req.deltas.count)")
+                scene.applyTuningDeltas(req.deltas)
+            }
+        }
+        .onChange(of: sim.assets) {
+            Task { @MainActor in
+                AlbumLog.immersive.info("Assets changed; respawning entities. assets=\(self.sim.assets.count)")
+                scene.respawnFromCurrentAssets(model: sim)
+            }
+        }
+        .onChange(of: sim.isPaused) { _, newValue in
+            AlbumLog.immersive.info("Pause state changed: \(newValue ? "paused" : "playing", privacy: .public)")
+        }
+        .onChange(of: sim.curvedCanvasEnabled) { _, newValue in
+            AlbumLog.immersive.info("Curved wall toggled: \(newValue ? "enabled" : "disabled", privacy: .public) mode=\(self.sim.panelMode.rawValue, privacy: .public) items=\(self.curvedWallVisibleAssetIDs.count)")
+        }
+        .onDisappear {
+            scene.stop()
+        }
+    }
+
+    private var curvedWallVisibleAssetIDs: [String] {
+        let raw = sim.curvedWallVisibleAssetIDs
+        guard !raw.isEmpty else { return [] }
+        return raw.compactMap { id in
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            guard !sim.hiddenIDs.contains(trimmed) else { return nil }
+            guard sim.item(for: trimmed) != nil else { return nil }
+            return trimmed
+        }
+    }
+}
+
+@MainActor
+private final class AlbumImmersiveSceneState {
+    private var anchor: AnchorEntity?
+    private var headAnchor: AnchorEntity?
+    private var curvedWallAnchor: AnchorEntity?
+    private var pmns: [ModelEntity] = []
+    private var balls: [ModelEntity] = []
+    private var frameTask: Task<Void, Never>?
+    private var lastCurvedWallLogSignature: String?
+
+    private var lastTs: Date = Date()
+    private var accum: Float = 0
+    private var nextPMN: Int = 0
 
     private let G: Float = 1
     private let soft: Float = 0.05
@@ -68,45 +166,35 @@ public struct AlbumImmersiveRootView: View {
     private let baseDnRadius: Float = 0.02
     private let maxDnScaleMultiplier: Float = 2.5
 
-    private let anchorOffset = SIMD3<Float>(0, 0, -3.0)
-
-    public init() {}
-
-    public var body: some View {
-        RealityView { content in
-            if anchor == nil { buildScene(in: content) }
-        }
-        .gesture(
-            TapGesture()
-                .targetedToAnyEntity()
-                .onEnded { value in handleTap(on: value.entity) }
-        )
-        .onChange(of: sim.absorbNowRequestID) {
-            Task { @MainActor in
-                AlbumLog.immersive.info("AbsorbNow requested")
-                accum = 0
-                absorbOne()
-            }
-        }
-        .onChange(of: sim.tuningDeltaRequest) {
-            guard let req = sim.tuningDeltaRequest else { return }
-            Task { @MainActor in
-                AlbumLog.immersive.info("Applying tuning deltas: \(req.deltas.count)")
-                applyTuningDeltas(req.deltas)
-            }
-        }
-        .onChange(of: sim.assets) {
-            Task { @MainActor in
-                AlbumLog.immersive.info("Assets changed; respawning entities. assets=\(self.sim.assets.count)")
-                respawnFromCurrentAssets()
-            }
-        }
+    deinit {
+        frameTask?.cancel()
     }
 
-    // MARK: Scene setup
+    func stop() {
+        frameTask?.cancel()
+        frameTask = nil
+    }
 
-    @MainActor
-    private func buildScene(in content: RealityViewContent) {
+    func ensureBuilt(in content: RealityViewContent, model: AlbumModel, anchorOffset: SIMD3<Float>) {
+        if let head = headAnchor {
+            if head.parent == nil {
+                content.add(head)
+            }
+        } else {
+            let head = AnchorEntity(.head)
+            head.name = "album-head-anchor"
+            headAnchor = head
+            content.add(head)
+        }
+
+        if let anchor {
+            if anchor.parent == nil {
+                content.add(anchor)
+            }
+            startFrameLoopIfNeeded(model: model)
+            return
+        }
+
         AlbumLog.immersive.info("Building immersive scene")
         let world = AnchorEntity(world: anchorOffset)
         anchor = world
@@ -114,30 +202,19 @@ public struct AlbumImmersiveRootView: View {
 
         pmns = makePMNs(parent: world)
         lastTs = Date()
-
-        Task { @MainActor in
-            respawnFromCurrentAssets()
-        }
-
-        Task.detached { [weak world] in
-            while world != nil {
-                await MainActor.run { frameStep() }
-                try? await Task.sleep(nanoseconds: 16_666_667)
-            }
-        }
+        respawnFromCurrentAssets(model: model)
+        startFrameLoopIfNeeded(model: model)
     }
 
-    @MainActor
-    private func respawnFromCurrentAssets() {
+    func respawnFromCurrentAssets(model: AlbumModel) {
         guard let root = anchor else { return }
 
         for ball in balls {
             ball.removeFromParent()
         }
         balls.removeAll(keepingCapacity: true)
-        assetIDByEntity.removeAll(keepingCapacity: true)
 
-        let assets = sim.assets
+        let assets = model.assets
         AlbumLog.immersive.info("Respawn requested. assets=\(assets.count)")
         guard !assets.isEmpty else { return }
 
@@ -158,84 +235,401 @@ public struct AlbumImmersiveRootView: View {
             let normalized = Float(max(0, min(1, t)))
             spawn(asset, basePosition: slot.basePosition, recency: normalized, root: root)
         }
+
         AlbumLog.immersive.info("Respawn complete. entities=\(self.balls.count)")
     }
 
-    @MainActor
-    private func spawn(_ asset: AlbumAsset, basePosition: SIMD3<Float>, recency: Float, root: Entity) {
-        let isVideo = asset.mediaType == .video
-        let mats: [RealityKit.Material] = isVideo ? [videoGlowMat] : [steelMat]
+    func handleTap(on entity: Entity, model: AlbumModel) {
+        var cursor: Entity? = entity
+        while let current = cursor {
+            if current.name == AlbumCurvedWallAttachmentID.close {
+                AlbumLog.immersive.info("Tap close curved wall")
+                model.curvedCanvasEnabled = false
+                return
+            }
+            if current.name == AlbumCurvedWallAttachmentID.prev {
+                AlbumLog.immersive.info("Tap curved wall prev")
+                model.curvedWallPageBack()
+                return
+            }
+            if current.name == AlbumCurvedWallAttachmentID.next {
+                AlbumLog.immersive.info("Tap curved wall next")
+                model.curvedWallPageForward()
+                return
+            }
 
-        let ball = ModelEntity(mesh: .generateSphere(radius: baseDnRadius), materials: mats)
-        let jitter = SIMD3<Float>(
-            .random(in: -0.15...0.15),
-            .random(in: -0.15...0.15),
-            .random(in: -0.15...0.15)
-        )
+            if let assetID = current.components[AlbumAssetIDComponent.self]?.assetID,
+               !assetID.isEmpty {
+                AlbumLog.immersive.info("Tap select assetID=\(assetID, privacy: .public)")
+                model.currentAssetID = assetID
 
-        ball.position = basePosition + jitter
-        ball.components.set(AlbumVelocityComponent(v: SIMD3<Float>(
-            .random(in: -0.3...0.3),
-            .random(in: -0.3...0.3),
-            .random(in: -0.3...0.3)
-        )))
+                if let modelEntity = current as? ModelEntity, balls.contains(where: { $0 == modelEntity }) {
+                    let tint = palette.randomElement() ?? .white
+                    modelEntity.model?.materials = [UnlitMaterial(color: tint)]
 
-        let favoriteBonus: Float = asset.isFavorite ? 0.25 : 0
-        let scaleMultiplier = 1 + (recency + favoriteBonus) * (maxDnScaleMultiplier - 1)
-        ball.scale = SIMD3<Float>(repeating: scaleMultiplier)
+                    if let halo = modelEntity.children.first(where: { $0.name == "halo" }) as? ModelEntity {
+                        halo.model?.materials = [makeHaloMaterial(tint)]
+                    } else {
+                        modelEntity.addChild(makeHalo(tint))
+                    }
+                }
 
-        let baseMass: Float = 1.0 + recency * 1.5 + favoriteBonus
-        ball.components.set(AlbumDataNodeTuningComponent(mass: baseMass, accelerationMultiplier: 1.0))
+                return
+            }
 
-        ball.generateCollisionShapes(recursive: false)
-        ball.components.set(InputTargetComponent())
-
-        balls.append(ball)
-        root.addChild(ball)
-        assetIDByEntity[ObjectIdentifier(ball)] = asset.localIdentifier
-
-        if isVideo { ball.addChild(makeHalo(videoHaloTint)) }
+            cursor = current.parent
+        }
     }
 
-    // MARK: Tap handling
+    func absorbNow(model: AlbumModel) {
+        accum = 0
+        absorbOne(model: model)
+    }
 
-    @MainActor
-    private func handleTap(on entity: Entity) {
-        if let assetID = assetIDByEntity[ObjectIdentifier(entity)] {
-            AlbumLog.immersive.info("Tap select assetID=\(assetID, privacy: .public)")
-            sim.currentAssetID = assetID
+    func applyTuningDeltas(_ deltas: [AlbumItemTuningDelta]) {
+        guard !deltas.isEmpty else { return }
+
+        var assetIDToBall: [String: ModelEntity] = [:]
+        assetIDToBall.reserveCapacity(balls.count)
+
+        for ball in balls {
+            if let assetID = ball.components[AlbumAssetIDComponent.self]?.assetID {
+                assetIDToBall[assetID] = ball
+            }
         }
 
-        guard let model = entity as? ModelEntity, balls.contains(model) else { return }
+        let minMass: Float = 0.05
+        let maxMass: Float = 80.0
+        let minAccelMul: Float = 0.05
+        let maxAccelMul: Float = 120.0
 
-        let tint = palette.randomElement() ?? .white
-        model.model?.materials = [UnlitMaterial(color: tint)]
+        for delta in deltas {
+            guard let ball = assetIDToBall[delta.itemID] else { continue }
+            var tuning = ball.components[AlbumDataNodeTuningComponent.self] ?? .init()
+            tuning.mass = min(maxMass, max(minMass, tuning.mass * delta.massMultiplier))
+            tuning.accelerationMultiplier = min(maxAccelMul, max(minAccelMul, tuning.accelerationMultiplier * delta.accelerationMultiplier))
+            ball.components.set(tuning)
+        }
+    }
 
-        if let halo = model.children.first(where: { $0.name == "halo" }) as? ModelEntity {
-            halo.model?.materials = [makeHaloMaterial(tint)]
+    // MARK: Curved wall placement
+
+    private struct CurvedWallArcLayout: Sendable {
+        var radius: Float
+        var step: Float
+        var angles: [Float]
+    }
+
+    private func curvedWallArcLayout(count: Int, desiredChord: Float) -> CurvedWallArcLayout {
+        let panelDepthOffset: Float = 0.03
+        let targetPanelDistance: Float = 0.25
+        let arcSpacingRadians: Float = .pi / 18
+        let maxFanRadians: Float = .pi * (160.0 / 180.0)
+        let canonicalTotalSlots: Int = 12
+        let minRadiusMeters: Float = 0.90
+        let maxArcRadius: Float = 2.1
+
+        guard count > 0 else {
+            return CurvedWallArcLayout(radius: max(minRadiusMeters, targetPanelDistance + panelDepthOffset), step: 0, angles: [])
+        }
+
+        let safeChord = max(0.001, desiredChord)
+        let canonicalStep = maxFanRadians / Float(max(1, canonicalTotalSlots - 1))
+        let baseRadius = min(
+            maxArcRadius,
+            max(minRadiusMeters, safeChord / max(0.001, 2 * sinf(canonicalStep / 2)))
+        )
+
+        var radius = max(minRadiusMeters, targetPanelDistance + 0.08)
+        var slotStep: Float = 0
+        var angles: [Float] = []
+
+        func centeredAngles(step: Float) -> [Float] {
+            let centeredOffset = Float(count - 1) / 2
+            return (0..<count).map { (Float($0) - centeredOffset) * step }
+        }
+
+        if count <= canonicalTotalSlots {
+            radius = max(radius, baseRadius)
+            slotStep = canonicalStep
+            angles = centeredAngles(step: canonicalStep)
+        } else if count > 1 {
+            let allowedStep = maxFanRadians / Float(count - 1)
+            let stepAtRadius = 2 * asinf(min(0.999, safeChord / (2 * radius)))
+            var step = max(arcSpacingRadians, stepAtRadius)
+
+            if step > allowedStep {
+                let requiredR = safeChord / (2 * sinf(allowedStep / 2))
+                radius = min(maxArcRadius, max(radius, requiredR))
+                step = allowedStep
+            } else {
+                let requiredR = safeChord / (2 * sinf(step / 2))
+                radius = min(maxArcRadius, max(radius, requiredR))
+            }
+
+            slotStep = step
+            angles = centeredAngles(step: slotStep)
         } else {
-            model.addChild(makeHalo(tint))
+            slotStep = canonicalStep
+            radius = max(radius, targetPanelDistance + 0.20)
+            angles = [0]
+        }
+
+        return CurvedWallArcLayout(radius: radius, step: slotStep, angles: angles)
+    }
+
+    func syncCurvedWall(in content: RealityViewContent, using attachments: RealityViewAttachments, model: AlbumModel, visibleAssetIDs: [String]) {
+        let signature = "enabled=\(model.curvedCanvasEnabled) mode=\(model.panelMode.rawValue) visible=\(visibleAssetIDs.count) first=\(visibleAssetIDs.first ?? "-") last=\(visibleAssetIDs.last ?? "-") dump=\(model.curvedWallDumpIndex)/\(model.curvedWallDumpPages.count) mem=\(model.memoryPageStartIndex)/\(model.memoryWindowItems.count)"
+        if signature != lastCurvedWallLogSignature {
+            lastCurvedWallLogSignature = signature
+            AlbumLog.immersive.info("CurvedWall sync \(signature, privacy: .public)")
+        }
+
+        guard model.curvedCanvasEnabled else {
+            if let wallAnchor = curvedWallAnchor {
+                removeCurvedWallEntities(from: wallAnchor)
+                wallAnchor.removeFromParent()
+                curvedWallAnchor = nil
+            }
+            return
+        }
+
+        let root = ensureCurvedWallAnchor(in: content, model: model)
+
+        let pointsPerMeter: Float = 780
+        let tileWidthPoints: Float = 260
+        let neighborGapMeters: Float = 0.015
+        let panelDepthOffset: Float = 0.03
+        let arcSpacingRadians: Float = .pi / 18
+
+        let tileWidthMeters = tileWidthPoints / pointsPerMeter
+        let desiredChord = tileWidthMeters + neighborGapMeters
+        let layout = curvedWallArcLayout(count: visibleAssetIDs.count, desiredChord: desiredChord)
+
+        let validTileAttachmentIDs = Set(visibleAssetIDs.map { AlbumCurvedWallAttachmentID.tile($0) })
+        let yMid: Float = 0.0
+
+        for (index, assetID) in visibleAssetIDs.enumerated() {
+            let attachmentID = AlbumCurvedWallAttachmentID.tile(assetID)
+            guard let panel = attachments.entity(for: attachmentID) else { continue }
+
+            let angle = index < layout.angles.count ? layout.angles[index] : (Float(index) * layout.step)
+            let sine = sinf(angle)
+            let cosine = cosf(angle)
+            let horizontalOffset = sine * layout.radius
+            let depthOffset = -cosine * layout.radius - panelDepthOffset
+
+            let forward = normalize(SIMD3<Float>(-horizontalOffset, 0, -depthOffset))
+            let right = normalize(cross(SIMD3<Float>(0, 1, 0), forward))
+            let up = cross(forward, right)
+
+            var transform = panel.transform
+            transform.translation = [horizontalOffset, yMid, depthOffset]
+            transform.rotation = simd_quatf(float3x3(columns: (right, up, forward)))
+            transform.scale = SIMD3<Float>(repeating: 1 / pointsPerMeter)
+            panel.transform = transform
+            panel.name = attachmentID
+            panel.components.set(AlbumAssetIDComponent(assetID: assetID))
+
+            if panel.components[InputTargetComponent.self] == nil {
+                panel.components.set(InputTargetComponent())
+            }
+            if panel.components[CollisionComponent.self] == nil {
+                panel.generateCollisionShapes(recursive: true)
+            }
+
+            if panel.parent != root {
+                root.addChild(panel)
+            }
+        }
+
+        for child in root.children {
+            guard child.name.hasPrefix("album-curved-wall-tile|") else { continue }
+            guard !validTileAttachmentIDs.contains(child.name) else { continue }
+            child.removeFromParent()
+        }
+
+        if visibleAssetIDs.isEmpty {
+            removeTileChildren(from: root)
+        }
+
+        let stepForNav = max(layout.step, arcSpacingRadians) * 1.05
+        let firstAngle = layout.angles.first ?? 0
+        let lastAngle = layout.angles.last ?? 0
+
+        let prevAngle = firstAngle - stepForNav
+        let nextAngle = lastAngle + stepForNav
+        let closeAngle = nextAngle + stepForNav
+
+        positionCurvedWallNavCard(
+            attachmentID: AlbumCurvedWallAttachmentID.prev,
+            name: AlbumCurvedWallAttachmentID.prev,
+            angle: prevAngle,
+            y: -0.32,
+            radius: layout.radius,
+            panelDepthOffset: panelDepthOffset,
+            pointsPerMeter: pointsPerMeter,
+            attachments: attachments,
+            root: root
+        )
+
+        positionCurvedWallNavCard(
+            attachmentID: AlbumCurvedWallAttachmentID.next,
+            name: AlbumCurvedWallAttachmentID.next,
+            angle: nextAngle,
+            y: -0.32,
+            radius: layout.radius,
+            panelDepthOffset: panelDepthOffset,
+            pointsPerMeter: pointsPerMeter,
+            attachments: attachments,
+            root: root
+        )
+
+        positionCurvedWallNavCard(
+            attachmentID: AlbumCurvedWallAttachmentID.close,
+            name: AlbumCurvedWallAttachmentID.close,
+            angle: closeAngle,
+            y: -0.32,
+            radius: layout.radius,
+            panelDepthOffset: panelDepthOffset,
+            pointsPerMeter: pointsPerMeter,
+            attachments: attachments,
+            root: root
+        )
+    }
+
+    private func ensureCurvedWallAnchor(in content: RealityViewContent, model: AlbumModel) -> AnchorEntity {
+        if let existing = curvedWallAnchor {
+            if existing.parent == nil {
+                content.add(existing)
+            }
+            return existing
+        }
+
+        let headMatrix: simd_float4x4 = headAnchor?.transformMatrix(relativeTo: nil) ?? matrix_identity_float4x4
+        let head = Transform(matrix: headMatrix)
+        let fcol = head.matrix.columns.2
+        let forward = normalize(-SIMD3<Float>(fcol.x, fcol.y, fcol.z))
+        let left = normalize(cross(SIMD3<Float>(0, 1, 0), forward))
+
+        let headForwardOffset: Float = 0.09
+        let lanes: [Float] = [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]
+        let spawnIndex: Int = {
+            switch model.panelMode {
+            case .recommends:
+                return max(0, model.curvedWallDumpIndex)
+            case .memories:
+                let step = max(1, model.memoryGroupSize - model.memoryOverlap)
+                return max(0, model.memoryPageStartIndex / step)
+            }
+        }()
+        let side = lanes[spawnIndex % lanes.count]
+        let depthNudge: Float = 0.05 * Float((spawnIndex / lanes.count) % 3)
+
+        var pos = head.translation + forward * (headForwardOffset + depthNudge) + left * side
+        if !pos.y.isFinite || abs(pos.y) <= 0.001 { pos.y = 1.35 } else { pos.y -= 0.05 }
+
+        var seeded = head
+        seeded.translation = pos
+
+        let anchor = AnchorEntity(world: seeded.matrix)
+        anchor.orientation = seeded.rotation
+        anchor.name = "album-curved-wall-anchor"
+
+        curvedWallAnchor = anchor
+        content.add(anchor)
+
+        AlbumLog.immersive.info("CurvedWall anchor seeded spawnIndex=\(spawnIndex) pos=(\(pos.x), \(pos.y), \(pos.z))")
+        return anchor
+    }
+
+    private func positionCurvedWallNavCard(
+        attachmentID: String,
+        name: String,
+        angle: Float,
+        y: Float,
+        radius: Float,
+        panelDepthOffset: Float,
+        pointsPerMeter: Float,
+        attachments: RealityViewAttachments,
+        root: Entity
+    ) {
+        guard let card = attachments.entity(for: attachmentID) else { return }
+
+        let sine = sinf(angle)
+        let cosine = cosf(angle)
+        let x = sine * radius
+        let z = -cosine * radius - panelDepthOffset
+
+        let forward = normalize(SIMD3<Float>(-x, 0, -z))
+        let right = normalize(cross(SIMD3<Float>(0, 1, 0), forward))
+        let up = cross(forward, right)
+
+        var transform = card.transform
+        transform.translation = [x, y, z]
+        transform.rotation = simd_quatf(float3x3(columns: (right, up, forward)))
+        transform.scale = SIMD3<Float>(repeating: 1 / pointsPerMeter)
+        card.transform = transform
+        card.name = name
+
+        if card.components[InputTargetComponent.self] == nil {
+            card.components.set(InputTargetComponent())
+        }
+        if card.components[CollisionComponent.self] == nil {
+            card.generateCollisionShapes(recursive: true)
+        }
+
+        if card.parent != root {
+            root.addChild(card)
+        }
+    }
+
+    private func removeCurvedWallEntities(from root: Entity) {
+        removeTileChildren(from: root)
+        for child in root.children {
+            if child.name == AlbumCurvedWallAttachmentID.close ||
+                child.name == AlbumCurvedWallAttachmentID.prev ||
+                child.name == AlbumCurvedWallAttachmentID.next {
+                child.removeFromParent()
+            }
+        }
+    }
+
+    private func removeTileChildren(from root: Entity) {
+        for child in root.children {
+            if child.name.hasPrefix("album-curved-wall-tile|") {
+                child.removeFromParent()
+            }
         }
     }
 
     // MARK: Frame loop
 
-    @MainActor
-    private func frameStep() {
+    private func startFrameLoopIfNeeded(model: AlbumModel) {
+        guard frameTask == nil else { return }
+
+        frameTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                self.frameStep(model: model)
+                try? await Task.sleep(nanoseconds: 16_666_667)
+            }
+        }
+    }
+
+    private func frameStep(model: AlbumModel) {
         guard let root = anchor else { return }
         var dt = Float(Date().timeIntervalSince(lastTs))
         if dt <= 0 { dt = 1 / 60 }
         dt = min(dt, 1 / 30)
         lastTs = Date()
+        guard !model.isPaused else { return }
+
         accum += dt
+        physicsStep(dt: dt, root: root)
 
-        if !sim.isPaused {
-            physicsStep(dt: dt, root: root)
-        }
-
-        if accum >= Float(sim.absorbInterval) {
+        if accum >= Float(model.absorbInterval) {
             accum = 0
-            absorbOne()
+            absorbOne(model: model)
         }
     }
 
@@ -297,18 +691,17 @@ public struct AlbumImmersiveRootView: View {
 
     // MARK: Absorb
 
-    @MainActor
-    private func absorbOne() {
+    private func absorbOne(model: AlbumModel) {
         guard let root = anchor, !balls.isEmpty else { return }
         let pmn = pmns[nextPMN % pmns.count]
         nextPMN += 1
 
         let centre = pmn.position(relativeTo: root)
-        let alreadySeen = Set(sim.historyAssetIDs)
+        let alreadySeen = Set(model.historyAssetIDs)
         let proximityWindowSize = 5
 
         struct Candidate {
-            let id: ObjectIdentifier
+            let ball: ModelEntity
             let dist: Float
             let speed: Float
         }
@@ -317,10 +710,9 @@ public struct AlbumImmersiveRootView: View {
         candidates.reserveCapacity(balls.count)
 
         for ball in balls {
-            let id = ObjectIdentifier(ball)
             let dist = distance(ball.position(relativeTo: root), centre)
             let v = ball.components[AlbumVelocityComponent.self]?.v ?? .zero
-            candidates.append(.init(id: id, dist: dist, speed: length(v)))
+            candidates.append(.init(ball: ball, dist: dist, speed: length(v)))
         }
 
         candidates.sort(by: { $0.dist < $1.dist })
@@ -330,48 +722,19 @@ public struct AlbumImmersiveRootView: View {
             let window = candidates[0..<windowEnd]
 
             guard let chosen = window.min(by: { $0.speed < $1.speed }) else { return }
-            guard let chosenIndex = candidates.firstIndex(where: { $0.id == chosen.id }) else { return }
+            guard let chosenIndex = candidates.firstIndex(where: { $0.ball == chosen.ball }) else { return }
             candidates.remove(at: chosenIndex)
 
-            guard let idx = balls.firstIndex(where: { ObjectIdentifier($0) == chosen.id }) else { continue }
+            guard let idx = balls.firstIndex(where: { $0 == chosen.ball }) else { continue }
             let victim = balls[idx]
             victim.removeFromParent()
             balls.remove(at: idx)
 
-            guard let assetID = assetIDByEntity.removeValue(forKey: chosen.id) else { continue }
+            guard let assetID = victim.components[AlbumAssetIDComponent.self]?.assetID else { continue }
             if alreadySeen.contains(assetID) { continue }
 
-            sim.currentAssetID = assetID
+            model.currentAssetID = assetID
             break
-        }
-    }
-
-    // MARK: Tuning deltas
-
-    @MainActor
-    private func applyTuningDeltas(_ deltas: [AlbumItemTuningDelta]) {
-        guard !deltas.isEmpty else { return }
-
-        var assetIDToBall: [String: ModelEntity] = [:]
-        assetIDToBall.reserveCapacity(balls.count)
-
-        for ball in balls {
-            if let assetID = assetIDByEntity[ObjectIdentifier(ball)] {
-                assetIDToBall[assetID] = ball
-            }
-        }
-
-        let minMass: Float = 0.05
-        let maxMass: Float = 80.0
-        let minAccelMul: Float = 0.05
-        let maxAccelMul: Float = 120.0
-
-        for delta in deltas {
-            guard let ball = assetIDToBall[delta.itemID] else { continue }
-            var tuning = ball.components[AlbumDataNodeTuningComponent.self] ?? .init()
-            tuning.mass = min(maxMass, max(minMass, tuning.mass * delta.massMultiplier))
-            tuning.accelerationMultiplier = min(maxAccelMul, max(minAccelMul, tuning.accelerationMultiplier * delta.accelerationMultiplier))
-            ball.components.set(tuning)
         }
     }
 
@@ -394,6 +757,41 @@ public struct AlbumImmersiveRootView: View {
             parent.addChild(e)
             return e
         }
+    }
+
+    private func spawn(_ asset: AlbumAsset, basePosition: SIMD3<Float>, recency: Float, root: Entity) {
+        let isVideo = asset.mediaType == .video
+        let mats: [RealityKit.Material] = isVideo ? [videoGlowMat] : [steelMat]
+
+        let ball = ModelEntity(mesh: .generateSphere(radius: baseDnRadius), materials: mats)
+        let jitter = SIMD3<Float>(
+            .random(in: -0.15...0.15),
+            .random(in: -0.15...0.15),
+            .random(in: -0.15...0.15)
+        )
+
+        ball.position = basePosition + jitter
+        ball.components.set(AlbumVelocityComponent(v: SIMD3<Float>(
+            .random(in: -0.3...0.3),
+            .random(in: -0.3...0.3),
+            .random(in: -0.3...0.3)
+        )))
+
+        let favoriteBonus: Float = asset.isFavorite ? 0.25 : 0
+        let scaleMultiplier = 1 + (recency + favoriteBonus) * (maxDnScaleMultiplier - 1)
+        ball.scale = SIMD3<Float>(repeating: scaleMultiplier)
+
+        let baseMass: Float = 1.0 + recency * 1.5 + favoriteBonus
+        ball.components.set(AlbumDataNodeTuningComponent(mass: baseMass, accelerationMultiplier: 1.0))
+        ball.components.set(AlbumAssetIDComponent(assetID: asset.id))
+
+        ball.generateCollisionShapes(recursive: false)
+        ball.components.set(InputTargetComponent())
+
+        balls.append(ball)
+        root.addChild(ball)
+
+        if isVideo { ball.addChild(makeHalo(videoHaloTint)) }
     }
 
     private func makeHaloMaterial(_ tint: UIColor) -> UnlitMaterial {

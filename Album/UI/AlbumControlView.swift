@@ -53,10 +53,6 @@ public struct AlbumControlView: View {
             AlbumQueryPickerSheet(limit: $assetLimit)
                 .environmentObject(model)
         }
-        .sheet(isPresented: $model.isLayoutPresented) {
-            AlbumLayoutSheet()
-                .environmentObject(model)
-        }
     }
 
     private var header: some View {
@@ -315,7 +311,10 @@ public struct AlbumControlView: View {
     private var bottomRightButtons: some View {
         HStack(spacing: 12) {
             Button {
-                model.isLayoutPresented = true
+                let current = self.model.currentAssetID ?? "nil"
+                let anchor = self.model.recommendAnchorID ?? "nil"
+                AlbumLog.ui.info("Layout pressed; mode=\(self.model.panelMode.rawValue, privacy: .public) current=\(current, privacy: .public) anchor=\(anchor, privacy: .public) neighbors=\(self.model.recommendItems.count)")
+                model.dumpFocusedNeighborsToCurvedWall()
             } label: {
                 Label("Layout", systemImage: "square.grid.2x2")
                     .labelStyle(.titleAndIcon)
@@ -344,7 +343,8 @@ public struct AlbumControlView: View {
     private var layoutEnabled: Bool {
         switch model.panelMode {
         case .recommends:
-            return !model.recommendItems.isEmpty
+            guard let current = model.currentAssetID else { return false }
+            return model.recommendAnchorID == current && !model.recommendItems.isEmpty
         case .memories:
             return model.currentAssetID != nil
         }

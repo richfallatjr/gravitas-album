@@ -1,0 +1,557 @@
+Gravitas Reader — UI Styling + Curved Layout + Scroll + Pagination Blueprint
+==========================================================================
+
+Goal
+----
+This document is a “drop-in context” file for another AI (or future-you) that needs to recreate
+Gravitas Reader’s look + immersive curved layout behavior:
+
+- A palette-driven styling system (light/dark) used everywhere
+- An immersive curved “wall/arc” layout of paged panels
+- A single large vertical ScrollView layout mode (for books / narrow format)
+- Paged pagination with Prev/Next nav cards
+- IMPORTANT: deterministic immersive-space spawn positions (boards dropped in-world)
+
+If you copy these patterns into another project, keep the numeric constants EXACT unless you are
+intentionally changing the geometry. The placement math is tuned together.
+
+
+1) Styling system (palette-first)
+---------------------------------
+
+We don’t style views ad-hoc. We define a small palette of semantic colors and pass it through
+views (`palette: ReaderThemePalette`), with the app deciding which palette to use.
+
+Source of truth is `ReaderTheme` → `ReaderThemePalette`:
+- `Sources/GravitasReader/ReaderState.swift`
+
+Key idea:
+- Views never ask “am I dark mode?”; they ask for `palette.primaryText`, `palette.cardBackground`, etc.
+
+Code (verbatim excerpt):
+
+```swift
+// Sources/GravitasReader/ReaderState.swift
+
+enum ReaderTheme: String, Codable, CaseIterable {
+    case light
+    case dark
+
+    var palette: ReaderThemePalette {
+        let readAccent = Color(red: 169.0/255.0, green: 220.0/255.0, blue: 118.0/255.0)
+        let historyAccent = Color(red: 171.0/255.0, green: 157.0/255.0, blue: 242.0/255.0)
+        let openAccent = Color(red: 255.0/255.0, green: 97.0/255.0, blue: 136.0/255.0)
+        let toggleAccent = Color(red: 255.0/255.0, green: 216.0/255.0, blue: 102.0/255.0)
+        let copyAccent = Color(red: 120.0/255.0, green: 220.0/255.0, blue: 232.0/255.0)
+
+        switch self {
+        case .light:
+            return ReaderThemePalette(
+                cardBackground: Color(.sRGB, white: 1.0, opacity: 1.0),
+                cardBorder: Color.black.opacity(0.08),
+                primaryText: .black,
+                secondaryText: Color(.sRGB, white: 0.35, opacity: 1.0),
+                captionText: Color(.sRGB, white: 0.42, opacity: 1.0),
+                overlayText: Color(.sRGB, white: 0.45, opacity: 1.0),
+                navBackground: Color(.sRGB, white: 0.98, opacity: 0.97),
+                navBorder: Color.black.opacity(0.08),
+                navIconActive: .black,
+                navIconDisabled: .black.opacity(0.35),
+                panelBackground: Color(.sRGB, white: 0.95, opacity: 1.0),
+                panelPrimaryText: .black,
+                panelSecondaryText: Color(.sRGB, white: 0.35, opacity: 1.0),
+                readButtonColor: readAccent,
+                historyButtonColor: historyAccent,
+                openButtonColor: openAccent,
+                toggleFillColor: toggleAccent,
+                toggleIconColor: .white,
+                copyButtonFill: copyAccent,
+                copyIconColor: .black,
+                buttonLabelOnColor: .white
+            )
+        case .dark:
+            return ReaderThemePalette(
+                cardBackground: Color(.sRGB, white: 0.10, opacity: 0.92),
+                cardBorder: Color.white.opacity(0.16),
+                primaryText: .white,
+                secondaryText: Color.white.opacity(0.72),
+                captionText: Color.white.opacity(0.6),
+                overlayText: Color.white.opacity(0.7),
+                navBackground: Color(.sRGB, white: 0.08, opacity: 0.92),
+                navBorder: Color.white.opacity(0.18),
+                navIconActive: .white,
+                navIconDisabled: Color.white.opacity(0.38),
+                panelBackground: Color(.sRGB, white: 0.12, opacity: 0.94),
+                panelPrimaryText: .white,
+                panelSecondaryText: Color.white.opacity(0.72),
+                readButtonColor: readAccent,
+                historyButtonColor: historyAccent,
+                openButtonColor: openAccent,
+                toggleFillColor: toggleAccent,
+                toggleIconColor: .black,
+                copyButtonFill: copyAccent,
+                copyIconColor: .black,
+                buttonLabelOnColor: .black
+            )
+        }
+    }
+}
+
+struct ReaderThemePalette {
+    let cardBackground: Color
+    let cardBorder: Color
+    let primaryText: Color
+    let secondaryText: Color
+    let captionText: Color
+    let overlayText: Color
+    let navBackground: Color
+    let navBorder: Color
+    let navIconActive: Color
+    let navIconDisabled: Color
+    let panelBackground: Color
+    let panelPrimaryText: Color
+    let panelSecondaryText: Color
+    let readButtonColor: Color
+    let historyButtonColor: Color
+    let openButtonColor: Color
+    let toggleFillColor: Color
+    let toggleIconColor: Color
+    let copyButtonFill: Color
+    let copyIconColor: Color
+    let buttonLabelOnColor: Color
+}
+```
+
+Style rules we follow consistently:
+- Cards: `RoundedRectangle(cornerRadius: 16).fill(palette.cardBackground)` + 1pt border with `palette.cardBorder`.
+- Nav cards: slightly different “glass-ish” background (`palette.navBackground`) + border `palette.navBorder`.
+- Typography: large page title (42 bold), body (24), captions (18), code (20 mono). (These are also baked into paging metrics.)
+
+
+2) App-level immersive scene plumbing (required)
+------------------------------------------------
+
+The curved layout is a 3D placement problem; it MUST be rendered in an `ImmersiveSpace` using
+`RealityView` attachments. If you put these SwiftUI views into a normal `WindowGroup`, you lose:
+- head tracking anchor
+- world anchors for “dropped boards”
+- stable curved layout in meters
+
+App scene setup (excerpt):
+
+```swift
+// Sources/GravitasReader/GravitasReaderApp.swift
+
+ImmersiveSpace(id: "ReadSpace") {
+    ImmersiveReadSpace()
+        .environmentObject(appModel)
+        .environmentObject(podcastPlayer)
+        .environmentObject(subscriptionManager)
+        .environment(\.colorScheme, colorScheme)
+}
+.immersionStyle(selection: .constant(style), in: .mixed)
+.immersiveEnvironmentBehavior(.coexist)
+```
+
+And BEFORE placing content, we ensure the immersive space is open:
+
+```swift
+// Sources/GravitasReader/ControlPanelView.swift
+
+@MainActor
+private func ensureReadSpaceOpen() async {
+    if immersiveOpen || openingInFlight { return }
+    openingInFlight = true
+    _ = await openImmersiveSpace(id: "ReadSpace")
+    immersiveOpen = true
+    openingInFlight = false
+}
+```
+
+This is not optional. If you spawn boards before `openImmersiveSpace`, you will “drop” placements
+but won’t see them, and your head-tracked spawn transform may be wrong/uninitialized.
+
+
+3) IMPORTANT: exact spawn positions for dropped boards (world anchors)
+----------------------------------------------------------------------
+
+Each article placement gets its own RealityKit `AnchorEntity(world:)`.
+If the placement already has a stored transform, we reuse it. Otherwise we create a deterministic
+spawn transform based on the user’s head pose at spawn time.
+
+Keep these constants EXACT to match Gravitas behavior:
+- `headForwardOffset = 0.09` meters (board drops ~9cm forward from head)
+- Lateral “lanes” (meters): `[0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]`
+- Depth nudge per row (meters): `0.05 * ((spawnIndex / lanes.count) % 3)`
+- Default Y (meters): `1.35` (if head Y is not reliable); otherwise `pos.y -= 0.05`
+
+Verbatim code:
+
+```swift
+// Sources/GravitasReader/ImmersiveSpaceView.swift
+
+// Always produce an anchor; add spawn "scatter" so new boards don't overlap
+private func makeAnchor(for placement: ArticlePlacement) -> AnchorEntity {
+    if let stored = placement.anchorTransform {
+        let a = AnchorEntity(world: stored)
+        a.orientation = Transform(matrix: stored).rotation
+        return a
+    }
+
+    // Start from head (or cached), else identity fallback
+    let head = latestHeadTransform ?? captureHeadTransform() ?? Transform()
+    let fcol = head.matrix.columns.2
+    let forward = normalize(-SIMD3<Float>(fcol.x, fcol.y, fcol.z))
+    let left = normalize(cross(SIMD3<Float>(0, 1, 0), forward))
+
+    // Deterministic scatter so new boards are visibly offset even if the head hasn't moved
+    let spawnIndex = model.placements.firstIndex(where: { $0.id == placement.id }) ?? (model.placements.count - 1)
+    let lanes: [Float] = [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]
+    let side = lanes[spawnIndex % lanes.count]
+    let depthNudge: Float = 0.05 * Float((spawnIndex / lanes.count) % 3)
+
+    var pos = head.translation + forward * (headForwardOffset + depthNudge) + left * side
+    if !pos.y.isFinite || abs(pos.y) <= 0.001 { pos.y = 1.35 } else { pos.y -= 0.05 }
+
+    var seeded = head
+    seeded.translation = pos
+
+    let anchor = AnchorEntity(world: seeded.matrix)
+    anchor.orientation = seeded.rotation
+
+    // Persist seeded transform back into the model once
+    let matrix = seeded.matrix
+    let pid = placement.id
+    Task { @MainActor in
+        model.assignTransform(matrix, to: pid)
+    }
+
+    return anchor
+}
+```
+
+HUD spawn (head-anchored) is also exact:
+
+```swift
+let hudAnchor = AnchorEntity(.head)
+hud.position = [0, -0.12, -1.0] // x,y,z in meters relative to head
+hudAnchor.addChild(hud)
+content.add(hudAnchor)
+```
+
+
+4) Curved “wall/arc” paged layout (RealityView attachments)
+-----------------------------------------------------------
+
+High-level:
+- We render SwiftUI page views as `RealityView` attachments.
+- We place each attachment Entity onto a curved arc around the placement anchor.
+- We compute both position and rotation so each panel faces the user.
+
+CRITICAL: Page geometry (meters) must match the page builder’s assumptions:
+- `PageBuilder.pageWidthPoints = 620`
+- `pointsPerMeter = 780`
+- `columnMaxHeight = 2.4` meters
+
+The layout constants below are tuned together (keep them exact to match current behavior):
+
+```
+panelDepthOffset = 0.03
+targetPanelDistance = 0.25
+pageSpacing = 0.03
+arcSpacingRadians = π / 18   (≈10°)
+maxFanDegrees = 160
+canonicalTotalSlots = 12
+minRadiusMeters = 0.90
+maxArcRadius = 2.1
+panelWidthPoints = 620
+pointsPerMeter = 780
+neighborGapMeters = 0.015
+```
+
+Core loop (verbatim excerpt) that creates the curved arc:
+
+```swift
+// Sources/GravitasReader/ImmersiveSpaceView.swift
+
+let pages = model.visiblePages(for: placement)
+let layout = layoutColumns(for: pages)   // splits pages into columns by max height
+let columns = layout.columns
+let heights = layout.heights
+
+let columnCount = columns.count
+let desiredChord = panelWidthMeters + neighborGapMeters
+
+let canonicalStep = maxFanRadians / Float(max(1, canonicalTotalSlots - 1))
+let baseRadius = min(maxArcRadius,
+                     max(minRadiusMeters,
+                         desiredChord / max(0.001, 2 * sinf(canonicalStep / 2))))
+
+var radius = max(minRadiusMeters, targetPanelDistance + 0.08)
+var slotStep: Float = 0
+var angles: [Float] = []
+
+if columnCount <= canonicalPanelSlots {
+    radius = max(radius, baseRadius)
+    slotStep = canonicalStep
+    angles = canonicalPanelAngles(count: columnCount, step: canonicalStep)
+} else if columnCount > 1 {
+    let allowedStep = maxFanRadians / Float(columnCount - 1)
+    let stepAtRadius = 2 * asinf(min(0.999, desiredChord / (2 * radius)))
+    var step = max(arcSpacingRadians, stepAtRadius)
+
+    if step > allowedStep {
+        let requiredR = desiredChord / (2 * sinf(allowedStep / 2))
+        radius = min(maxArcRadius, max(radius, requiredR))
+        step = allowedStep
+    } else {
+        let requiredR = desiredChord / (2 * sinf(step / 2))
+        radius = min(maxArcRadius, max(radius, requiredR))
+    }
+
+    slotStep = step
+    let centeredOffset = Float(columnCount - 1) / 2
+    angles = (0..<columnCount).map { (Float($0) - centeredOffset) * slotStep }
+} else {
+    slotStep = canonicalStep
+    radius = max(radius, targetPanelDistance + 0.20)
+    angles = [0]
+}
+
+for (columnIndex, column) in columns.enumerated() {
+    let angle = columnIndex < angles.count ? angles[columnIndex] : (Float(columnIndex) * slotStep)
+    let sine = sin(angle)
+    let cosine = cos(angle)
+    let horizontalOffset = sine * radius
+    let depthOffset = -cosine * radius - panelDepthOffset
+    let totalHeight = heights[columnIndex]
+    var yCursor = -totalHeight / 2
+
+    for (itemOffset, pageIndex) in column.enumerated() {
+        let page = pages[pageIndex]
+        let attachmentID = panelAttachmentID(for: placement, pageId: page.id)
+        let yMid = yCursor + page.heightMeters / 2
+
+        if let panel = attachments.entity(for: attachmentID) {
+            var transform = panel.transform
+            transform.translation = [horizontalOffset, yMid, depthOffset]
+
+            // Make the panel face the user (so text is readable).
+            let forward = normalize(SIMD3<Float>(-horizontalOffset, 0, -depthOffset))
+            let right = normalize(cross(SIMD3<Float>(0, 1, 0), forward))
+            let up = cross(forward, right)
+            transform.rotation = simd_quatf(float3x3(columns: (right, up, forward)))
+
+            panel.transform = transform
+            panel.name = "Panel:\(attachmentID)"
+            if panel.parent != root { root.addChild(panel) }
+        }
+
+        yCursor = yMid + page.heightMeters / 2
+        if itemOffset != column.count - 1 { yCursor += pageSpacing }
+    }
+}
+```
+
+
+5) Pagination (paged mode) + nav cards
+--------------------------------------
+
+Pagination model:
+- We keep a per-placement “window index” (`pageWindows[placementID]`) where each window is 10 pages.
+- The immersive view only renders the visible window (up to 10 pages, then columnized/curved).
+
+Code excerpt (copied from `Sources/GravitasReader/AppModel.swift`; keep the logic + constants in sync):
+
+```swift
+// Sources/GravitasReader/AppModel.swift
+
+let pageWindowSize: Int = 10
+@Published private(set) var pageWindows: [UUID: Int] = [:]
+
+func visiblePages(for placement: ArticlePlacement) -> [ArticlePage] {
+    let total = placement.pagesSnapshot.count
+    guard total > 0 else { return [] }
+    let start = currentPageStart(for: placement.id, total: total)
+    let end = min(start + pageWindowSize, total)
+    return Array(placement.pagesSnapshot[start..<end])
+}
+
+func canPageBack(_ placement: ArticlePlacement) -> Bool {
+    let total = placement.pagesSnapshot.count
+    guard total > 0 else { return false }
+    return currentPageIndex(for: placement.id, total: total) > 0
+}
+
+func canPageForward(_ placement: ArticlePlacement) -> Bool {
+    let total = placement.pagesSnapshot.count
+    guard total > 0 else { return false }
+    let index = currentPageIndex(for: placement.id, total: total)
+    return index < maxPageIndex(total: total)
+}
+
+func pageBack(_ placement: ArticlePlacement) {
+    let total = placement.pagesSnapshot.count
+    guard total > 0 else { return }
+    let oldIndex = currentPageIndex(for: placement.id, total: total)
+    let newIndex = max(0, oldIndex - 1)
+    pageWindows[placement.id] = newIndex
+    updateBookSession(for: placement, windowIndex: newIndex)
+    GRLog.p("Pager", "Back pid=\(placement.id) page=\(oldIndex) -> \(newIndex) totalPages=\(maxPageIndex(total: total) + 1)")
+    objectWillChange.send()
+}
+
+func pageForward(_ placement: ArticlePlacement) {
+    let total = placement.pagesSnapshot.count
+    guard total > 0 else { return }
+    let oldIndex = currentPageIndex(for: placement.id, total: total)
+    let newIndex = min(oldIndex + 1, maxPageIndex(total: total))
+    pageWindows[placement.id] = newIndex
+    updateBookSession(for: placement, windowIndex: newIndex)
+    GRLog.p("Pager", "Forward pid=\(placement.id) page=\(oldIndex) -> \(newIndex) totalPages=\(maxPageIndex(total: total) + 1)")
+    objectWillChange.send()
+}
+
+private func currentPageIndex(for placementID: UUID, total: Int) -> Int {
+    let rawIndex = pageWindows[placementID] ?? 0
+    let maxIndex = maxPageIndex(total: total)
+    return max(0, min(rawIndex, maxIndex))
+}
+
+private func currentPageStart(for placementID: UUID, total: Int) -> Int {
+    let index = currentPageIndex(for: placementID, total: total)
+    return index * pageWindowSize
+}
+
+private func maxPageIndex(total: Int) -> Int {
+    return max(0, (total - 1) / pageWindowSize)
+}
+```
+
+Nav UI is just 2 attachments placed at angles outside the curved panel cluster:
+- `NavCardView(direction: .prev/.next, enabled: canPageBack/canPageForward, action: pageBack/pageForward)`
+- Nav placement uses the same “face the user” rotation math as panels.
+
+
+6) Vertical ScrollView layout mode (single big panel)
+-----------------------------------------------------
+
+We support a “Scroll” mode where the article is rendered in one tall vertical scroll view.
+In immersive space, this scroll panel is placed straight ahead and scaled up.
+
+Keep these constants EXACT (immersive placement tuning):
+- `scrollPanelHeightPoints = 980`
+- `scrollPanelDepthPaddingMeters = 1.9`
+- `scrollPanelScale = 1.85`
+
+Immersive placement excerpt:
+
+```swift
+// Sources/GravitasReader/ImmersiveSpaceView.swift
+
+let radius = max(minRadiusMeters, targetPanelDistance + scrollPanelDepthPaddingMeters)
+let x: Float = 0
+let z = -radius - panelDepthOffset
+transform.translation = [x, 0, z]
+// rotation faces user (same math as paged panels)
+panel.scale = [scrollPanelScale, scrollPanelScale, scrollPanelScale]
+```
+
+SwiftUI ScrollView excerpt (shows look-based scrolling on visionOS and anchor tracking for books):
+
+```swift
+// Sources/GravitasReader/ArticlePresentation.swift
+
+struct ArticleScrollView: View {
+    let article: Article
+    let palette: ReaderThemePalette
+    let contentWidth: CGFloat
+    @EnvironmentObject private var model: AppModel
+    @State private var hasAppliedInitialAnchor = false
+    @State private var lastReportedBlockID: UUID?
+    @State private var pendingAnchorID: UUID?
+    @State private var canReportPositions = false
+    @State private var lastAnchorRecordDate: Date = .distantPast
+
+    private let anchorRecordThrottle: TimeInterval = 1.5
+    private var scrollSpaceName: String { "ArticleScroll-\(article.id.uuidString)" }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 18) {
+                    // headerIfNeeded()
+                    // blocks...
+                    Spacer(minLength: 6)
+                }
+                .frame(maxWidth: contentWidth)
+                .padding(.vertical, 28)
+                .padding(.horizontal, 28)
+                .background(RoundedRectangle(cornerRadius: 16).fill(palette.cardBackground))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.cardBorder, lineWidth: 1))
+                .padding(.horizontal)
+            }
+            .coordinateSpace(name: scrollSpaceName)
+            .scrollIndicators(.visible)
+        #if os(visionOS)
+            .scrollInputBehavior(.enabled, for: .look)
+        #endif
+        }
+        .id(article.id)
+    }
+}
+```
+
+The production implementation includes a `PreferenceKey`-based geometry reporter to compute the
+nearest visible block and persist it as a “scroll anchor” in the model for resume-on-reopen.
+See `ArticleScrollPositionKey` and `BlockScrollPositionReporter` in `ArticlePresentation.swift`.
+
+
+7) Glue: “paged vs scroll” selection
+------------------------------------
+
+We select layout mode per-article:
+- non-books use a default (`defaultReaderLayoutMode`)
+- books choose based on format (wide → paged, narrow → scroll)
+
+Verbatim:
+
+```swift
+// Sources/GravitasReader/AppModel.swift
+
+func layoutMode(for article: Article) -> ReaderLayoutMode? {
+    if let bookID = article.bookID {
+        let isWide = bookSessions[bookID]?.formatIsWide ?? defaultBookSession().formatIsWide
+        return isWide ? .paged : .scroll
+    } else {
+        return defaultReaderLayoutMode
+    }
+}
+```
+
+
+Summary checklist (what must exist in a new project)
+----------------------------------------------------
+
+1) Styling
+   - `ReaderTheme` + `ReaderThemePalette` (semantic colors only)
+   - Views accept a `palette` and never hardcode colors
+
+2) Immersive scene
+   - `ImmersiveSpace(id: "ReadSpace") { ImmersiveReadSpace() }`
+   - Ensure it is opened via `openImmersiveSpace(id: "ReadSpace")` before spawning placements
+
+3) Spawn positions (do not change)
+   - Head-relative spawn with exact `lanes` + `headForwardOffset` + default y=1.35
+
+4) Curved layout
+   - Place SwiftUI attachments as RealityKit entities
+   - Arc positioning: x=sin(angle)*radius, z=-cos(angle)*radius, face-user rotation
+   - Keep `pointsPerMeter` and page width in sync with the page builder
+
+5) Pagination
+   - Per-placement page window state + Prev/Next nav cards
+
+6) Scroll layout
+   - Single large vertical ScrollView panel, placed straight ahead and scaled
+   - (visionOS) enable look-based scrolling

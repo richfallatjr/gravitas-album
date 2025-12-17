@@ -25,7 +25,18 @@ actor AlbumFoundationModelsOracleEngine {
     private var thumbUpSession: LanguageModelSession?
     private var thumbDownSession: LanguageModelSession?
 
+    private var isResponding: Bool = false
+    private var responseWaiters: [CheckedContinuation<Void, Never>] = []
+
     func recommend(snapshot: AlbumOracleSnapshot, requestID: UUID, feedback: AlbumThumbFeedback) async -> AlbumRecOutcome {
+        await acquireResponseLock()
+        defer { releaseResponseLock() }
+
+        if Task.isCancelled {
+            AlbumLog.model.info("FoundationModels oracle cancelled before start requestID: \(requestID.uuidString, privacy: .public)")
+            return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: "Cancelled")
+        }
+
         AlbumLog.model.info("FoundationModels oracle start: \(feedback.rawValue, privacy: .public) requestID: \(requestID.uuidString, privacy: .public) candidates: \(snapshot.candidates.count)")
         let model = SystemLanguageModel.default
 
@@ -48,7 +59,7 @@ actor AlbumFoundationModelsOracleEngine {
             if let existing = thumbUpSession {
                 session = existing
             } else {
-                let created = LanguageModelSession(model: model) { Self.instructions(feedback: feedback) }
+                let created = LanguageModelSession(model: model, instructions: Self.instructions(feedback: feedback))
                 thumbUpSession = created
                 session = created
             }
@@ -56,7 +67,7 @@ actor AlbumFoundationModelsOracleEngine {
             if let existing = thumbDownSession {
                 session = existing
             } else {
-                let created = LanguageModelSession(model: model) { Self.instructions(feedback: feedback) }
+                let created = LanguageModelSession(model: model, instructions: Self.instructions(feedback: feedback))
                 thumbDownSession = created
                 session = created
             }
@@ -66,6 +77,11 @@ actor AlbumFoundationModelsOracleEngine {
         var lastError: String? = nil
 
         for maxCandidates in candidateCounts {
+            if Task.isCancelled {
+                AlbumLog.model.info("FoundationModels oracle cancelled requestID: \(requestID.uuidString, privacy: .public)")
+                return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: "Cancelled")
+            }
+
             let prompt = Self.buildPrompt(snapshot: snapshot, feedback: feedback, requestID: requestID, maxCandidates: maxCandidates)
 
             do {
@@ -116,6 +132,10 @@ actor AlbumFoundationModelsOracleEngine {
                     default:
                         lastError = generationError.localizedDescription
                     }
+                } else if error is CancellationError {
+                    lastError = "Cancelled"
+                    AlbumLog.model.info("FoundationModels cancelled requestID: \(requestID.uuidString, privacy: .public)")
+                    return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: lastError)
                 } else {
                     lastError = error.localizedDescription
                 }
@@ -126,6 +146,25 @@ actor AlbumFoundationModelsOracleEngine {
         }
 
         return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: lastError ?? "LLM failed")
+    }
+
+    private func acquireResponseLock() async {
+        if !isResponding {
+            isResponding = true
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            responseWaiters.append(continuation)
+        }
+    }
+
+    private func releaseResponseLock() {
+        if !responseWaiters.isEmpty {
+            responseWaiters.removeFirst().resume()
+            return
+        }
+        isResponding = false
     }
 
     private static func candidateBudgets(total: Int) -> [Int] {
