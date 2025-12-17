@@ -530,6 +530,432 @@ func layoutMode(for article: Article) -> ReaderLayoutMode? {
 ```
 
 
+8) RealityView anchoring + dynamic attachments lifecycle (the “entire system”)
+------------------------------------------------------------------------------
+
+This is the critical architecture that makes the immersive reader “draw in space” and stay dynamic:
+
+- The model owns *data* (`placements`, pages, etc.)
+- `RealityView` owns the *scene graph*
+- SwiftUI attachments own the *rendered panels* (as textures on RealityKit entities)
+
+The pipeline in 3 pieces:
+
+8.1) Data model: placements are immutable “what to render”
+
+An `ArticlePlacement` contains:
+- an ID
+- a per-instance token (used to namespace attachment IDs)
+- optional persisted world transform (`anchorTransform`)
+- a snapshot of prebuilt pages (`pagesSnapshot`)
+
+```swift
+// Sources/GravitasReader/ReaderState.swift
+
+struct ArticlePlacement: Identifiable {
+    let id: UUID
+    let instanceToken: UUID
+    var article: Article
+    var anchorTransform: simd_float4x4?
+    let pagesSnapshot: [ArticlePage]
+    let theaterLayout: TheaterLayout?
+    let createdAt: Date
+
+    var attachmentsPrefix: String { "Inst:\(instanceToken.uuidString)" }
+}
+```
+
+8.2) Runtime scene: one world anchor + one root entity per placement
+
+We keep a private runtime dictionary keyed by placement ID:
+- `AnchorEntity(world:)` is the placement’s world-space anchor
+- `root` is where we parent all panel/nav entities for this placement
+
+```swift
+// Sources/GravitasReader/ImmersiveSpaceView.swift
+
+private final class RuntimePlacement {
+    let anchor: AnchorEntity
+    let root: Entity
+    init(anchor: AnchorEntity, root: Entity) { self.anchor = anchor; self.root = root }
+}
+```
+
+8.3) RealityView: render loop + attachments loop
+
+RealityView has three parts:
+- initial `content` phase
+- per-frame `update`
+- `attachments` builder (SwiftUI → RealityKit entities)
+
+```swift
+// Sources/GravitasReader/ImmersiveSpaceView.swift
+
+struct ImmersiveReadSpace: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var runtimePlacements: [UUID: RuntimePlacement] = [:]
+    @State private var headTracker: AnchorEntity?
+    @State private var latestHeadTransform: Transform?
+
+    var body: some View {
+        RealityView { content, attachments in
+            ensureHeadTracker(in: content)
+            syncScene(content: content, attachments: attachments)
+        } update: { content, attachments in
+            ensureHeadTracker(in: content)
+            syncScene(content: content, attachments: attachments)
+        } attachments: {
+            ForEach(model.placements) { placement in
+                // Paged mode pages + nav cards (or scroll/theater variants).
+                // Attachment IDs MUST be stable & unique.
+                Attachment(id: navAttachmentID(for: placement, direction: .prev)) { /* ... */ }
+                Attachment(id: navAttachmentID(for: placement, direction: .next)) { /* ... */ }
+                ForEach(model.visiblePages(for: placement)) { page in
+                    Attachment(id: panelAttachmentID(for: placement, pageId: page.id)) {
+                        ArticleCardView(article: placement.article, page: page, palette: model.palette)
+                            .frame(width: 620, height: page.viewHeight)
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+8.4) Head tracking is required (for spawn + “face the user” math)
+
+We attach an `AnchorEntity(.head)` to the RealityView content and cache its transform every frame.
+
+```swift
+private func ensureHeadTracker(in content: RealityViewContent) {
+    if headTracker == nil { headTracker = AnchorEntity(.head) }
+    if let tracker = headTracker {
+        if tracker.parent == nil { content.add(tracker) }
+        latestHeadTransform = Transform(matrix: tracker.transformMatrix(relativeTo: nil))
+    }
+}
+```
+
+8.5) Stable attachment IDs (this is non-negotiable)
+
+If IDs collide across placements, or change between frames, the wrong entity will be reused and you’ll
+see panels “swap” content or flicker. We avoid this by namespacing everything with `instanceToken`.
+
+```swift
+private func navAttachmentID(for placement: ArticlePlacement, direction: NavDirection) -> String {
+    "\(placement.attachmentsPrefix):Placement=\(placement.id.uuidString):Nav=\(direction == .prev ? "Prev" : "Next")"
+}
+
+private func scrollAttachmentID(for placement: ArticlePlacement) -> String {
+    "\(placement.attachmentsPrefix):Placement=\(placement.id.uuidString):Scroll"
+}
+
+private func panelAttachmentID(for placement: ArticlePlacement, pageId: Int) -> String {
+    "\(placement.attachmentsPrefix):Placement=\(placement.id.uuidString):Page=\(pageId)"
+}
+```
+
+8.6) Dynamic sync + cleanup (how it “stays correct”)
+
+Each frame:
+- create runtime placement (anchor+root) if missing
+- add anchors to `content` if not already present
+- place any currently-available attachment entities under the root
+- remove any stale entities (pages/navs no longer visible)
+- remove runtime placements that disappeared from `model.placements`
+
+```swift
+// Sources/GravitasReader/ImmersiveSpaceView.swift (excerpt)
+
+private func syncScene(content: RealityViewContent, attachments: RealityViewAttachments) {
+    var updatedPlacements = runtimePlacements
+    var stale = Set(updatedPlacements.keys)
+
+    for placement in model.placements {
+        let pid = placement.id
+        stale.remove(pid)
+
+        let runtime: RuntimePlacement
+        if let existing = updatedPlacements[pid] {
+            runtime = existing
+        } else {
+            let anchor = makeAnchor(for: placement)
+            let root = Entity()
+            anchor.addChild(root)
+            runtime = RuntimePlacement(anchor: anchor, root: root)
+            updatedPlacements[pid] = runtime
+        }
+
+        if runtime.anchor.parent == nil { content.add(runtime.anchor) }
+        if runtime.root.parent !== runtime.anchor {
+            runtime.anchor.addChild(runtime.root)
+            runtime.root.transform = .identity
+        }
+
+        // ...choose layout mode (theater/scroll/paged) and place panels/navs...
+        // ...remove children not in the new "valid" sets...
+    }
+
+    for id in stale {
+        if let runtime = updatedPlacements.removeValue(forKey: id) {
+            runtime.anchor.removeFromParent()
+        }
+    }
+
+    DispatchQueue.main.async { self.runtimePlacements = updatedPlacements }
+}
+```
+
+8.7) Performance: incremental attachment loading (keeps “dynamic” from becoming “janky”)
+
+Paged mode can have up to 10 pages visible per placement; each page is a large SwiftUI view.
+We don’t create them all at once — we “ramp” attachments in batches:
+
+- `initialPanelBatchSize = 2`
+- `panelBatchStep = 2`
+- track per-placement load counts in `panelLoadCounts`
+- in `attachments`, only render `windowPages.prefix(loadCount)`
+
+```swift
+// Sources/GravitasReader/ImmersiveSpaceView.swift (excerpt)
+
+let windowPages = model.visiblePages(for: placement)
+let loadCount = panelLoadCounts[placement.id] ?? min(max(windowPages.count, 0), initialPanelBatchSize)
+let limitedPages = Array(windowPages.prefix(loadCount))
+ForEach(limitedPages) { page in
+    Attachment(id: panelAttachmentID(for: placement, pageId: page.id)) { /* ... */ }
+}
+```
+
+This is especially important when pages contain multiple images/video/PDF previews.
+
+
+9) Dynamic media loading + “fill the panel” behavior (images, PDFs, video)
+---------------------------------------------------------------------------
+
+The key trick is: **panel geometry must be stable even while media is loading.**
+We do that by precomputing layout metrics (height in meters + points) and then giving images a fixed
+frame based on those metrics, so `AsyncImage` loading doesn’t change the panel size in 3D.
+
+9.1) Page geometry: meters for layout, points for SwiftUI
+
+```swift
+// Sources/GravitasReader/PageLayout.swift
+
+struct ArticlePage: Identifiable {
+    struct Item: Identifiable {
+        let id = UUID()
+        let block: ArticleBlock
+        let imageHeightPoints: CGFloat?
+    }
+
+    let id: Int
+    let items: [Item]
+    let showHeader: Bool
+    let heightMeters: Float
+    let viewHeight: CGFloat
+}
+```
+
+- `heightMeters` is used by the curved layout to stack pages in space.
+- `viewHeight` is used by SwiftUI (`.frame(height: ...)`) so the attachment entity’s physical height matches.
+
+9.2) Media sizing: use `imageHeightPoints` if available (avoids layout shift)
+
+```swift
+// Sources/GravitasReader/ArticlePresentation.swift (excerpt)
+
+private static func mediaDimensions(for item: ArticlePage.Item, contentWidth: CGFloat) -> CGSize? {
+    let innerWidth = max(contentWidth - 56, 240)
+    let minHeight: CGFloat = 220
+    let minWidth: CGFloat = 240
+
+    switch item.block.kind {
+    case .image, .video:
+        if let points = item.imageHeightPoints, points > 0 {
+            let scale = innerWidth / 620
+            var scaledHeight = max(minHeight, CGFloat(points) * scale)
+            let portraitCap = innerWidth * 1.8
+            if scaledHeight > portraitCap { scaledHeight = portraitCap }
+            return CGSize(width: max(minWidth, innerWidth), height: scaledHeight)
+        }
+
+        guard let w = item.block.originalWidth, let h = item.block.originalHeight, w > 0 else {
+            return CGSize(width: innerWidth, height: max(minHeight, innerWidth * 0.6))
+        }
+
+        let aspect = CGFloat(h) / CGFloat(w)
+        var computedHeight = innerWidth * aspect
+        if aspect <= 1 {
+            if computedHeight < minHeight { computedHeight = minHeight }
+        } else {
+            computedHeight = min(computedHeight, innerWidth * 1.8)
+        }
+        return CGSize(width: innerWidth, height: computedHeight)
+
+    case .pdfDocument:
+        return CGSize(width: innerWidth, height: max(minHeight, innerWidth * 1.3))
+
+    default:
+        return nil
+    }
+}
+```
+
+9.3) Image loading: remote (`AsyncImage`) vs local (`LocalImageView`)
+
+Remote images:
+- fixed frame based on `mediaSize`
+- `.scaledToFit()` to avoid cropping
+- placeholders for empty/failure
+
+```swift
+// Sources/GravitasReader/ArticlePresentation.swift (excerpt)
+
+case .image:
+    if let url = item.block.imageURL {
+        let mediaSize = mediaSize(for: item)
+        HStack {
+            Spacer(minLength: 0)
+            Group {
+                if url.isFileURL {
+                    LocalImageView(url: url,
+                                   placeholderColor: palette.secondaryText.opacity(0.15),
+                                   placeholderIconColor: palette.secondaryText)
+                        .scaledToFit()
+                } else {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image): image.resizable().scaledToFit()
+                        case .failure:
+                            ZStack {
+                                palette.secondaryText.opacity(0.15)
+                                Image(systemName: "photo")
+                                    .font(.system(size: 40, weight: .light))
+                                    .foregroundStyle(palette.secondaryText)
+                            }
+                        case .empty: ProgressView()
+                        @unknown default: ProgressView()
+                        }
+                    }
+                }
+            }
+            .frame(width: mediaSize.width, height: mediaSize.height)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            Spacer(minLength: 0)
+        }
+    }
+```
+
+Local images (e.g. extracted from a PDF) are loaded off the main thread to keep scrolling smooth:
+
+```swift
+// Sources/GravitasReader/ArticlePresentation.swift (verbatim)
+
+private struct LocalImageView: View {
+    let url: URL
+    let placeholderColor: Color
+    let placeholderIconColor: Color
+
+    @State private var image: UIImage?
+    @State private var isLoading = false
+    @State private var loadError = false
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(placeholderColor)
+            if let image {
+                Image(uiImage: image).resizable().scaledToFit()
+            } else if loadError {
+                Image(systemName: "photo")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(placeholderIconColor)
+            } else {
+                ProgressView().progressViewStyle(.circular)
+            }
+        }
+        .onAppear(perform: loadIfNeeded)
+    }
+
+    private func loadIfNeeded() {
+        guard !isLoading, image == nil, !loadError else { return }
+        isLoading = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { DispatchQueue.main.async { self.isLoading = false } }
+            guard let data = try? Data(contentsOf: url),
+                  let img = UIImage(data: data) else {
+                DispatchQueue.main.async { self.loadError = true }
+                return
+            }
+            DispatchQueue.main.async { self.image = img }
+        }
+    }
+}
+```
+
+9.4) PDF previews in panels (PDFKit)
+
+PDF blocks get an inline preview using a `UIViewRepresentable` wrapper around `PDFView`.
+This lets PDFs render inside the same fixed media frame (so layout remains stable).
+
+```swift
+// Sources/GravitasReader/ArticlePresentation.swift (excerpt)
+
+case .pdfDocument:
+    let mediaSize = mediaSize(for: item)
+    VStack(alignment: .leading, spacing: 10) {
+        if let url = item.block.pdfURL {
+            PDFDisplayView(url: url)
+                .frame(width: mediaSize.width, height: mediaSize.height)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(palette.cardBorder.opacity(0.25), lineWidth: 1)
+                )
+        } else {
+            ZStack {
+                palette.secondaryText.opacity(0.12)
+                Image(systemName: "doc.richtext")
+                    .font(.system(size: 40, weight: .semibold))
+                    .foregroundStyle(palette.secondaryText)
+            }
+            .frame(width: mediaSize.width, height: mediaSize.height)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+```
+
+```swift
+// Sources/GravitasReader/ArticlePresentation.swift (verbatim)
+
+private struct PDFDisplayView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        view.usePageViewController(true, withViewOptions: nil)
+        view.backgroundColor = .clear
+        view.document = PDFDocument(url: url)
+        return view
+    }
+
+    func updateUIView(_ uiView: PDFView, context: Context) {
+        guard uiView.document?.documentURL != url else { return }
+        uiView.document = PDFDocument(url: url)
+    }
+}
+```
+
+9.5) Why this stays dynamic in immersive space
+
+- Attachments are SwiftUI views; when an `AsyncImage` finishes, SwiftUI re-renders the attachment.
+- RealityKit updates the underlying texture automatically; you don’t “rebuild meshes”.
+- Because the media frame is fixed (via precomputed sizing), the panel’s 3D footprint does not jump.
+
+
 Summary checklist (what must exist in a new project)
 ----------------------------------------------------
 
@@ -555,3 +981,13 @@ Summary checklist (what must exist in a new project)
 6) Scroll layout
    - Single large vertical ScrollView panel, placed straight ahead and scaled
    - (visionOS) enable look-based scrolling
+
+7) Anchoring + attachments lifecycle
+   - Runtime map: placementID → (world `AnchorEntity`, root `Entity`)
+   - Stable, unique attachment IDs (namespace with an instance token)
+   - Per-frame sync that re-parents entities and cleans up stale ones
+   - Incremental attachment loading for performance
+
+8) Dynamic media filling
+   - Stable panel geometry: `heightMeters` + `viewHeight`
+   - Fixed media frames for images/PDF/video so async loading doesn’t shift 3D layout
