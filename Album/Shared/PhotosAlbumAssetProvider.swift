@@ -110,6 +110,24 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
         return mapAlbumAssets(phAssets)
     }
 
+    public func fetchAssets(localIdentifiers: [String]) async throws -> [AlbumAsset] {
+        let ids = localIdentifiers
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !ids.isEmpty else { return [] }
+
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+        var phAssets: [PHAsset] = []
+        phAssets.reserveCapacity(result.count)
+
+        result.enumerateObjects { asset, _, _ in
+            phAssets.append(asset)
+        }
+
+        return mapAlbumAssets(phAssets)
+    }
+
     public func fetchUserAlbums() async throws -> [AlbumUserAlbum] {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "localizedTitle", ascending: true)]

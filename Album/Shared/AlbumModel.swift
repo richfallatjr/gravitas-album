@@ -10,8 +10,10 @@ public enum AlbumDatasetSource: String, Sendable, Codable, CaseIterable {
 public final class AlbumModel: ObservableObject {
     public let assetProvider: AlbumAssetProvider
     private let sidecarStore: AlbumSidecarStore
+    private let libraryIndexStore: AlbumLibraryIndexStore
+    private let visionQueue: AlbumVisionQueue
+    private let backfillCoordinator: AlbumBackfillCoordinator
     public let oracle: AlbumOracle
-    private let visionService = AlbumVisionSummaryService.shared
 
     @Published public var theme: AlbumTheme = .dark
     public var palette: AlbumThemePalette { theme.palette }
@@ -42,7 +44,7 @@ public final class AlbumModel: ObservableObject {
 
             guard let item = currentItem else { return }
 
-            ensureVisionSummary(for: item.id, reason: "current_item")
+            ensureVisionSummary(for: item.id, reason: "current_item", priority: .userInitiated)
             appendToHistory(assetID: item.id)
 
             if panelMode == .memories {
@@ -65,8 +67,8 @@ public final class AlbumModel: ObservableObject {
     @Published public var memoryAnchorID: String? = nil
     @Published public var memoryWindowItems: [AlbumItem] = []
     @Published public var memoryPageStartIndex: Int = 0
-    @Published public var memoryGroupSize: Int = 24
-    @Published public var memoryOverlap: Int = 4
+    @Published public var memoryGroupSize: Int = 21
+    @Published public var memoryOverlap: Int = 1
     @Published public var memoryPrevEnabled: Bool = false
     @Published public var memoryNextEnabled: Bool = false
     @Published public var memoryLabel: String = ""
@@ -139,7 +141,13 @@ public final class AlbumModel: ObservableObject {
     @Published public var thumbFeedbackByAssetID: [String: AlbumThumbFeedback] = [:]
 
     @Published public var visionSummaryByAssetID: [String: String] = [:]
+    @Published public var visionSourceByAssetID: [String: AlbumVisionSource] = [:]
+    @Published public var visionConfidenceByAssetID: [String: Float] = [:]
     @Published public var visionPendingAssetIDs: Set<String> = []
+
+    @Published public private(set) var backfillTargetCount: Int = 0
+    @Published public private(set) var backfillCompletedCount: Int = 0
+    @Published public private(set) var backfillIsRunning: Bool = false
 
     @Published public var curvedCanvasEnabled: Bool = false
     @Published public private(set) var curvedWallDumpPages: [CurvedWallDumpPage] = []
@@ -148,13 +156,12 @@ public final class AlbumModel: ObservableObject {
 
     @Published public private(set) var isLoadingItems: Bool = false
 
-    private var sidecar: AlbumSidecar
-    private var saveSidecarTask: Task<Void, Never>? = nil
     private var thumbTask: Task<Void, Never>? = nil
     private var latestThumbRequestID: UUID? = nil
     private var isSyncingSelection: Bool = false
     private var recommendsCacheByAnchorID: [String: AlbumRecResponse] = [:]
     private var recommendsFeedbackByAnchorID: [String: AlbumThumbFeedback] = [:]
+    private var memoryRebuildTask: Task<Void, Never>? = nil
 
     public struct CurvedWallDumpPage: Identifiable, Sendable, Equatable {
         public let id: UUID
@@ -190,18 +197,46 @@ public final class AlbumModel: ObservableObject {
         sidecarStore: AlbumSidecarStore = AlbumSidecarStore(),
         oracle: AlbumOracle = AlbumAutoOracle()
     ) {
-        self.assetProvider = assetProvider ?? PhotosAlbumAssetProvider()
-        self.sidecarStore = sidecarStore
-        self.oracle = oracle
+        let provider = assetProvider ?? PhotosAlbumAssetProvider()
+        let indexStore = AlbumLibraryIndexStore()
+        let visionQueue = AlbumVisionQueue(sidecarStore: sidecarStore, libraryIndexStore: indexStore, assetProvider: provider)
+        let backfillCoordinator = AlbumBackfillCoordinator(
+            sidecarStore: sidecarStore,
+            libraryIndexStore: indexStore,
+            visionQueue: visionQueue
+        )
 
-        let loaded = sidecarStore.load()
-        self.sidecar = loaded
-        self.visionSummaryByAssetID = loaded.visionSummaryByLocalIdentifier
-        self.thumbFeedbackByAssetID = loaded.thumbFeedbackByLocalIdentifier
-        self.hiddenIDs = loaded.hiddenLocalIdentifiers
+        self.assetProvider = provider
+        self.sidecarStore = sidecarStore
+        self.libraryIndexStore = indexStore
+        self.visionQueue = visionQueue
+        self.backfillCoordinator = backfillCoordinator
+        self.oracle = oracle
         self.scenes = AlbumSceneStore.load()
         self.libraryAuthorization = self.assetProvider.authorizationStatus()
         AlbumLog.model.info("AlbumModel init oracle: \(String(describing: type(of: self.oracle)), privacy: .public)")
+
+        Task(priority: .utility) { [sidecarStore] in
+            await sidecarStore.migrateLegacyIfNeeded()
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            await visionQueue.setUpdateSink { [weak self] update in
+                self?.applyVisionUpdate(update)
+            }
+
+            await visionQueue.setCompletionSink { [weak self] assetID in
+                self?.visionPendingAssetIDs.remove(assetID)
+            }
+
+            await backfillCoordinator.setProgressSink { [weak self] progress in
+                self?.backfillTargetCount = progress.targetCount
+                self?.backfillCompletedCount = progress.completedCount
+                self?.backfillIsRunning = progress.isRunning
+            }
+        }
     }
 
     public func requestAbsorbNow() {
@@ -211,11 +246,25 @@ public final class AlbumModel: ObservableObject {
     public func item(for itemID: String) -> AlbumItem? {
         let id = itemID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }
-        return items.first(where: { $0.id == id })
+        if let hit = items.first(where: { $0.id == id }) {
+            return hit
+        }
+        if let hit = memoryWindowItems.first(where: { $0.id == id }) {
+            return hit
+        }
+        if let hit = recommendItems.first(where: { $0.id == id }) {
+            return hit
+        }
+        return nil
     }
 
     public func asset(for assetID: String) -> AlbumAsset? {
         item(for: assetID)
+    }
+
+    private func sidecarKey(for assetID: String) -> AlbumSidecarKey {
+        let source: AlbumSidecarSource = (datasetSource == .demo) ? .demo : .photos
+        return AlbumSidecarKey(source: source, id: assetID)
     }
 
     public func createdYearMonth(for assetID: String) -> String? {
@@ -324,6 +373,7 @@ public final class AlbumModel: ObservableObject {
 
         datasetSource = .photos
         lastAssetLoadError = nil
+        await sidecarStore.migrateLegacyIfNeeded()
         let auth = assetProvider.authorizationStatus()
         libraryAuthorization = auth
         let q = query ?? selectedQuery
@@ -348,7 +398,8 @@ public final class AlbumModel: ObservableObject {
         do {
             let fetched = try await assetProvider.fetchAssets(limit: cappedLimit, query: q, sampling: .random)
             lastAssetFetchCount = fetched.count
-            items = fetched.filter { !hiddenIDs.contains($0.id) }
+            let filtered = await hydrateSidecars(for: fetched, source: .photos)
+            items = filtered
             AlbumLog.photos.info("loadItems fetched: \(fetched.count) filtered: \(self.items.count) hiddenIDs: \(self.hiddenIDs.count)")
             if let id = currentAssetID, let item = item(for: id) {
                 currentItem = item
@@ -356,6 +407,11 @@ public final class AlbumModel: ObservableObject {
             history = historyAssetIDs.compactMap { item(for: $0) }
             if panelMode == .memories {
                 rebuildMemoryWindow(resetToAnchor: memoryWindowItems.isEmpty)
+            }
+
+            enqueueVisionForActiveSet(assetIDs: filtered.map(\.id), reason: "active_set_load")
+            Task(priority: .background) { [backfillCoordinator] in
+                await backfillCoordinator.startIfNeeded(source: .photos)
             }
         } catch {
             lastAssetLoadError = String(describing: error)
@@ -388,9 +444,72 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
+    private func hydrateSidecars(for fetched: [AlbumItem], source: AlbumSidecarSource) async -> [AlbumItem] {
+        guard !fetched.isEmpty else {
+            hiddenIDs = []
+            thumbFeedbackByAssetID = [:]
+            visionSummaryByAssetID = [:]
+            visionSourceByAssetID = [:]
+            visionConfidenceByAssetID = [:]
+            return []
+        }
+
+        let keys = fetched.map { AlbumSidecarKey(source: source, id: $0.id) }
+        let records = await sidecarStore.loadMany(keys)
+
+        var hidden: Set<String> = []
+        var feedback: [String: AlbumThumbFeedback] = [:]
+        var vision: [String: String] = [:]
+        var visionSource: [String: AlbumVisionSource] = [:]
+        var visionConfidence: [String: Float] = [:]
+
+        hidden.reserveCapacity(records.count / 4)
+        feedback.reserveCapacity(records.count / 3)
+        vision.reserveCapacity(records.count / 2)
+
+        for record in records {
+            let id = record.key.id
+            guard !id.isEmpty else { continue }
+
+            if record.hidden {
+                hidden.insert(id)
+            }
+
+            switch record.rating {
+            case 1:
+                feedback[id] = .up
+            case -1:
+                feedback[id] = .down
+            default:
+                break
+            }
+
+            if let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !summary.isEmpty {
+                vision[id] = summary
+            }
+            if let src = record.visionSource {
+                visionSource[id] = src
+            }
+            if let conf = record.visionConfidence {
+                visionConfidence[id] = conf
+            }
+        }
+
+        hiddenIDs = hidden
+        thumbFeedbackByAssetID = feedback
+        visionSummaryByAssetID = vision
+        visionSourceByAssetID = visionSource
+        visionConfidenceByAssetID = visionConfidence
+
+        return fetched.filter { !hidden.contains($0.id) }
+    }
+
     public func requestThumbnail(assetID: String, targetSize: CGSize, displayScale: CGFloat = 1) async -> AlbumImage? {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }
+
+        ensureVisionSummary(for: id, reason: "thumbnail", priority: .utility)
 
         if datasetSource == .demo || AlbumDemoLibrary.isDemoID(id) {
             let mediaType = asset(for: id)?.mediaType
@@ -711,7 +830,11 @@ public final class AlbumModel: ObservableObject {
         guard !id.isEmpty else { return }
 
         thumbFeedbackByAssetID[id] = feedback
-        scheduleSidecarSave()
+        let rating = feedback == .up ? 1 : -1
+        let key = sidecarKey(for: id)
+        Task(priority: .utility) { [sidecarStore] in
+            await sidecarStore.setRating(key, rating: rating)
+        }
 
         guard !isPaused else {
             thumbThinkingSince = nil
@@ -783,7 +906,10 @@ public final class AlbumModel: ObservableObject {
         guard !id.isEmpty else { return }
 
         guard hiddenIDs.insert(id).inserted else { return }
-        scheduleSidecarSave()
+        let key = sidecarKey(for: id)
+        Task(priority: .utility) { [sidecarStore] in
+            await sidecarStore.setHidden(key, hidden: true)
+        }
 
         items.removeAll(where: { $0.id == id })
         recommendItems.removeAll(where: { $0.id == id })
@@ -814,58 +940,81 @@ public final class AlbumModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         visionSummaryByAssetID[assetID] = trimmed
-        sidecar.visionSummaryByLocalIdentifier[assetID] = trimmed
-        scheduleSidecarSave()
+        visionSourceByAssetID[assetID] = .computed
+        visionConfidenceByAssetID[assetID] = 0.75
+        visionPendingAssetIDs.remove(assetID)
+
+        let key = sidecarKey(for: assetID)
+        Task(priority: .utility) { [sidecarStore] in
+            await sidecarStore.setVisionComputed(
+                key,
+                summary: trimmed,
+                tags: nil,
+                confidence: 0.75,
+                computedAt: Date(),
+                modelVersion: "VNClassifyImageRequest"
+            )
+        }
     }
 
-    public func ensureVisionSummary(for assetID: String, reason: String) {
-        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !id.isEmpty else { return }
+    private func applyVisionUpdate(_ update: AlbumVisionUpdate) {
+        let assetID = update.assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !assetID.isEmpty else { return }
+        let trimmed = update.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
 
-        if visionSummaryByAssetID[id] != nil { return }
-        if visionPendingAssetIDs.contains(id) { return }
-
-        if datasetSource == .demo || AlbumDemoLibrary.isDemoID(id) {
-            visionSummaryByAssetID[id] = AlbumDemoLibrary.placeholderTitle(for: id, mediaType: asset(for: id)?.mediaType)
+        if visionSourceByAssetID[assetID] == .computed, update.source != .computed {
             return
         }
 
-        visionPendingAssetIDs.insert(id)
+        visionSummaryByAssetID[assetID] = trimmed
+        visionSourceByAssetID[assetID] = update.source
+        visionConfidenceByAssetID[assetID] = update.confidence
+        visionPendingAssetIDs.remove(assetID)
+    }
 
-        Task { [assetProvider, visionService] in
-            defer {
-                Task { @MainActor in
-                    visionPendingAssetIDs.remove(id)
-                }
+    public func ensureVisionSummary(for assetID: String, reason: String, priority: TaskPriority = .utility) {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+
+        if datasetSource == .demo || AlbumDemoLibrary.isDemoID(id) {
+            if visionSummaryByAssetID[id] == nil {
+                visionSummaryByAssetID[id] = AlbumDemoLibrary.placeholderTitle(for: id, mediaType: asset(for: id)?.mediaType)
+                visionSourceByAssetID[id] = .computed
+                visionConfidenceByAssetID[id] = 1.0
             }
+            return
+        }
 
-            let image = await assetProvider.requestThumbnail(localIdentifier: id, targetSize: CGSize(width: 384, height: 384))
+        if let summary = visionSummaryByAssetID[id]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !summary.isEmpty,
+           visionSourceByAssetID[id] == .computed {
+            return
+        }
 
-#if canImport(UIKit)
-            let data = image?.jpegData(compressionQuality: 0.82) ?? image?.pngData()
-#else
-            let data: Data? = nil
-#endif
-
-            guard let data else { return }
-            guard let summary = await visionService.summaryForImageData(data, cacheKey: id) else { return }
-
-            await MainActor.run {
-                setVisionSummary(summary, for: id)
+        Task(priority: priority) { [visionQueue] in
+            let scheduled = await visionQueue.enqueueVision(for: id, source: .photos, reason: reason, priority: priority)
+            if scheduled {
+                await MainActor.run {
+                    self.visionPendingAssetIDs.insert(id)
+                }
             }
         }
     }
 
-    private func scheduleSidecarSave() {
-        sidecar.thumbFeedbackByLocalIdentifier = thumbFeedbackByAssetID
-        sidecar.hiddenLocalIdentifiers = hiddenIDs
-        sidecar.updatedAt = Date()
+    private func enqueueVisionForActiveSet(assetIDs: [String], reason: String) {
+        guard datasetSource == .photos else { return }
+        guard !assetIDs.isEmpty else { return }
 
-        saveSidecarTask?.cancel()
-        saveSidecarTask = Task { [sidecarStore] in
-            try? await Task.sleep(nanoseconds: 450_000_000)
-            await MainActor.run {
-                sidecarStore.save(sidecar)
+        let ids = assetIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !ids.isEmpty else { return }
+
+        Task(priority: .background) { [visionQueue] in
+            for id in ids {
+                _ = await visionQueue.enqueueVision(for: id, source: .photos, reason: reason, priority: .background)
             }
         }
     }
@@ -880,7 +1029,7 @@ public final class AlbumModel: ObservableObject {
             return
         }
 
-        let snapshot = buildOracleSnapshot(thumbed: thumbed)
+        let snapshot = await buildOracleSnapshot(thumbed: thumbed)
         let oracle = self.oracle
 
         let outcome: AlbumRecOutcome
@@ -914,20 +1063,118 @@ public final class AlbumModel: ObservableObject {
         thumbStatusMessage = status
     }
 
-    private func buildOracleSnapshot(thumbed: AlbumItem) -> AlbumOracleSnapshot {
-        let thumbedHandle = semanticHandle(for: thumbed)
+    private func buildOracleSnapshot(thumbed: AlbumItem) async -> AlbumOracleSnapshot {
+        if datasetSource == .demo {
+            let thumbedHandle = semanticHandle(for: thumbed)
 
-        let candidates: [AlbumOracleCandidate] = items.compactMap { item in
-            if item.id == thumbed.id { return nil }
-            if hiddenIDs.contains(item.id) { return nil }
+            let candidates: [AlbumOracleCandidate] = items.compactMap { item in
+                if item.id == thumbed.id { return nil }
+                if hiddenIDs.contains(item.id) { return nil }
+                return AlbumOracleCandidate(
+                    key: item.id,
+                    assetID: item.id,
+                    mediaType: item.mediaType,
+                    createdYearMonth: createdYearMonth(for: item),
+                    locationBucket: locationBucket(for: item),
+                    visionSummary: semanticHandle(for: item)
+                )
+            }
+
+            let alreadySeen = Set(history.map(\.id)).union([thumbed.id])
+
+            return AlbumOracleSnapshot(
+                thumbedAssetID: thumbed.id,
+                thumbedMediaType: thumbed.mediaType,
+                thumbedCreatedYearMonth: createdYearMonth(for: thumbed),
+                thumbedLocationBucket: locationBucket(for: thumbed),
+                thumbedVisionSummary: thumbedHandle,
+                candidates: candidates,
+                alreadySeenKeys: alreadySeen
+            )
+        }
+
+        let candidateItems = items.filter { item in
+            if item.id == thumbed.id { return false }
+            if hiddenIDs.contains(item.id) { return false }
+            return true
+        }
+
+        let allIDs = ([thumbed.id] + candidateItems.map(\.id))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let records = await sidecarStore.loadMany(allIDs.map { AlbumSidecarKey(source: .photos, id: $0) })
+        var recordByID: [String: AlbumSidecarRecord] = [:]
+        recordByID.reserveCapacity(records.count)
+
+        for record in records {
+            let id = record.key.id
+            guard !id.isEmpty else { continue }
+            recordByID[id] = record
+
+            if let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !summary.isEmpty,
+               visionSummaryByAssetID[id] == nil {
+                visionSummaryByAssetID[id] = summary
+            }
+            if let src = record.visionSource, visionSourceByAssetID[id] == nil {
+                visionSourceByAssetID[id] = src
+            }
+            if let conf = record.visionConfidence, visionConfidenceByAssetID[id] == nil {
+                visionConfidenceByAssetID[id] = conf
+            }
+        }
+
+        func oracleVisionSummary(assetID: String, mediaType: AlbumMediaType) -> String {
+            let trimmedID = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let summary = visionSummaryByAssetID[trimmedID]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !summary.isEmpty {
+                return summary
+            }
+
+            if let record = recordByID[trimmedID],
+               let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !summary.isEmpty {
+                return summary
+            }
+
+            return mediaType == .video ? "unlabeled video" : "unlabeled photo"
+        }
+
+        var idsNeedingCompute: Set<String> = []
+        idsNeedingCompute.reserveCapacity(32)
+
+        func noteIfNeedsCompute(assetID: String) {
+            let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else { return }
+
+            if visionSourceByAssetID[id] == .computed { return }
+            if recordByID[id]?.visionSource == .computed { return }
+            idsNeedingCompute.insert(id)
+        }
+
+        noteIfNeedsCompute(assetID: thumbed.id)
+
+        let candidates: [AlbumOracleCandidate] = candidateItems.map { item in
+            let summary = oracleVisionSummary(assetID: item.id, mediaType: item.mediaType)
+            if summary.hasPrefix("unlabeled ") {
+                noteIfNeedsCompute(assetID: item.id)
+            } else if recordByID[item.id]?.visionSource == .inferred {
+                noteIfNeedsCompute(assetID: item.id)
+            }
+
             return AlbumOracleCandidate(
                 key: item.id,
                 assetID: item.id,
                 mediaType: item.mediaType,
                 createdYearMonth: createdYearMonth(for: item),
                 locationBucket: locationBucket(for: item),
-                visionSummary: semanticHandle(for: item)
+                visionSummary: summary
             )
+        }
+
+        if !idsNeedingCompute.isEmpty {
+            enqueueVisionForActiveSet(assetIDs: Array(idsNeedingCompute), reason: "oracle_snapshot")
         }
 
         let alreadySeen = Set(history.map(\.id)).union([thumbed.id])
@@ -937,7 +1184,7 @@ public final class AlbumModel: ObservableObject {
             thumbedMediaType: thumbed.mediaType,
             thumbedCreatedYearMonth: createdYearMonth(for: thumbed),
             thumbedLocationBucket: locationBucket(for: thumbed),
-            thumbedVisionSummary: thumbedHandle,
+            thumbedVisionSummary: oracleVisionSummary(assetID: thumbed.id, mediaType: thumbed.mediaType),
             candidates: candidates,
             alreadySeenKeys: alreadySeen
         )
@@ -1115,6 +1362,15 @@ public final class AlbumModel: ObservableObject {
         guard delta != 0 else { return }
         guard memoryAnchorID != nil else { return }
 
+        if datasetSource == .photos {
+            memoryRebuildTask?.cancel()
+            memoryRebuildTask = Task { [weak self] in
+                guard let self else { return }
+                await self.shiftMemoryPageFromLibrary(delta: delta)
+            }
+            return
+        }
+
         let groupSize = max(1, memoryGroupSize)
         let overlap = max(0, min(memoryOverlap, groupSize - 1))
         let step = max(1, groupSize - overlap)
@@ -1126,7 +1382,32 @@ public final class AlbumModel: ObservableObject {
         rebuildMemoryWindow(resetToAnchor: false)
     }
 
+    private func shiftMemoryPageFromLibrary(delta: Int) async {
+        guard delta != 0 else { return }
+        guard memoryAnchorID != nil else { return }
+        guard let index = await libraryIndexStore.buildIfNeeded() else { return }
+
+        let groupSize = max(1, memoryGroupSize)
+        let overlap = max(0, min(memoryOverlap, groupSize - 1))
+        let step = max(1, groupSize - overlap)
+
+        let total = index.idsByCreationDateAscending.count
+        let maxStart = max(0, total - groupSize)
+        let proposed = memoryPageStartIndex + delta * step
+        memoryPageStartIndex = max(0, min(proposed, maxStart))
+        await rebuildMemoryWindowFromLibrary(resetToAnchor: false, index: index)
+    }
+
     private func rebuildMemoryWindow(resetToAnchor: Bool) {
+        if datasetSource == .photos {
+            memoryRebuildTask?.cancel()
+            memoryRebuildTask = Task { [weak self] in
+                guard let self else { return }
+                await self.rebuildMemoryWindowFromLibrary(resetToAnchor: resetToAnchor)
+            }
+            return
+        }
+
         guard let anchorID = memoryAnchorID else {
             memoryWindowItems = []
             memoryLabel = ""
@@ -1170,6 +1451,135 @@ public final class AlbumModel: ObservableObject {
         memoryPrevEnabled = start > 0
         memoryNextEnabled = end < timeline.count
         memoryLabel = formatMemoryLabel(items: memoryWindowItems)
+    }
+
+    private func rebuildMemoryWindowFromLibrary(resetToAnchor: Bool) async {
+        guard let index = await libraryIndexStore.buildIfNeeded() else {
+            memoryWindowItems = []
+            memoryLabel = ""
+            memoryPrevEnabled = false
+            memoryNextEnabled = false
+            AlbumLog.model.info("Memories: library index unavailable")
+            return
+        }
+
+        await rebuildMemoryWindowFromLibrary(resetToAnchor: resetToAnchor, index: index)
+    }
+
+    private func rebuildMemoryWindowFromLibrary(resetToAnchor: Bool, index: AlbumLibraryIndex) async {
+        guard let anchorID = memoryAnchorID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !anchorID.isEmpty else {
+            memoryWindowItems = []
+            memoryLabel = ""
+            memoryPrevEnabled = false
+            memoryNextEnabled = false
+            return
+        }
+
+        let total = index.idsByCreationDateAscending.count
+        guard total > 0 else {
+            memoryWindowItems = []
+            memoryLabel = ""
+            memoryPrevEnabled = false
+            memoryNextEnabled = false
+            return
+        }
+
+        let groupSize = max(1, memoryGroupSize)
+        let maxStart = max(0, total - groupSize)
+
+        let anchorIndex = index.index(of: anchorID) ?? 0
+
+        if resetToAnchor {
+            let centered = max(0, anchorIndex - (groupSize / 2))
+            memoryPageStartIndex = min(centered, maxStart)
+        } else {
+            memoryPageStartIndex = max(0, min(memoryPageStartIndex, maxStart))
+        }
+
+        let start = memoryPageStartIndex
+        let end = min(total, start + groupSize)
+        let windowIDsRaw = Array(index.idsByCreationDateAscending[start..<end])
+        let windowIDs = windowIDsRaw
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        await mergeSidecars(for: windowIDs, source: .photos)
+
+        let fetched: [AlbumAsset]
+        do {
+            fetched = try await assetProvider.fetchAssets(localIdentifiers: windowIDs)
+        } catch {
+            AlbumLog.photos.error("Memories: fetchAssets(localIdentifiers:) error: \(String(describing: error), privacy: .public)")
+            memoryWindowItems = []
+            memoryLabel = ""
+            memoryPrevEnabled = start > 0
+            memoryNextEnabled = end < total
+            return
+        }
+
+        var byID: [String: AlbumAsset] = [:]
+        byID.reserveCapacity(fetched.count)
+        for asset in fetched {
+            byID[asset.id] = asset
+        }
+
+        let ordered = windowIDs.compactMap { byID[$0] }.filter { !hiddenIDs.contains($0.id) }
+        memoryWindowItems = ordered
+
+        memoryPrevEnabled = start > 0
+        memoryNextEnabled = end < total
+        memoryLabel = formatMemoryLabel(items: memoryWindowItems)
+        AlbumLog.model.info("Memories window (library): anchorIndex=\(anchorIndex) start=\(start) end=\(end) loaded=\(self.memoryWindowItems.count) total=\(total)")
+
+        if resetToAnchor {
+            let placementID = Self.curvedWallMemoriesPlacementID
+            let indexInWindow = max(0, min(groupSize - 1, anchorIndex - start))
+            curvedWallPageWindows[placementID] = max(0, indexInWindow / curvedWallWindowSize)
+        }
+    }
+
+    private func mergeSidecars(for assetIDs: [String], source: AlbumSidecarSource) async {
+        guard !assetIDs.isEmpty else { return }
+
+        let keys = assetIDs.map { AlbumSidecarKey(source: source, id: $0) }
+        let records = await sidecarStore.loadMany(keys)
+        guard !records.isEmpty else { return }
+
+        for record in records {
+            let id = record.key.id
+            guard !id.isEmpty else { continue }
+
+            if record.hidden {
+                hiddenIDs.insert(id)
+            }
+
+            switch record.rating {
+            case 1:
+                thumbFeedbackByAssetID[id] = .up
+            case -1:
+                thumbFeedbackByAssetID[id] = .down
+            default:
+                break
+            }
+
+            if let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !summary.isEmpty {
+                if visionSourceByAssetID[id] == .computed, record.visionSource != .computed {
+                    continue
+                }
+                visionSummaryByAssetID[id] = summary
+            }
+            if let src = record.visionSource {
+                if visionSourceByAssetID[id] == .computed, src != .computed {
+                    continue
+                }
+                visionSourceByAssetID[id] = src
+            }
+            if let conf = record.visionConfidence {
+                visionConfidenceByAssetID[id] = conf
+            }
+        }
     }
 
     private func formatMemoryLabel(items: [AlbumItem]) -> String {

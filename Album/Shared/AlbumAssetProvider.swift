@@ -32,6 +32,7 @@ public protocol AlbumAssetProvider {
     func fetchAssets(limit: Int, mode: AlbumSamplingMode) async throws -> [AlbumAsset]
     func fetchAssets(limit: Int, query: AlbumQuery) async throws -> [AlbumAsset]
     func fetchAssets(limit: Int, query: AlbumQuery, sampling: AlbumAssetSampling) async throws -> [AlbumAsset]
+    func fetchAssets(localIdentifiers: [String]) async throws -> [AlbumAsset]
     func fetchUserAlbums() async throws -> [AlbumUserAlbum]
 
     func requestThumbnail(localIdentifier: String, targetSize: CGSize) async -> AlbumImage?
@@ -63,4 +64,6 @@ public extension AlbumAssetProvider {
     }
 
     func fetchUserAlbums() async throws -> [AlbumUserAlbum] { [] }
+
+    func fetchAssets(localIdentifiers: [String]) async throws -> [AlbumAsset] { [] }
 }

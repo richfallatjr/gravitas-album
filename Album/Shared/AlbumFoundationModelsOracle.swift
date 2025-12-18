@@ -208,6 +208,25 @@ Rules:
             return trimmed.isEmpty ? fallback : trimmed
         }
 
+        func title(mediaType: AlbumMediaType, createdYearMonth: String?, locationBucket: String?) -> String {
+            var parts: [String] = []
+            parts.reserveCapacity(3)
+
+            let datePart = safe(createdYearMonth, fallback: "Unknown")
+            if datePart != "-" {
+                parts.append(datePart)
+            }
+
+            parts.append(mediaType == .video ? "Video" : "Photo")
+
+            let loc = safe(locationBucket)
+            if loc != "-" {
+                parts.append(loc)
+            }
+
+            return parts.joined(separator: " • ")
+        }
+
         func sanitizeText(_ text: String, maxLen: Int) -> String {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmed.count > maxLen else { return trimmed }
@@ -216,9 +235,7 @@ Rules:
 
         let anchorLine = [
             snapshot.thumbedAssetID,
-            snapshot.thumbedMediaType == .video ? "video" : "photo",
-            safe(snapshot.thumbedCreatedYearMonth),
-            safe(snapshot.thumbedLocationBucket),
+            title(mediaType: snapshot.thumbedMediaType, createdYearMonth: snapshot.thumbedCreatedYearMonth, locationBucket: snapshot.thumbedLocationBucket),
             sanitizeText(snapshot.thumbedVisionSummary, maxLen: 160)
         ].joined(separator: "\t")
 
@@ -231,10 +248,8 @@ Rules:
         for c in candidates {
             candidateLines.append([
                 c.key,
-                c.mediaType == .video ? "video" : "photo",
-                safe(c.createdYearMonth),
-                safe(c.locationBucket),
-                sanitizeText(c.visionSummary, maxLen: 120)
+                title(mediaType: c.mediaType, createdYearMonth: c.createdYearMonth, locationBucket: c.locationBucket),
+                sanitizeText(c.visionSummary, maxLen: 140)
             ].joined(separator: "\t"))
         }
 
@@ -242,12 +257,12 @@ Rules:
 RequestID: \(requestID.uuidString)
 Feedback: \(feedback.rawValue)
 
-Anchor (id\\ttype\\tcreatedYearMonth\\tlocationBucket\\tsemanticHandle):
+Anchor (id\\ttitle\\tvisionSummary):
 \(anchorLine)
 
 alreadySeenIDs (comma-separated, may be partial): \(seenBlock)
 
-Candidates (id\\ttype\\tcreatedYearMonth\\tlocationBucket\\tsemanticHandle):
+Candidates (id\\ttitle\\tvisionSummary):
 \(candidateLines.joined(separator: "\n"))
 """
     }

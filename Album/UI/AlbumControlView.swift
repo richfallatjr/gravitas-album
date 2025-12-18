@@ -1,4 +1,5 @@
 import SwiftUI
+import Darwin
 
 public struct AlbumControlView: View {
     @EnvironmentObject private var model: AlbumModel
@@ -170,6 +171,12 @@ public struct AlbumControlView: View {
                 Text("Fetched: \(model.lastAssetFetchCount) • Hidden: \(model.hiddenIDs.count) • \(accessLabel)")
                     .font(.caption2)
                     .foregroundStyle(palette.panelSecondaryText)
+
+                if model.backfillIsRunning, model.backfillTargetCount > 0 {
+                    Text("Indexing memories… \(model.backfillCompletedCount)/\(model.backfillTargetCount)")
+                        .font(.caption2)
+                        .foregroundStyle(palette.panelSecondaryText)
+                }
             } else {
                 Text("Photos access: \(accessLabel)")
                     .font(.caption2)
@@ -394,6 +401,30 @@ public struct AlbumControlView: View {
             .tint(palette.openButtonColor)
             .foregroundStyle(palette.buttonLabelOnColor)
             .disabled(model.currentAssetID == nil)
+
+            Button {
+                AlbumLog.ui.info("Quit pressed; tearing down immersive + windows then exiting")
+                let popoutIDs = model.poppedAssetIDs
+                Task { @MainActor in
+                    let result = await dismissImmersiveSpace()
+                    AlbumLog.immersive.info("dismissImmersiveSpace result: \(String(describing: result), privacy: .public)")
+
+                    dismissWindow(id: "album-scene-manager")
+                    for assetID in popoutIDs {
+                        dismissWindow(value: AlbumPopOutPayload(assetID: assetID))
+                    }
+
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    exit(0)
+                }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3.weight(.semibold))
+                    .padding(.horizontal, 14)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(palette.openButtonColor)
+            .foregroundStyle(palette.buttonLabelOnColor)
         }
         .padding(.bottom, 26)
         .padding(.trailing, 26)

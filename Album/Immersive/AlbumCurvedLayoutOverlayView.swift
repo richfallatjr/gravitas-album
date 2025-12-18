@@ -1,4 +1,6 @@
 import SwiftUI
+import AVKit
+import AVFoundation
 
 enum AlbumCurvedWallNavDirection: Sendable {
     case prev
@@ -15,6 +17,10 @@ struct AlbumCurvedWallPanelAttachmentView: View {
 
     @State private var image: AlbumImage? = nil
     @State private var isLoading: Bool = false
+    @State private var player: AVQueuePlayer? = nil
+    @State private var playerLooper: AVPlayerLooper? = nil
+    @State private var currentVideoURL: URL? = nil
+    @State private var isLoadingVideo: Bool = false
 
     private let panelWidthPoints: CGFloat = 620
     private let horizontalPaddingPoints: CGFloat = 4
@@ -25,6 +31,7 @@ struct AlbumCurvedWallPanelAttachmentView: View {
 
     var body: some View {
         let isSelected = model.currentAssetID == assetID
+        let asset = model.asset(for: assetID)
         let innerWidth = max(panelWidthPoints - (horizontalPaddingPoints * 2), 240)
         let contentHeight = max(1, CGFloat(viewHeightPoints) - (verticalPaddingPoints * 2))
         let mediaHeight = max(1, contentHeight - actionRowHeightPoints - actionRowSpacingPoints)
@@ -39,7 +46,15 @@ struct AlbumCurvedWallPanelAttachmentView: View {
 
             VStack(alignment: .center, spacing: actionRowSpacingPoints) {
                 ZStack {
-                    if let image {
+                    if asset?.mediaType == .video, let player {
+                        VideoPlayer(player: player)
+                            .onAppear {
+                                player.play()
+                            }
+                            .onDisappear {
+                                player.pause()
+                            }
+                    } else if let image {
 #if canImport(UIKit)
                         Image(uiImage: image)
                             .resizable()
@@ -53,7 +68,7 @@ struct AlbumCurvedWallPanelAttachmentView: View {
 #endif
                     } else {
                         Color.white.opacity(0.06)
-                        if isLoading {
+                        if isLoading || isLoadingVideo {
                             ProgressView()
                         } else {
                             Image(systemName: "photo")
@@ -71,19 +86,53 @@ struct AlbumCurvedWallPanelAttachmentView: View {
             .padding(.vertical, verticalPaddingPoints)
         }
         .frame(width: panelWidthPoints, height: CGFloat(viewHeightPoints))
+        .onDisappear {
+            player?.pause()
+            player = nil
+            playerLooper = nil
+            currentVideoURL = nil
+            isLoadingVideo = false
+        }
         .task(id: assetID) {
-            await loadThumbnail(innerWidth: innerWidth, mediaHeight: mediaHeight)
+            await loadMedia(innerWidth: innerWidth, mediaHeight: mediaHeight)
         }
     }
 
     @MainActor
-    private func loadThumbnail(innerWidth: CGFloat, mediaHeight: CGFloat) async {
-        guard model.asset(for: assetID) != nil else { return }
+    private func loadMedia(innerWidth: CGFloat, mediaHeight: CGFloat) async {
+        guard let asset = model.asset(for: assetID) else { return }
+
+        player?.pause()
+        player = nil
+        playerLooper = nil
+        currentVideoURL = nil
+
         isLoading = true
         defer { isLoading = false }
 
         let requestPoints = CGSize(width: innerWidth, height: mediaHeight)
         image = await model.requestThumbnail(assetID: assetID, targetSize: requestPoints, displayScale: displayScale)
+
+        guard asset.mediaType == .video else { return }
+
+        isLoadingVideo = true
+        defer { isLoadingVideo = false }
+
+        guard let url = await model.requestVideoURL(assetID: assetID) else { return }
+        if currentVideoURL == url, player != nil { return }
+
+        currentVideoURL = url
+
+        let item = AVPlayerItem(url: url)
+        let queue = AVQueuePlayer()
+        queue.isMuted = true
+        queue.volume = 0
+        queue.actionAtItemEnd = .none
+
+        let looper = AVPlayerLooper(player: queue, templateItem: item)
+        playerLooper = looper
+        player = queue
+        queue.play()
     }
 
     @ViewBuilder

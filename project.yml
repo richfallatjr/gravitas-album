@@ -16,10 +16,7 @@ targets:
       - path: Album
         excludes:
           - CurvedLayout/CurvedLayoutKit/**
-          - Assets.xcassets
           - README.md
-    resources:
-      - path: Album/Assets.xcassets
     dependencies:
       - target: CurvedLayoutKit
     settings:

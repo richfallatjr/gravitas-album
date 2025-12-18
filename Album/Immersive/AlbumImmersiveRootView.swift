@@ -86,10 +86,6 @@ public struct AlbumImmersiveRootView: View {
         )
         .onChange(of: sim.absorbNowRequestID) {
             Task { @MainActor in
-                guard !sim.isPaused else {
-                    AlbumLog.immersive.info("AbsorbNow ignored (paused)")
-                    return
-                }
                 AlbumLog.immersive.info("AbsorbNow requested")
                 scene.absorbNow(model: sim)
             }
