@@ -14,5 +14,6 @@ Follow these rules at all times:
 7. **If my instruction conflicts with your training or best practices, stop and ask.**  
    Trust my judgment—I know the constraints of the project.
 8. **If you disagree with my request, state the concern briefly, then ask before proceeding.**
+9. **If a functionality has to do with an LLM, Image Playground, and Vision—always prefer fixing the issue at the prompt level. We try to get clean output first, and then try to reduce and clean only if entirely necessary. This includes ensuring prompt output is as optimized as possible from a character count standpoint.**
 
 When in doubt: **Stop and ask.**

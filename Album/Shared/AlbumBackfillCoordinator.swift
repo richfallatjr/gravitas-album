@@ -13,7 +13,7 @@ public struct AlbumBackfillProgress: Sendable, Hashable {
 }
 
 public struct AlbumBackfillState: Codable, Sendable, Hashable {
-    public static let currentSchemaVersion: Int = 1
+    public static let currentSchemaVersion: Int = 2
 
     public var schemaVersion: Int
     public var seedSelectionVersion: Int
@@ -144,6 +144,9 @@ public actor AlbumBackfillCoordinator {
         guard state.targetCount > 0 else { return }
         guard let index = await libraryIndexStore.loadIndex() else { return }
 
+        let initialAttempted = state.attemptedAssetIDs?.count ?? 0
+        AlbumLog.model.info("Backfill: run start seeds=\(state.seedAssetIDs.count) completed=\(state.completedAssetIDs.count)/\(state.targetCount) attempted=\(initialAttempted)")
+
         while !Task.isCancelled {
             state = await loadState() ?? state
             if state.completedAssetIDs.count >= state.targetCount { return }
@@ -154,6 +157,7 @@ public actor AlbumBackfillCoordinator {
             }
 
             if pending.isEmpty {
+                AlbumLog.model.info("Backfill: pending empty; scanning for more seeds (seeds=\(state.seedAssetIDs.count) completed=\(state.completedAssetIDs.count) attempted=\(attempted.count))")
                 let added = await appendMoreSeedsIfNeeded(source: source, index: index, state: &state)
                 if added == 0 {
                     AlbumLog.model.info("Backfill: no additional seeds available; stopping at \(state.completedAssetIDs.count)/\(state.targetCount)")
@@ -165,6 +169,7 @@ public actor AlbumBackfillCoordinator {
 
             let chunkSize = config.chunkSize
             let chunk = Array(pending.prefix(chunkSize))
+            AlbumLog.model.info("Backfill: processing chunk size=\(chunk.count) completed=\(state.completedAssetIDs.count)/\(state.targetCount)")
 
             var attemptedBatch: [String] = []
             attemptedBatch.reserveCapacity(chunk.count)
@@ -180,8 +185,9 @@ public actor AlbumBackfillCoordinator {
                         let key = AlbumSidecarKey(source: source, id: id)
                         if let record = await sidecarStore.load(key),
                            let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-                           !summary.isEmpty {
-                            return (id, record.visionSource == .computed)
+                           !summary.isEmpty,
+                           record.visionSource == .computed {
+                            return (id, true)
                         }
 
                         let ok = await visionQueue.ensureVisionComputed(
@@ -203,6 +209,7 @@ public actor AlbumBackfillCoordinator {
             }
 
             await markAttempted(attemptedBatch, completed: completedBatch, state: &state)
+            AlbumLog.model.info("Backfill: chunk finished attempted=\(attemptedBatch.count) computed=\(completedBatch.count) completed=\(state.completedAssetIDs.count)/\(state.targetCount)")
         }
     }
 
@@ -299,6 +306,7 @@ public actor AlbumBackfillCoordinator {
 
             let key = AlbumSidecarKey(source: source, id: id)
             if let record = await sidecarStore.load(key),
+               record.visionSource == .computed,
                let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
                !summary.isEmpty {
                 continue
@@ -324,6 +332,7 @@ public actor AlbumBackfillCoordinator {
 
             let key = AlbumSidecarKey(source: source, id: id)
             if let record = await sidecarStore.load(key),
+               record.visionSource == .computed,
                let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
                !summary.isEmpty {
                 continue
@@ -351,6 +360,8 @@ public actor AlbumBackfillCoordinator {
         var cursor = state.seedScanCursor ?? Int.random(in: 0..<total)
         var scanned = 0
         var added = 0
+        var inferredFallback: [String] = []
+        inferredFallback.reserveCapacity(desiredAdd)
 
         while added < desiredAdd, scanned < total {
             let rawID = index.idsByCreationDateAscending[cursor]
@@ -365,12 +376,28 @@ public actor AlbumBackfillCoordinator {
             if let record = await sidecarStore.load(key),
                let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
                !summary.isEmpty {
+                if record.visionSource == .computed {
+                    continue
+                }
+                if inferredFallback.count < desiredAdd {
+                    inferredFallback.append(id)
+                }
                 continue
             }
 
             state.seedAssetIDs.append(id)
             exclude.insert(id)
             added += 1
+        }
+
+        if added < desiredAdd, !inferredFallback.isEmpty {
+            for id in inferredFallback {
+                if added >= desiredAdd { break }
+                guard !exclude.contains(id) else { continue }
+                state.seedAssetIDs.append(id)
+                exclude.insert(id)
+                added += 1
+            }
         }
 
         state.seedScanCursor = cursor
@@ -420,6 +447,32 @@ public actor AlbumBackfillCoordinator {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let decoded = try decoder.decode(AlbumBackfillState.self, from: data)
+
+            if decoded.schemaVersion < AlbumBackfillState.currentSchemaVersion {
+                var migrated = decoded
+                let oldVersion = decoded.schemaVersion
+                migrated.schemaVersion = AlbumBackfillState.currentSchemaVersion
+
+                if oldVersion < 2 {
+                    // v1 attemptedAssetIDs included items skipped due to inferred vision; clear so analysis can resume.
+                    migrated.attemptedAssetIDs = []
+                }
+
+                if migrated.attemptedAssetIDs == nil {
+                    migrated.attemptedAssetIDs = []
+                }
+
+                await saveState(migrated)
+                return migrated
+            }
+
+            if decoded.attemptedAssetIDs == nil {
+                var normalized = decoded
+                normalized.attemptedAssetIDs = []
+                await saveState(normalized)
+                return normalized
+            }
+
             self.state = decoded
             return decoded
         } catch {
