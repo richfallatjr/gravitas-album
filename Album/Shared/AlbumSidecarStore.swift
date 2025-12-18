@@ -36,6 +36,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
     public var visionSource: AlbumVisionSource?
     public var visionConfidence: Float?
     public var visionDerivedFromID: String?
+    public var visionInferenceMethod: String?
     public var visionComputedAt: Date?
     public var visionModelVersion: String?
 
@@ -50,6 +51,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         visionSource: AlbumVisionSource? = nil,
         visionConfidence: Float? = nil,
         visionDerivedFromID: String? = nil,
+        visionInferenceMethod: String? = nil,
         visionComputedAt: Date? = nil,
         visionModelVersion: String? = nil
     ) {
@@ -63,6 +65,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         self.visionSource = visionSource
         self.visionConfidence = visionConfidence
         self.visionDerivedFromID = visionDerivedFromID
+        self.visionInferenceMethod = visionInferenceMethod
         self.visionComputedAt = visionComputedAt
         self.visionModelVersion = visionModelVersion
     }
@@ -253,6 +256,7 @@ public actor AlbumSidecarStore {
             record.visionSource = .computed
             record.visionConfidence = max(0, min(1, confidence))
             record.visionDerivedFromID = nil
+            record.visionInferenceMethod = nil
             record.visionComputedAt = computedAt
             record.visionModelVersion = modelVersion
         }
@@ -282,6 +286,7 @@ public actor AlbumSidecarStore {
             record.visionSource = .inferred
             record.visionConfidence = max(0, min(1, confidence))
             record.visionDerivedFromID = derivedNormalized
+            record.visionInferenceMethod = "autopopulated_neighbor_fill_v1"
             if record.visionComputedAt != nil {
                 record.visionComputedAt = nil
             }

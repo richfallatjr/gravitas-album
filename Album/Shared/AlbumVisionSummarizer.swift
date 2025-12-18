@@ -75,7 +75,7 @@ public enum AlbumVisionSummarizer {
         seen.reserveCapacity(8)
 
         for observation in results.sorted(by: { $0.confidence > $1.confidence }) {
-            guard observation.confidence >= 0.20 else { continue }
+            guard observation.confidence >= 0.10 else { continue }
             let cleaned = cleanLabel(observation.identifier)
             guard !cleaned.isEmpty else { continue }
             guard seen.insert(cleaned).inserted else { continue }
@@ -114,4 +114,3 @@ public enum AlbumVisionSummarizer {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
-

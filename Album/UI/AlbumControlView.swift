@@ -275,6 +275,7 @@ public struct AlbumControlView: View {
                 if target > 0 {
                     ProgressView(value: Double(completed), total: Double(target))
                         .progressViewStyle(.linear)
+                        .tint(palette.copyButtonFill)
 
                     Text("Indexing memories… \(completed)/\(target)")
                         .font(.caption2)

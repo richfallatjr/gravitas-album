@@ -1477,34 +1477,42 @@ public final class AlbumModel: ObservableObject {
     private func computeTuningDeltas(feedback: AlbumThumbFeedback, anchorID: String, neighbors: [AlbumRecNeighbor]) -> [AlbumItemTuningDelta] {
         let trimmedAnchor = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
         let maxNeighbors = 20
+        let similarityExponent: Float = 1.0
 
-        // LLM returns similarity as a rank (1 = most similar, up to 20).
-        let maxRankRaw = neighbors.prefix(maxNeighbors).map(\.similarity).max() ?? 1
-        let maxRank = max(1.0, min(20.0, maxRankRaw))
+        // Debug-tuned: 10× stronger deltas so effects are unmistakable.
+        let massGain: Float = 75.0
+        let massLoss: Float = 105.0
+        let accelGain: Float = 525.0
 
         var deltas: [AlbumItemTuningDelta] = []
         deltas.reserveCapacity(min(neighbors.count, maxNeighbors))
 
+        var used = Set<String>()
+        used.reserveCapacity(min(neighbors.count, maxNeighbors) + 1)
+        used.insert(trimmedAnchor)
+
         for neighbor in neighbors.prefix(maxNeighbors) {
-            let id = neighbor.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawID = neighbor.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = rawID
             guard !id.isEmpty else { continue }
             if id == trimmedAnchor { continue }
             if hiddenIDs.contains(id) { continue }
+            guard used.insert(id).inserted else { continue }
 
-            let rank = max(1.0, min(maxRank, neighbor.similarity))
-            let w0 = (maxRank + 1.0 - rank) / maxRank
-            let w = pow(Float(w0), 1.25)
+            let rank = max(1, deltas.count + 1)
+            let rankWeight = 1.0 / Float(rank)
+            let w = pow(rankWeight, similarityExponent)
 
             let massMul: Float
             let accelMul: Float
 
             switch feedback {
             case .up:
-                massMul = min(1.70, max(0.60, 1.0 + 0.35 * w))
-                accelMul = min(1.40, max(0.60, 1.0 - 0.12 * w))
+                massMul = 1.0 + massGain * w
+                accelMul = 1.0
             case .down:
-                massMul = min(1.40, max(0.60, 1.0 - 0.25 * w))
-                accelMul = min(1.90, max(0.60, 1.0 + 0.40 * w))
+                massMul = 1.0 / (1.0 + massLoss * w)
+                accelMul = 1.0 + accelGain * w
             }
 
             deltas.append(.init(itemID: id, massMultiplier: massMul, accelerationMultiplier: accelMul))
