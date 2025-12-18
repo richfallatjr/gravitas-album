@@ -80,48 +80,61 @@ public struct AlbumRecOutcome: Sendable {
 }
 
 public struct AlbumOracleCandidate: Sendable, Hashable {
-    public let key: String
     public let assetID: String
+    public let promptID: String
+    public let fileName: String
+    public let visionSummary: String
     public let mediaType: AlbumMediaType
     public let createdYearMonth: String?
     public let locationBucket: String?
-    public let visionSummary: String
 
-    public init(key: String, assetID: String, mediaType: AlbumMediaType, createdYearMonth: String?, locationBucket: String?, visionSummary: String) {
-        self.key = key
+    public init(
+        assetID: String,
+        promptID: String,
+        fileName: String,
+        visionSummary: String,
+        mediaType: AlbumMediaType,
+        createdYearMonth: String?,
+        locationBucket: String?
+    ) {
         self.assetID = assetID
+        self.promptID = promptID
+        self.fileName = fileName
+        self.visionSummary = visionSummary
         self.mediaType = mediaType
         self.createdYearMonth = createdYearMonth
         self.locationBucket = locationBucket
-        self.visionSummary = visionSummary
     }
 }
 
 public struct AlbumOracleSnapshot: Sendable {
     public let thumbedAssetID: String
+    public let thumbedFileName: String
     public let thumbedMediaType: AlbumMediaType
     public let thumbedCreatedYearMonth: String?
     public let thumbedLocationBucket: String?
     public let thumbedVisionSummary: String
     public let candidates: [AlbumOracleCandidate]
-    public let alreadySeenKeys: Set<String>
+    public let alreadySeenAssetIDs: Set<String>
 
     public init(
         thumbedAssetID: String,
+        thumbedFileName: String,
         thumbedMediaType: AlbumMediaType,
         thumbedCreatedYearMonth: String?,
         thumbedLocationBucket: String?,
         thumbedVisionSummary: String,
         candidates: [AlbumOracleCandidate],
-        alreadySeenKeys: Set<String>
+        alreadySeenAssetIDs: Set<String>
     ) {
         self.thumbedAssetID = thumbedAssetID
+        self.thumbedFileName = thumbedFileName
         self.thumbedMediaType = thumbedMediaType
         self.thumbedCreatedYearMonth = thumbedCreatedYearMonth
         self.thumbedLocationBucket = thumbedLocationBucket
         self.thumbedVisionSummary = thumbedVisionSummary
         self.candidates = candidates
-        self.alreadySeenKeys = alreadySeenKeys
+        self.alreadySeenAssetIDs = alreadySeenAssetIDs
     }
 }
 

@@ -34,6 +34,7 @@ public enum AlbumDemoLibrary {
             out.append(
                 AlbumAsset(
                     localIdentifier: id,
+                    fileName: String(format: "DEMO_%04d.%@", idx + 1, isVideo ? "MOV" : "HEIC"),
                     mediaType: mediaType,
                     creationDate: created,
                     location: nil,
@@ -134,4 +135,3 @@ public enum AlbumDemoLibrary {
 #endif
     }
 }
-

@@ -128,6 +128,7 @@ public final class AlbumModel: ObservableObject {
         }
     }
     @Published public var poppedAssetIDs: [String] = []
+    @Published private var pinnedAssetsByID: [String: AlbumAsset] = [:]
     @Published public var scenes: [AlbumSceneRecord] = []
 
     @Published public var aiNextAssetIDs: Set<String> = []
@@ -162,6 +163,7 @@ public final class AlbumModel: ObservableObject {
     private var recommendsCacheByAnchorID: [String: AlbumRecResponse] = [:]
     private var recommendsFeedbackByAnchorID: [String: AlbumThumbFeedback] = [:]
     private var memoryRebuildTask: Task<Void, Never>? = nil
+    private var pinnedAssetLoadsInFlight: Set<String> = []
 
     public struct CurvedWallDumpPage: Identifiable, Sendable, Equatable {
         public let id: UUID
@@ -243,6 +245,28 @@ public final class AlbumModel: ObservableObject {
         absorbNowRequestID = UUID()
     }
 
+    public func shutdownForQuit() {
+        AlbumLog.model.info("Shutdown requested (quit button)")
+        isPaused = true
+        curvedCanvasEnabled = false
+
+        latestThumbRequestID = nil
+        thumbTask?.cancel()
+        thumbTask = nil
+        thumbThinkingSince = nil
+        thumbThinkingFeedback = nil
+
+        memoryRebuildTask?.cancel()
+        memoryRebuildTask = nil
+
+        Task(priority: .userInitiated) { [backfillCoordinator] in
+            await backfillCoordinator.pause()
+        }
+        Task(priority: .userInitiated) { [visionQueue] in
+            await visionQueue.cancelAll()
+        }
+    }
+
     public func item(for itemID: String) -> AlbumItem? {
         let id = itemID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }
@@ -253,6 +277,9 @@ public final class AlbumModel: ObservableObject {
             return hit
         }
         if let hit = recommendItems.first(where: { $0.id == id }) {
+            return hit
+        }
+        if let hit = pinnedAssetsByID[id] {
             return hit
         }
         return nil
@@ -896,8 +923,54 @@ public final class AlbumModel: ObservableObject {
     }
 
     public func appendPoppedAsset(_ assetID: String) {
-        if !poppedAssetIDs.contains(assetID) {
-            poppedAssetIDs.append(assetID)
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+
+        if !poppedAssetIDs.contains(id) {
+            poppedAssetIDs.append(id)
+        }
+
+        pinAssetForPopOut(id)
+    }
+
+    public func removePoppedAsset(_ assetID: String) {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        poppedAssetIDs.removeAll(where: { $0 == id })
+        pinnedAssetsByID[id] = nil
+        pinnedAssetLoadsInFlight.remove(id)
+    }
+
+    private func pinAssetForPopOut(_ assetID: String) {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        guard pinnedAssetsByID[id] == nil else { return }
+
+        if let existing = items.first(where: { $0.id == id })
+            ?? memoryWindowItems.first(where: { $0.id == id })
+            ?? recommendItems.first(where: { $0.id == id }) {
+            pinnedAssetsByID[id] = existing
+            return
+        }
+
+        guard datasetSource == .photos else { return }
+        guard !pinnedAssetLoadsInFlight.contains(id) else { return }
+        pinnedAssetLoadsInFlight.insert(id)
+
+        AlbumLog.model.info("PopOut pin requesting asset fetch id=\(id, privacy: .public)")
+        Task { @MainActor in
+            defer { self.pinnedAssetLoadsInFlight.remove(id) }
+            do {
+                let fetched = try await assetProvider.fetchAssets(localIdentifiers: [id])
+                guard let asset = fetched.first(where: { $0.id == id }) else {
+                    AlbumLog.photos.info("PopOut pin fetchAssets returned no results id=\(id, privacy: .public)")
+                    return
+                }
+                self.pinnedAssetsByID[id] = asset
+                self.ensureVisionSummary(for: id, reason: "popout_pin", priority: .userInitiated)
+            } catch {
+                AlbumLog.photos.error("PopOut pin fetchAssets error id=\(id, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
         }
     }
 
@@ -1064,19 +1137,34 @@ public final class AlbumModel: ObservableObject {
     }
 
     private func buildOracleSnapshot(thumbed: AlbumItem) async -> AlbumOracleSnapshot {
+        func promptID(for index: Int) -> String {
+            let clamped = max(0, index)
+            return "c\(clamped + 1)"
+        }
+
+        func fileNameOrFallback(for asset: AlbumAsset) -> String {
+            let trimmed = asset.fileName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? "unknown" : trimmed
+        }
+
         if datasetSource == .demo {
             let thumbedHandle = semanticHandle(for: thumbed)
 
-            let candidates: [AlbumOracleCandidate] = items.compactMap { item in
+            let candidateItems: [AlbumAsset] = items.compactMap { item in
                 if item.id == thumbed.id { return nil }
                 if hiddenIDs.contains(item.id) { return nil }
-                return AlbumOracleCandidate(
-                    key: item.id,
+                return item
+            }
+
+            let candidates: [AlbumOracleCandidate] = candidateItems.enumerated().map { idx, item in
+                AlbumOracleCandidate(
                     assetID: item.id,
+                    promptID: promptID(for: idx),
+                    fileName: fileNameOrFallback(for: item),
+                    visionSummary: semanticHandle(for: item),
                     mediaType: item.mediaType,
                     createdYearMonth: createdYearMonth(for: item),
-                    locationBucket: locationBucket(for: item),
-                    visionSummary: semanticHandle(for: item)
+                    locationBucket: locationBucket(for: item)
                 )
             }
 
@@ -1084,12 +1172,13 @@ public final class AlbumModel: ObservableObject {
 
             return AlbumOracleSnapshot(
                 thumbedAssetID: thumbed.id,
+                thumbedFileName: fileNameOrFallback(for: thumbed),
                 thumbedMediaType: thumbed.mediaType,
                 thumbedCreatedYearMonth: createdYearMonth(for: thumbed),
                 thumbedLocationBucket: locationBucket(for: thumbed),
                 thumbedVisionSummary: thumbedHandle,
                 candidates: candidates,
-                alreadySeenKeys: alreadySeen
+                alreadySeenAssetIDs: alreadySeen
             )
         }
 
@@ -1129,16 +1218,26 @@ public final class AlbumModel: ObservableObject {
             let trimmedID = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
             if let summary = visionSummaryByAssetID[trimmedID]?.trimmingCharacters(in: .whitespacesAndNewlines),
                !summary.isEmpty {
-                return summary
+                return normalizeVisionSummary(summary)
             }
 
             if let record = recordByID[trimmedID],
                let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
                !summary.isEmpty {
-                return summary
+                return normalizeVisionSummary(summary)
             }
 
-            return mediaType == .video ? "unlabeled video" : "unlabeled photo"
+            return "unlabeled"
+        }
+
+        func normalizeVisionSummary(_ summary: String) -> String {
+            let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.lowercased().hasPrefix("vision:") {
+                let dropped = trimmed.dropFirst("vision:".count)
+                let cleaned = dropped.trimmingCharacters(in: .whitespacesAndNewlines)
+                return cleaned.isEmpty ? trimmed : cleaned
+            }
+            return trimmed
         }
 
         var idsNeedingCompute: Set<String> = []
@@ -1155,21 +1254,22 @@ public final class AlbumModel: ObservableObject {
 
         noteIfNeedsCompute(assetID: thumbed.id)
 
-        let candidates: [AlbumOracleCandidate] = candidateItems.map { item in
+        let candidates: [AlbumOracleCandidate] = candidateItems.enumerated().map { idx, item in
             let summary = oracleVisionSummary(assetID: item.id, mediaType: item.mediaType)
-            if summary.hasPrefix("unlabeled ") {
+            if summary.lowercased().hasPrefix("unlabeled") {
                 noteIfNeedsCompute(assetID: item.id)
             } else if recordByID[item.id]?.visionSource == .inferred {
                 noteIfNeedsCompute(assetID: item.id)
             }
 
             return AlbumOracleCandidate(
-                key: item.id,
                 assetID: item.id,
+                promptID: promptID(for: idx),
+                fileName: fileNameOrFallback(for: item),
+                visionSummary: summary,
                 mediaType: item.mediaType,
                 createdYearMonth: createdYearMonth(for: item),
-                locationBucket: locationBucket(for: item),
-                visionSummary: summary
+                locationBucket: locationBucket(for: item)
             )
         }
 
@@ -1181,12 +1281,13 @@ public final class AlbumModel: ObservableObject {
 
         return AlbumOracleSnapshot(
             thumbedAssetID: thumbed.id,
+            thumbedFileName: fileNameOrFallback(for: thumbed),
             thumbedMediaType: thumbed.mediaType,
             thumbedCreatedYearMonth: createdYearMonth(for: thumbed),
             thumbedLocationBucket: locationBucket(for: thumbed),
             thumbedVisionSummary: oracleVisionSummary(assetID: thumbed.id, mediaType: thumbed.mediaType),
             candidates: candidates,
-            alreadySeenKeys: alreadySeen
+            alreadySeenAssetIDs: alreadySeen
         )
     }
 
@@ -1194,17 +1295,16 @@ public final class AlbumModel: ObservableObject {
         let anchorID = snapshot.thumbedAssetID.trimmingCharacters(in: .whitespacesAndNewlines)
         recommendAnchorID = anchorID
 
-        let pruned = pruneRecommendsResponse(anchorID: anchorID, raw: result)
-        recommendsCacheByAnchorID[anchorID] = pruned
+        recommendsCacheByAnchorID[anchorID] = result
         recommendsFeedbackByAnchorID[anchorID] = feedback
 
-        recommendItems = pruned.neighbors.compactMap { item(for: $0.id) }
+        recommendItems = result.neighbors.compactMap { item(for: $0.id) }
             .filter { $0.id != anchorID && !hiddenIDs.contains($0.id) }
         neighborsReady = !recommendItems.isEmpty
 
         switch feedback {
         case .up:
-            let nextUpID = chooseNextUpAssetID(snapshot: snapshot, pruned: pruned)
+            let nextUpID = chooseNextUpAssetID(snapshot: snapshot, response: result)
             recommendedAssetID = nextUpID
             if let nextUpID {
                 aiNextAssetIDs = [nextUpID]
@@ -1217,45 +1317,13 @@ public final class AlbumModel: ObservableObject {
             aiNextAssetIDs.removeAll()
         }
 
-        tuningDeltaRequest = AlbumTuningDeltaRequest(deltas: computeTuningDeltas(feedback: feedback, anchorID: anchorID, neighbors: pruned.neighbors))
+        tuningDeltaRequest = AlbumTuningDeltaRequest(deltas: computeTuningDeltas(feedback: feedback, anchorID: anchorID, neighbors: result.neighbors))
     }
 
-    private func pruneRecommendsResponse(anchorID: String, raw: AlbumRecResponse) -> AlbumRecResponse {
-        let trimmedAnchor = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let prunedNextID: String? = {
-            guard let rawNext = raw.nextID?.trimmingCharacters(in: .whitespacesAndNewlines), !rawNext.isEmpty else { return nil }
-            guard rawNext != trimmedAnchor else { return nil }
-            guard !hiddenIDs.contains(rawNext) else { return nil }
-            guard item(for: rawNext) != nil else { return nil }
-            return rawNext
-        }()
-
-        var seen = Set<String>()
-        seen.insert(trimmedAnchor)
-
-        var neighbors: [AlbumRecNeighbor] = []
-        neighbors.reserveCapacity(20)
-
-        for n in raw.neighbors {
-            if neighbors.count >= 20 { break }
-            let id = n.id.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !id.isEmpty else { continue }
-            guard !seen.contains(id) else { continue }
-            guard id != trimmedAnchor else { continue }
-            guard !hiddenIDs.contains(id) else { continue }
-            guard item(for: id) != nil else { continue }
-            seen.insert(id)
-            neighbors.append(n)
-        }
-
-        return AlbumRecResponse(nextID: prunedNextID, neighbors: neighbors)
-    }
-
-    private func chooseNextUpAssetID(snapshot: AlbumOracleSnapshot, pruned: AlbumRecResponse) -> String? {
+    private func chooseNextUpAssetID(snapshot: AlbumOracleSnapshot, response: AlbumRecResponse) -> String? {
         let anchorID = snapshot.thumbedAssetID.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let orderedCandidates = [pruned.nextID].compactMap { $0 } + pruned.neighbors.map(\.id)
+        let orderedCandidates = [response.nextID].compactMap { $0 } + response.neighbors.map(\.id)
 
         for id in orderedCandidates {
             let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1263,7 +1331,7 @@ public final class AlbumModel: ObservableObject {
             guard trimmed != anchorID else { continue }
             guard !hiddenIDs.contains(trimmed) else { continue }
             guard item(for: trimmed) != nil else { continue }
-            guard !snapshot.alreadySeenKeys.contains(trimmed) else { continue }
+            guard !snapshot.alreadySeenAssetIDs.contains(trimmed) else { continue }
             return trimmed
         }
 

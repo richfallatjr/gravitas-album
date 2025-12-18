@@ -270,6 +270,27 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
         out.reserveCapacity(phAssets.count)
 
         for asset in phAssets {
+            let fileName: String? = {
+                let resources = PHAssetResource.assetResources(for: asset)
+                if resources.isEmpty { return nil }
+
+                let preferredTypes: [PHAssetResourceType]
+                switch asset.mediaType {
+                case .video:
+                    preferredTypes = [.fullSizeVideo, .video]
+                case .image:
+                    preferredTypes = [.fullSizePhoto, .photo]
+                default:
+                    preferredTypes = []
+                }
+
+                if let preferred = resources.first(where: { preferredTypes.contains($0.type) }) {
+                    return preferred.originalFilename
+                }
+
+                return resources.first?.originalFilename
+            }()
+
             let mediaType: AlbumMediaType?
             switch asset.mediaType {
             case .image:
@@ -291,6 +312,7 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
             out.append(
                 AlbumAsset(
                     localIdentifier: asset.localIdentifier,
+                    fileName: fileName,
                     mediaType: mediaType,
                     creationDate: asset.creationDate,
                     location: location,

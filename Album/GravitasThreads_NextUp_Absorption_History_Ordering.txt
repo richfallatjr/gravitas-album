@@ -1,0 +1,1321 @@
+Gravitas Threads (visionOS) — “Next Up” absorption + history ordering + de-dupe + LLM list filtering
+Generated: 2025-12-17
+
+Goal of this note:
+- Capture the exact code paths that make “Next Up” (LLM-selected next pick) behave correctly:
+  1) Next Up is recorded in history in the right order,
+  2) items already in history don’t get “absorbed” / surfaced again,
+  3) history items are removed from the on-screen LLM recommendation list,
+  4) history items are excluded from future LLM nextID selections (ALREADY_SEEN_IDS).
+
+High-level behavior:
+- `sim.history` is the canonical “already seen” set.
+- On 👍, the chosen “next” ball is:
+  - stored as `sim.recommendedMeta`,
+  - pushed into `sim.recommendedMetas` (most-recent-first),
+  - appended to `sim.history` (so it shows up immediately, ordered as most-recent),
+  - marked in `sim.aiNextMetaIDs` so the UI can badge it as “AI”.
+- The absorb loop consults `sim.history` and skips anything already seen (prevents re-absorption / double-history).
+- The history sidebar filters `recommendedMetas` against `history` so the LLM list never shows duplicates.
+- The LLM prompt includes `ALREADY_SEEN_IDS` (derived from history) and the system prompt forbids returning them.
+
+──────────────────────────────────────────────────────────────────────────────
+1) Shared state: history + AI “next up” markers + recommendation list
+File: Packages/GAEngine/Sources/GAEngine/GravitasModel.swift
+
+@MainActor
+public final class GravitasModel: ObservableObject {
+    @Published public var history: [MetaInfo] = []
+    @Published public var aiNextMetaIDs: Set<UUID> = []
+    @Published public var recommendedMeta: MetaInfo? = nil
+    @Published public var recommendedMetas: [MetaInfo] = []
+
+    @discardableResult
+    public func appendToHistoryIfNew(_ meta: MetaInfo) -> Bool {
+        guard !history.contains(where: { $0.id == meta.id }) else { return false }
+        history.append(meta)
+        return true
+    }
+
+    public func clearHistory() {
+        history.removeAll()
+        aiNextMetaIDs.removeAll()
+    }
+}
+
+Notes:
+- History ordering is “append at end”; UI shows `history.reversed()` so the most recent item appears first.
+- `aiNextMetaIDs` is cleared alongside history to avoid stale “AI” badges after a reset.
+
+──────────────────────────────────────────────────────────────────────────────
+2) “Next Up” selection: queue + mark + (optionally) surface immediately
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+Within `applyThumbResult(...)`, after resolving the LLM next pick (and validating it is not already seen):
+
+guard req.feedback == .up else {
+    var message = "👎 Applied \(neighborResult.applied) neighbor deltas"
+    if neighborResult.applied == 0, let sample = neighborResult.invalidIDSample, !sample.isEmpty {
+        message += " (invalid IDs: \(sample))"
+    }
+    return ThumbApplySummary(message: message)
+}
+
+guard let nextMetaID = resolvedNextMetaID,
+      !snapshot.alreadySeenMetaIDs.contains(nextMetaID),
+      let nextBall = idToBall[nextMetaID] else {
+    var message = "👍 Applied \(neighborResult.applied) neighbor deltas (no next pick)"
+    if neighborResult.applied == 0, let sample = neighborResult.invalidIDSample, !sample.isEmpty {
+        message += " (invalid IDs: \(sample))"
+    } else if let rawNextID, !rawNextID.isEmpty, keyToMetaID[rawNextID] == nil {
+        message += " (invalid nextID: \(rawNextID))"
+    }
+    return ThumbApplySummary(message: message)
+}
+
+var nextTitle: String? = nil
+if let info = meta[ObjectIdentifier(nextBall)] {
+    sim.recommendedMeta = info
+    pushRecommendedMeta(info)
+    sim.appendToHistoryIfNew(info)
+    sim.aiNextMetaIDs.insert(info.id)
+    accum = 0
+    nextTitle = truncateForPrompt(info.title, maxChars: 64)
+}
+if surfaceNextPick {
+    handleTap(on: nextBall)
+    if let nextTitle, !nextTitle.isEmpty {
+        return ThumbApplySummary(message: "👍 Next: \(nextTitle) — Δ\(neighborResult.applied)")
+    }
+    return ThumbApplySummary(message: "👍 Applied \(neighborResult.applied) neighbor deltas + surfaced next pick")
+}
+
+if let nextTitle, !nextTitle.isEmpty {
+    return ThumbApplySummary(message: "👍 Queued: \(nextTitle) — Δ\(neighborResult.applied)")
+}
+return ThumbApplySummary(message: "👍 Applied \(neighborResult.applied) neighbor deltas (queued recommendation)")
+
+The recommendation list is maintained (dedupe + most-recent-first + cap):
+
+@MainActor
+private func pushRecommendedMeta(_ recommended: MetaInfo) {
+    let maxStored = 12
+    sim.recommendedMetas.removeAll(where: { $0.id == recommended.id })
+    sim.recommendedMetas.insert(recommended, at: 0)
+
+    if sim.recommendedMetas.count > maxStored {
+        sim.recommendedMetas.removeSubrange(maxStored..<sim.recommendedMetas.count)
+    }
+}
+
+Notes:
+- Adding the Next Up item to `history` immediately is what makes it appear in the history list in the correct place.
+- `accum = 0` resets the absorb timer so we don’t immediately auto-absorb another item right after queuing next.
+
+──────────────────────────────────────────────────────────────────────────────
+3) History sidebar: correct ordering + remove history items from “LLM list”
+File: Packages/SharedUI/Sources/SharedUI/ControlView.swift
+
+The sidebar first shows “recommendations” (LLM list), then history (most recent first):
+
+private var recommendationsToShow: [MetaInfo] {
+    guard !recommendedMetas.isEmpty else { return [] }
+    let historyIDs = Set(history.map(\.id))
+    var used = Set<UUID>()
+    used.reserveCapacity(min(recommendedMetas.count, 16))
+    var result: [MetaInfo] = []
+    result.reserveCapacity(min(recommendedMetas.count, 16))
+
+    for meta in recommendedMetas {
+        guard used.insert(meta.id).inserted else { continue }
+        guard !historyIDs.contains(meta.id) else { continue }
+        result.append(meta)
+    }
+    return result
+}
+
+VStack(alignment: .leading, spacing: 8) {
+    ForEach(recommendationsToShow, id: \.id) { meta in
+        HistoryRow(
+            meta: meta,
+            isActive: meta.id == currentMetaID,
+            isAINext: true,
+            kind: .recommendation,
+            feedback: nil,
+            onSelect: { onSelect(meta) }
+        )
+    }
+    ForEach(Array(history.reversed()), id: \.id) { meta in
+        HistoryRow(
+            meta: meta,
+            isActive: meta.id == currentMetaID,
+            isAINext: aiNextMetaIDs.contains(meta.id),
+            kind: .history,
+            feedback: feedbackByMetaID[meta.id],
+            onSelect: { onSelect(meta) }
+        )
+    }
+}
+
+Notes:
+- `recommendationsToShow` removes any recommended item already present in `history` (and also de-dupes).
+- `history.reversed()` is the ordering guarantee: most recent absorb / next-up queues show at the top.
+
+──────────────────────────────────────────────────────────────────────────────
+4) Auto-absorb loop: skip anything already in history (prevents re-absorption)
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+@MainActor
+private func absorbOne() {
+    guard let root = anchor, !balls.isEmpty else { return }
+    let pmn = pmns[nextPMN % pmns.count]; nextPMN += 1
+
+    let centre = pmn.position(relativeTo: root)
+    let alreadySeen = Set(sim.history.map(\.id))
+    let proximityWindowSize = 5
+
+    struct AbsorbCandidate {
+        let id: ObjectIdentifier
+        let dist: Float
+        let speed: Float
+    }
+
+    var candidates: [AbsorbCandidate] = []
+    candidates.reserveCapacity(balls.count)
+
+    for ball in balls {
+        let id = ObjectIdentifier(ball)
+        let dist = distance(ball.position(relativeTo: root), centre)
+        let v = ball.components[VelocityComponent.self]?.v ?? .zero
+        let speed = length(v)
+        candidates.append(.init(id: id, dist: dist, speed: speed))
+    }
+
+    candidates.sort(by: { $0.dist < $1.dist })
+
+    while !candidates.isEmpty {
+        let windowEnd = min(proximityWindowSize, candidates.count)
+        let window = candidates[0..<windowEnd]
+
+        guard let chosen = window.min(by: { $0.speed < $1.speed }) else { return }
+        guard let chosenIndex = candidates.firstIndex(where: { $0.id == chosen.id }) else { return }
+        candidates.remove(at: chosenIndex)
+
+        guard let idx = balls.firstIndex(where: { ObjectIdentifier($0) == chosen.id }) else { continue }
+        let victim = balls[idx]
+        victim.removeFromParent()
+        balls.remove(at: idx)
+
+        guard let info = meta.removeValue(forKey: chosen.id) else { continue }
+        if alreadySeen.contains(info.id) { continue }
+
+        sim.currentMeta = info
+        ensureVisionSummary(for: info, reason: "absorb")
+        sim.appendToHistoryIfNew(info)
+        break
+    }
+}
+
+Why this prevents re-absorption:
+- If an entity’s `MetaInfo.id` is already in `sim.history` (including “Next Up” items added on 👍),
+  the absorb loop removes the sphere but does NOT re-surface it or append it to history again.
+
+──────────────────────────────────────────────────────────────────────────────
+5) LLM prompt: mark history items as ALREADY_SEEN_IDS (so nextID can’t repeat)
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+The thumb request snapshot explicitly maps history → candidate IDs:
+
+private struct ThumbCandidate: Sendable {
+    let key: String
+    let metaID: UUID
+    let title: String
+    let upvotes: Int
+}
+
+private struct ThumbSnapshot: Sendable {
+    let thumbedMetaID: UUID
+    let thumbedTitle: String
+    let thumbedUpvotes: Int
+    let candidates: [ThumbCandidate]
+    let alreadySeenIDs: [String]
+    let alreadySeenMetaIDs: Set<UUID>
+}
+
+@MainActor
+private func buildThumbSnapshot(for req: ThumbRequest) -> ThumbSnapshot? {
+    let baseThumbedTitle = sanitizeCandidateTitle(req.meta.title)
+    let thumbedTitle = candidateTitleForPrompt(base: baseThumbedTitle, sourceID: req.meta.sourceID)
+#if DEBUG
+    if thumbedTitle != baseThumbedTitle {
+        print("[ImmersiveRootView] Enriched THUMBED_TITLE with vision tags metaID=\(req.metaID.uuidString) sourceID=\(req.meta.sourceID) title=\"\(thumbedTitle)\"")
+    }
+#endif
+    let thumbedUpvotes = req.meta.upvoteCount
+    let thumbedMetaID = req.meta.id
+
+    struct ScoredCandidate {
+        let metaID: UUID
+        let baseTitle: String
+        let upvotes: Int
+        let score: Double
+    }
+
+    let thumbTokens = tokenizeTitle(baseThumbedTitle)
+    var scored: [ScoredCandidate] = []
+    scored.reserveCapacity(balls.count)
+
+    for ball in balls {
+        guard let info = meta[ObjectIdentifier(ball)] else { continue }
+        let baseTitle = sanitizeCandidateTitle(info.title)
+        let score = titleSimilarity(thumbTokens: thumbTokens, candidateTitle: baseTitle)
+        scored.append(.init(metaID: info.id, baseTitle: baseTitle, upvotes: info.upvoteCount, score: score))
+    }
+
+    guard !scored.isEmpty else { return nil }
+
+    scored.sort {
+        if $0.score != $1.score { return $0.score > $1.score }
+        return $0.upvotes > $1.upvotes
+    }
+
+    // Keep prompts comfortably under the model context window.
+    // Budget note: we aim for <= 8,192 chars in the *user* prompt.
+    let maxCandidates = 400
+    let maxPromptChars = 8_192
+
+    let baseLines: [String] = [
+        "THUMBED_TITLE: \(thumbedTitle)",
+        "THUMBED_UPVOTES: \(thumbedUpvotes)",
+        "ALREADY_SEEN_IDS:",
+        "CANDIDATES (ID\\tTITLE\\tUPVOTES):"
+    ]
+    var promptChars = baseLines.reduce(0) { $0 + $1.count } + (baseLines.count - 1)
+
+    var candidates: [ThumbCandidate] = []
+    candidates.reserveCapacity(min(scored.count, maxCandidates))
+
+    for entry in scored {
+        guard candidates.count < maxCandidates else { break }
+        if entry.metaID == thumbedMetaID { continue }
+
+        let key = String(candidates.count)
+        let title = entry.baseTitle
+        let line = "\(key)\t\(title)\t\(entry.upvotes)"
+
+        let projected = promptChars + line.count + 1
+        guard projected <= maxPromptChars else { break }
+
+        candidates.append(.init(key: key, metaID: entry.metaID, title: title, upvotes: entry.upvotes))
+        promptChars = projected
+    }
+
+    guard !candidates.isEmpty else { return nil }
+
+#if DEBUG
+    let thumbedEnriched = (thumbedTitle != baseThumbedTitle)
+    print("[ImmersiveRootView] thumbPrompt candidates=\(candidates.count) thumbedEnriched=\(thumbedEnriched)")
+#endif
+
+    var alreadySeenMetaIDs = Set(sim.history.map(\.id))
+    alreadySeenMetaIDs.insert(thumbedMetaID)
+
+    var alreadySeenIDs: [String] = []
+    alreadySeenIDs.reserveCapacity(min(alreadySeenMetaIDs.count, candidates.count))
+
+    for candidate in candidates {
+        if alreadySeenMetaIDs.contains(candidate.metaID) {
+            alreadySeenIDs.append(candidate.key)
+        }
+    }
+
+    // Ensure the prompt stays <= maxPromptChars even if ALREADY_SEEN_IDS grows (it usually doesn't).
+    if !alreadySeenIDs.isEmpty {
+        let withIDs = "ALREADY_SEEN_IDS: \(alreadySeenIDs.joined(separator: ","))"
+        let withoutIDs = "ALREADY_SEEN_IDS:"
+        let delta = withIDs.count - withoutIDs.count
+        if promptChars + delta > maxPromptChars {
+            alreadySeenIDs.removeAll()
+        }
+    }
+
+    return ThumbSnapshot(
+        thumbedMetaID: thumbedMetaID,
+        thumbedTitle: thumbedTitle,
+        thumbedUpvotes: thumbedUpvotes,
+        candidates: candidates,
+        alreadySeenIDs: alreadySeenIDs,
+        alreadySeenMetaIDs: alreadySeenMetaIDs
+    )
+}
+
+The prompt includes that list under the exact label used by the system prompt:
+
+private func buildThumbPrompt(from snapshot: ThumbSnapshot) -> String {
+    var lines: [String] = []
+    lines.reserveCapacity(3 + snapshot.candidates.count)
+
+    lines.append("THUMBED_TITLE: \(snapshot.thumbedTitle)")
+    lines.append("THUMBED_UPVOTES: \(snapshot.thumbedUpvotes)")
+
+    if snapshot.alreadySeenIDs.isEmpty {
+        lines.append("ALREADY_SEEN_IDS:")
+    } else {
+        lines.append("ALREADY_SEEN_IDS: \(snapshot.alreadySeenIDs.joined(separator: ","))")
+    }
+    lines.append("CANDIDATES (ID\\tTITLE\\tUPVOTES):")
+
+    for candidate in snapshot.candidates {
+        lines.append("\(candidate.key)\t\(candidate.title)\t\(candidate.upvotes)")
+    }
+
+    return lines.joined(separator: "\n")
+}
+
+And the LLM is explicitly instructed not to pick an already-seen ID:
+File: Packages/SharedUI/Sources/SharedUI/ThreadsRecService.swift
+
+private static let systemPromptUp: String = """
+You are a recommendation engine for Gravitas Threads.
+Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
+
+Response shape:
+- nextID: String candidate ID
+- neighbors: Array<{id: String candidate ID, similarity: Int rank (1..20)}>
+
+Rules:
+
+- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (small integers like 0,1,2...). Never output UPVOTES as an ID.
+- Never output "..." or placeholder text.
+- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS.
+- neighbors MUST contain the most conceptually related candidates to THUMBED_TITLE.
+- neighbors MUST be ranked best→worst.
+- Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
+- neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
+- Return at most 20 neighbors.
+- Upvotes are ~50% weighting; conceptual match dominates.
+"""
+
+──────────────────────────────────────────────────────────────────────────────
+6) Pop-Out window: where it’s defined + styling + “Open” button under media
+
+The pop-out is a separate SwiftUI WindowGroup keyed by a codable payload:
+
+File: GravitasThreads/GravitasThreads/GravitasThreadsApp.swift
+
+WindowGroup(for: PopOutPayload.self) { binding in
+    if let payload = binding.wrappedValue {
+        PopOutMediaView(payload: payload)
+    } else {
+        Text("Loading...")
+    }
+}
+.defaultSize(width: 640, height: 480)
+.restorationBehavior(.disabled)
+.defaultLaunchBehavior(.automatic)
+
+File: Packages/GAEngine/Sources/GAEngine/PopOutPayload.swift
+
+public struct PopOutPayload: Codable, Hashable {
+    public let meta: MetaInfo
+    public init(meta: MetaInfo) { self.meta = meta }
+}
+
+It’s opened from the main media panel’s action button row:
+
+File: Packages/SharedUI/Sources/SharedUI/ControlView.swift
+
+Button {
+    openWindow(value: PopOutPayload(meta: meta))
+    if !g.poppedMetas.contains(where: { $0.id == meta.id }) {
+        g.poppedMetas.append(meta)
+    }
+} label: {
+    Label("Pop Out", systemImage: "square.and.arrow.up.on.square")
+        .labelStyle(.iconOnly)
+        .font(.title3)
+        .padding(8)
+}
+.buttonStyle(.plain)
+.background(.thinMaterial)
+.clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+.accessibilityLabel("Pop out post")
+
+Pop-out view styling:
+
+File: Packages/SharedUI/Sources/SharedUI/PopOutMediaView.swift
+
+public var body: some View {
+    VStack(spacing: 16) {
+        mediaContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.opacity(0.2))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+        HStack {
+            Text(payload.meta.title)
+                .font(.headline)
+                .multilineTextAlignment(.leading)
+            Spacer()
+            if let url = payload.meta.postURL {
+                Button {
+                    openURL(url)
+                } label: {
+                    Label("Open", systemImage: "safari")
+                }
+            }
+        }
+    }
+    .padding(24)
+    .background(.ultraThinMaterial)
+    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    .onAppear { configure(for: payload.meta) }
+    .onChange(of: payload.meta) { configure(for: $0) }
+    .onDisappear { tearDownPlayer() }
+}
+
+What’s important about the styling + “Open” row:
+- The media area is visually separated from the window material using a subtle dark backing (`Color.black.opacity(0.2)`) and rounded corners (radius 16).
+- The “under media” row is a simple `HStack` with the title on the left and the `Open` (Safari) button on the right; the button only appears when `payload.meta.postURL` is non-nil.
+- The entire panel uses `.background(.ultraThinMaterial)` with a larger corner radius (24) to read as a single glass card inside the window.
+
+Media rendering inside the pop-out:
+
+@ViewBuilder
+private var mediaContent: some View {
+    if payload.meta.isVideo,
+       let urlString = payload.meta.videoURL,
+       let url = URL(string: urlString) {
+        VideoPlayer(player: player)
+            .onAppear { preparePlayer(with: url) }
+    } else if !payload.meta.imageURL.isEmpty,
+              let url = URL(string: payload.meta.imageURL) {
+        AsyncImage(url: url) { img in
+            img.resizable().scaledToFit()
+        } placeholder: {
+            ProgressView()
+        }
+    } else {
+        Color.clear
+    }
+}
+
+Notes:
+- Images are `scaledToFit()` (no cropping) so the post is readable in the pop-out window.
+- Videos use an `AVQueuePlayer` + `AVPlayerLooper` and are torn down on disappear to avoid background playback / leaks.
+
+Main “in-panel” (non-pop-out) styling under the image/video:
+File: Packages/SharedUI/Sources/SharedUI/ControlView.swift
+
+var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottomTrailing) { visionTagStatusBadge }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+        HStack(alignment: .bottom, spacing: 12) {
+            metaCard
+            Spacer(minLength: 0)
+            actionButtons
+        }
+    }
+}
+
+The “Open in Safari” button (under the media) matches the rest of the glass styling:
+
+private var actionButtons: some View {
+    HStack(alignment: .center, spacing: 8) {
+        if meta.postURL != nil {
+            Button {
+                openPost()
+            } label: {
+                Image(systemName: "safari")
+                    .font(.title3)
+                    .padding(8)
+            }
+            .buttonStyle(.plain)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .accessibilityLabel("Open in Safari")
+        }
+        // ... bookmark + popout buttons use the same visual treatment
+    }
+    .padding(8)
+    .background(.ultraThinMaterial)
+    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+}
+
+──────────────────────────────────────────────────────────────────────────────
+7) Foundation Models (Framework + availability gates + versions)
+
+This project uses Apple’s `FoundationModels` behind a compile-time AND runtime gate so the app:
+- compiles even when `FoundationModels` isn’t present at build time, and
+- runs safely on OS versions where the API isn’t available at runtime.
+
+File: Packages/SharedUI/Sources/SharedUI/ThreadsRecService.swift
+
+Import gate (critical):
+
+import Foundation
+
+#if canImport(FoundationModels)
+@_weakLinked import FoundationModels
+#endif
+
+Runtime availability gate (critical):
+
+#if canImport(FoundationModels)
+if #available(visionOS 26.0, iOS 26.0, macOS 26.0, *) {
+    let model = SystemLanguageModel.default
+    switch model.availability {
+    case .available:
+        // safe to create sessions and call respond(...)
+    case .unavailable:
+        // return an error outcome
+    @unknown default:
+        // return an error outcome
+    }
+}
+#endif
+
+Why both gates matter:
+- `canImport(FoundationModels)` protects compilation when the SDK/framework isn’t present.
+- `@_weakLinked` prevents hard-linking so the binary can still launch on systems without the framework.
+- `#available(... 26.0 ...)` prevents runtime symbol usage on older OS versions even if the app compiled with a newer SDK.
+
+──────────────────────────────────────────────────────────────────────────────
+8) Foundation Models call flow (exact implementation)
+
+File: Packages/SharedUI/Sources/SharedUI/ThreadsRecService.swift
+
+Types (decoded from the LLM’s JSON, with lenient decoding for IDs/numbers):
+
+public struct ThreadsRecNeighbor: Sendable, Decodable {
+    public let id: String
+    public let similarity: Double
+    // init(from:) decodes id as String/Int/Double and similarity as Double/Int/String
+}
+
+public struct ThreadsRecResponse: Sendable, Decodable {
+    public let nextID: String?
+    public let neighbors: [ThreadsRecNeighbor]
+    // init(from:) decodes nextID as String/Int/Double and neighbors as an array (or [])
+}
+
+public struct ThreadsRecOutcome: Sendable {
+    public let response: ThreadsRecResponse?
+    public let errorDescription: String?
+    public let debugDumpPath: String?
+}
+
+Public entrypoints (separate prompts + separate sessions):
+
+public static func recommendThumbUp(prompt: String, requestID: UUID) async -> ThreadsRecOutcome {
+    await runFoundationCall(system: systemPromptUp, prompt: prompt, requestID: requestID, mode: "thumb_up")
+}
+
+public static func recommendThumbDown(prompt: String, requestID: UUID) async -> ThreadsRecOutcome {
+    await runFoundationCall(system: systemPromptDown, prompt: prompt, requestID: requestID, mode: "thumb_down")
+}
+
+Hard budgets (kept small on purpose):
+
+private static let maxUserPromptChars = 8_192
+private static let maximumResponseTokens = 512
+
+Session + generation options (the actual Foundation Models call site):
+
+let session = LanguageModelSession(model: model, instructions: system)
+let options = GenerationOptions(maximumResponseTokens: maximumResponseTokens)
+let reply = try await session.respond(to: prompt, options: options)
+
+Return / error behavior:
+- If prompt exceeds `maxUserPromptChars`, the call is rejected early with a user-facing error string.
+- If `FoundationModels` isn’t available at compile time or runtime, returns `ThreadsRecOutcome(..., errorDescription: "FoundationModels not available", ...)`.
+- Errors are captured as `errorDescription` strings; JSON sanitation + decoding attempts occur on successful reply.
+
+──────────────────────────────────────────────────────────────────────────────
+9) Foundation Models debug dumps (why “it worked yesterday”)
+
+The service writes debug dump files ONLY in DEBUG builds, under the user caches directory:
+
+File: Packages/SharedUI/Sources/SharedUI/ThreadsRecService.swift
+
+private static func debugDumpURL(for requestID: UUID, mode: String) -> URL? {
+    guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+    let dir = caches.appendingPathComponent("ThreadsRecDebug", isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir.appendingPathComponent("\(mode)_\(requestID.uuidString).txt")
+}
+
+Each dump includes:
+- system prompt
+- user prompt
+- raw model output
+- sanitized output
+- decode/session errors (if any)
+
+This is the fastest way to diagnose:
+- “model unavailable”
+- “prompt too large”
+- invalid JSON (extra text/code fences)
+- IDs not matching candidates
+
+──────────────────────────────────────────────────────────────────────────────
+10) JSON sanitation + decoding (exact behavior)
+
+The model is required to return JSON only, but the service still defends against:
+- code fences
+- surrounding text
+- accidental multi-line output
+
+File: Packages/SharedUI/Sources/SharedUI/ThreadsRecService.swift
+
+private static func sanitizeJSON(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.contains("```") else { return extractJSONObject(from: trimmed) }
+
+    // remove leading/trailing ``` fences if present
+    // then extract the outermost {...} object
+}
+
+private static func extractJSONObject(from raw: String) -> String {
+    guard let start = raw.firstIndex(of: "{"),
+          let end = raw.lastIndex(of: "}"),
+          start < end else { return raw }
+    return String(raw[start...end])
+}
+
+Decode path:
+- Attempt `JSONDecoder().decode(ThreadsRecResponse.self, from: data)`.
+- If decode fails, attempt a lenient regex recovery (`parseResponseLenient`).
+- If both fail, return an error outcome.
+
+──────────────────────────────────────────────────────────────────────────────
+11) Prompt strings (as-coded) vs prompt strings (VISION_DESCRIPTION swap)
+
+IMPORTANT:
+- The CURRENT app code (today) builds a user prompt with `THUMBED_UPVOTES` and `CANDIDATES (ID<TAB>TITLE<TAB>UPVOTES)`.
+- Your requested change is to swap that “upvotes” field to “vision description”.
+
+Below are (A) the exact system prompts as-coded, and (B) the swapped versions you requested.
+
+──────────────────────────────────────────────────────────────────────────────
+11A) System prompts (as-coded today)
+File: Packages/SharedUI/Sources/SharedUI/ThreadsRecService.swift
+
+systemPromptUp:
+You are a recommendation engine for Gravitas Threads.
+Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
+
+Response shape:
+- nextID: String candidate ID
+- neighbors: Array<{id: String candidate ID, similarity: Int rank (1..20)}>
+
+Rules:
+
+- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (small integers like 0,1,2...). Never output UPVOTES as an ID.
+- Never output "..." or placeholder text.
+- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS.
+- neighbors MUST contain the most conceptually related candidates to THUMBED_TITLE.
+- neighbors MUST be ranked best→worst.
+- Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
+- neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
+- Return at most 20 neighbors.
+- Upvotes are ~50% weighting; conceptual match dominates.
+
+systemPromptDown:
+You are a recommendation engine for Gravitas Threads.
+Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
+
+Response shape:
+- nextID: String candidate ID
+- neighbors: Array<{id: String candidate ID, similarity: Int rank (1..20)}>
+
+Rules:
+
+- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (small integers like 0,1,2...). Never output UPVOTES as an ID.
+- Never output "..." or placeholder text.
+- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS (it will NOT be surfaced in UI).
+- neighbors MUST contain the most conceptually related candidates to THUMBED_TITLE.
+- neighbors MUST be ranked best→worst.
+- Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
+- neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
+- Return at most 20 neighbors.
+- Upvotes are ~50% weighting; conceptual match dominates.
+
+──────────────────────────────────────────────────────────────────────────────
+11B) System prompts (VISION_DESCRIPTION swap — requested)
+
+If you swap the prompt inputs to remove UPVOTES and include Vision text instead, update the system prompt language to match:
+
+systemPromptUp (VISION_DESCRIPTION):
+You are a recommendation engine for Gravitas Threads.
+Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
+
+Response shape:
+- nextID: String candidate ID
+- neighbors: Array<{id: String candidate ID, similarity: Int rank (1..20)}>
+
+Rules:
+
+- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (small integers like 0,1,2...). Never output TITLE or VISION_DESCRIPTION as an ID.
+- Never output "..." or placeholder text.
+- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS.
+- neighbors MUST contain the most conceptually related candidates to THUMBED_TITLE and THUMBED_VISION_DESCRIPTION.
+- neighbors MUST be ranked best→worst.
+- Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
+- neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
+- Return at most 20 neighbors.
+- Vision description is a strong signal; conceptual match dominates.
+
+systemPromptDown (VISION_DESCRIPTION):
+You are a recommendation engine for Gravitas Threads.
+Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
+
+Response shape:
+- nextID: String candidate ID
+- neighbors: Array<{id: String candidate ID, similarity: Int rank (1..20)}>
+
+Rules:
+
+- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (small integers like 0,1,2...). Never output TITLE or VISION_DESCRIPTION as an ID.
+- Never output "..." or placeholder text.
+- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS (it will NOT be surfaced in UI).
+- neighbors MUST contain the most conceptually related candidates to THUMBED_TITLE and THUMBED_VISION_DESCRIPTION.
+- neighbors MUST be ranked best→worst.
+- Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
+- neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
+- Return at most 20 neighbors.
+- Vision description is a strong signal; conceptual match dominates.
+
+──────────────────────────────────────────────────────────────────────────────
+12) User prompt format (as-coded today) vs (VISION_DESCRIPTION swap)
+
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+12A) User prompt format (as-coded today):
+
+THUMBED_TITLE: <thumbed title (optionally enriched with vision tags)>
+THUMBED_UPVOTES: <int>
+ALREADY_SEEN_IDS: <comma-separated candidate IDs, or blank>
+CANDIDATES (ID<TAB>TITLE<TAB>UPVOTES):
+0<TAB><candidate title><TAB><int>
+1<TAB><candidate title><TAB><int>
+...
+
+12B) User prompt format (VISION_DESCRIPTION swap — requested):
+
+THUMBED_TITLE: <thumbed title>
+THUMBED_VISION_DESCRIPTION: <short vision summary text (or blank)>
+ALREADY_SEEN_IDS: <comma-separated candidate IDs, or blank>
+CANDIDATES (ID<TAB>TITLE<TAB>VISION_DESCRIPTION):
+0<TAB><candidate title><TAB><short vision summary text (or blank)>
+1<TAB><candidate title><TAB><short vision summary text (or blank)>
+...
+
+Where “vision description” comes from in this repo:
+- `sim.visionSummaryBySourceID[sourceID]` (populated by `ensureVisionSummary(for:reason:)` in `ImmersiveRootView`)
+- In the current implementation, vision tags are already used to enrich `THUMBED_TITLE` when available.
+
+Practical constraints when swapping UPVOTES → VISION_DESCRIPTION:
+- Vision description text must be sanitized to remove tabs/newlines so rows stay parseable (`\t`-delimited).
+- Vision descriptions must be clipped (e.g., 64–96 chars) or you will blow the 8,192-char user prompt budget and lose too many candidates.
+- It’s normal for some candidates to have blank vision descriptions unless you precompute/queue vision tagging for more items.
+
+──────────────────────────────────────────────────────────────────────────────
+13) ThreadsRecService.swift (full reference, copy/paste safe)
+
+This is the complete service as it exists in this repo today.
+File: Packages/SharedUI/Sources/SharedUI/ThreadsRecService.swift
+
+import Foundation
+
+#if canImport(FoundationModels)
+@_weakLinked import FoundationModels
+#endif
+
+public struct ThreadsRecNeighbor: Sendable, Decodable {
+    public let id: String
+    public let similarity: Double
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case similarity
+    }
+
+    public init(id: String, similarity: Double) {
+        self.id = id
+        self.similarity = similarity
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = Self.decodeStringOrInt(container: container, key: .id) ?? ""
+        similarity = Self.decodeDoubleOrString(container: container, key: .similarity) ?? 0
+    }
+
+    private static func decodeStringOrInt(container: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) -> String? {
+        if let s = try? container.decode(String.self, forKey: key) {
+            return s
+        }
+        if let i = try? container.decode(Int.self, forKey: key) {
+            return String(i)
+        }
+        if let d = try? container.decode(Double.self, forKey: key) {
+            if d.rounded() == d { return String(Int(d)) }
+            return String(d)
+        }
+        return nil
+    }
+
+    private static func decodeDoubleOrString(container: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) -> Double? {
+        if let d = try? container.decode(Double.self, forKey: key) {
+            return d
+        }
+        if let i = try? container.decode(Int.self, forKey: key) {
+            return Double(i)
+        }
+        if let s = try? container.decode(String.self, forKey: key) {
+            return Double(s.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return nil
+    }
+}
+
+public struct ThreadsRecResponse: Sendable, Decodable {
+    public let nextID: String?
+    public let neighbors: [ThreadsRecNeighbor]
+
+    private enum CodingKeys: String, CodingKey {
+        case nextID
+        case neighbors
+    }
+
+    public init(nextID: String?, neighbors: [ThreadsRecNeighbor]) {
+        self.nextID = nextID
+        self.neighbors = neighbors
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        if let nextString = try? container.decode(String.self, forKey: .nextID) {
+            nextID = nextString
+        } else if let nextInt = try? container.decode(Int.self, forKey: .nextID) {
+            nextID = String(nextInt)
+        } else if let nextDouble = try? container.decode(Double.self, forKey: .nextID) {
+            if nextDouble.rounded() == nextDouble {
+                nextID = String(Int(nextDouble))
+            } else {
+                nextID = String(nextDouble)
+            }
+        } else {
+            nextID = nil
+        }
+
+        neighbors = (try? container.decode([ThreadsRecNeighbor].self, forKey: .neighbors)) ?? []
+    }
+}
+
+public struct ThreadsRecOutcome: Sendable {
+    public let response: ThreadsRecResponse?
+    public let errorDescription: String?
+    public let debugDumpPath: String?
+
+    public init(response: ThreadsRecResponse?, errorDescription: String?, debugDumpPath: String?) {
+        self.response = response
+        self.errorDescription = errorDescription
+        self.debugDumpPath = debugDumpPath
+    }
+}
+
+public enum ThreadsRecService {
+    private static let maxUserPromptChars = 8_192
+    private static let maximumResponseTokens = 512
+
+    // MARK: - Public API (separate prompts + separate sessions)
+
+    public static func recommendThumbUp(prompt: String, requestID: UUID) async -> ThreadsRecOutcome {
+        await runFoundationCall(system: systemPromptUp, prompt: prompt, requestID: requestID, mode: "thumb_up")
+    }
+
+    public static func recommendThumbDown(prompt: String, requestID: UUID) async -> ThreadsRecOutcome {
+        await runFoundationCall(system: systemPromptDown, prompt: prompt, requestID: requestID, mode: "thumb_down")
+    }
+
+    // MARK: - Prompt Definitions
+
+    private static let systemPromptUp: String = """
+You are a recommendation engine for Gravitas Threads.
+Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
+
+Response shape:
+- nextID: String candidate ID
+- neighbors: Array<{id: String candidate ID, similarity: Int rank (1..20)}>
+
+Rules:
+
+- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (small integers like 0,1,2...). Never output UPVOTES as an ID.
+- Never output "..." or placeholder text.
+- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS.
+- neighbors MUST contain the most conceptually related candidates to THUMBED_TITLE.
+- neighbors MUST be ranked best→worst.
+- Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
+- neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
+- Return at most 20 neighbors.
+- Upvotes are ~50% weighting; conceptual match dominates.
+"""
+
+    private static let systemPromptDown: String = """
+You are a recommendation engine for Gravitas Threads.
+Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
+
+Response shape:
+- nextID: String candidate ID
+- neighbors: Array<{id: String candidate ID, similarity: Int rank (1..20)}>
+
+Rules:
+
+- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (small integers like 0,1,2...). Never output UPVOTES as an ID.
+- Never output "..." or placeholder text.
+- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS (it will NOT be surfaced in UI).
+- neighbors MUST contain the most conceptually related candidates to THUMBED_TITLE.
+- neighbors MUST be ranked best→worst.
+- Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
+- neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
+- Return at most 20 neighbors.
+- Upvotes are ~50% weighting; conceptual match dominates.
+"""
+
+    // MARK: - FoundationModels backend
+
+    private static func runFoundationCall(system: String, prompt: String, requestID: UUID, mode: String) async -> ThreadsRecOutcome {
+#if canImport(FoundationModels)
+        if #available(visionOS 26.0, iOS 26.0, macOS 26.0, *) {
+            let model = SystemLanguageModel.default
+
+            switch model.availability {
+            case .available:
+                if prompt.count > maxUserPromptChars {
+#if DEBUG
+                    debugLog("Rejecting \(mode) requestID=\(requestID.uuidString) promptChars=\(prompt.count) exceeds maxUserPromptChars=\(maxUserPromptChars)")
+#endif
+                    return ThreadsRecOutcome(
+                        response: nil,
+                        errorDescription: "Prompt too large (\(prompt.count) chars > \(maxUserPromptChars) budget)",
+                        debugDumpPath: nil
+                    )
+                }
+                let dumpPath: String?
+#if DEBUG
+                let dumpURL = debugDumpURL(for: requestID, mode: mode)
+                dumpPath = dumpURL?.path
+                let systemChars = system.count
+                let promptChars = prompt.count
+                let systemBytes = system.utf8.count
+                let promptBytes = prompt.utf8.count
+                debugLog("Budget \(mode) requestID=\(requestID.uuidString) maxUserPromptChars=\(maxUserPromptChars) maximumResponseTokens=\(maximumResponseTokens)")
+                debugLog("Starting \(mode) requestID=\(requestID.uuidString) systemChars=\(systemChars) promptChars=\(promptChars) totalChars=\(systemChars + promptChars) systemBytes=\(systemBytes) promptBytes=\(promptBytes) totalBytes=\(systemBytes + promptBytes)")
+                debugLogLarge("SYSTEM PROMPT", system, requestID: requestID, maxChars: 4000)
+                debugLogLarge("USER PROMPT", prompt, requestID: requestID, maxChars: 12_000)
+                if let dumpURL {
+                    debugAppend("""
+                    === ThreadsRecService \(mode) ===
+                    requestID: \(requestID.uuidString)
+                    date: \(Date().description)
+
+                    --- SYSTEM PROMPT ---
+                    \(system)
+
+                    --- USER PROMPT ---
+                    \(prompt)
+
+                    """, to: dumpURL)
+                    debugLog("Dump file: \(dumpURL.path)")
+                }
+#endif
+#if !DEBUG
+                dumpPath = nil
+#endif
+                let session = LanguageModelSession(model: model, instructions: system)
+                do {
+                    let options = GenerationOptions(maximumResponseTokens: maximumResponseTokens)
+                    let reply = try await session.respond(to: prompt, options: options)
+#if DEBUG
+                    debugLog("Raw response chars=\(reply.content.count) requestID=\(requestID.uuidString)")
+                    debugLogLarge("RAW RESPONSE", reply.content, requestID: requestID, maxChars: 8000)
+                    if let dumpURL {
+                        debugAppend("""
+
+                        --- RAW RESPONSE ---
+                        \(reply.content)
+
+                        """, to: dumpURL)
+                    }
+#endif
+                    let cleaned = sanitizeJSON(reply.content)
+#if DEBUG
+                    debugLog("Cleaned response chars=\(cleaned.count) requestID=\(requestID.uuidString)")
+                    debugLogLarge("CLEANED RESPONSE", cleaned, requestID: requestID, maxChars: 8000)
+                    if let dumpURL {
+                        debugAppend("""
+
+                        --- CLEANED RESPONSE ---
+                        \(cleaned)
+
+                        """, to: dumpURL)
+                    }
+#endif
+
+                    guard let data = cleaned.data(using: .utf8) else {
+#if DEBUG
+                        debugLog("Failed to convert cleaned response to UTF-8 data requestID=\(requestID.uuidString)")
+                        if let dumpURL {
+                            debugAppend("\n--- ERROR ---\ncleaned response is not UTF-8 encodable\n", to: dumpURL)
+                        }
+#endif
+                        return ThreadsRecOutcome(
+                            response: nil,
+                            errorDescription: "Cleaned response is not UTF-8 encodable",
+                            debugDumpPath: dumpPath
+                        )
+                    }
+
+                    do {
+                        let decoded = try JSONDecoder().decode(ThreadsRecResponse.self, from: data)
+                        return ThreadsRecOutcome(response: decoded, errorDescription: nil, debugDumpPath: dumpPath)
+                    } catch {
+#if DEBUG
+                        debugLog("Decode failed requestID=\(requestID.uuidString) error=\(String(describing: error))")
+                        if let dumpURL {
+                            debugAppend("""
+
+                            --- DECODE ERROR ---
+                            \(String(describing: error))
+
+                            """, to: dumpURL)
+                        }
+#endif
+
+                        if let recovered = parseResponseLenient(from: cleaned) {
+#if DEBUG
+                            debugLog("Recovered response via lenient parse requestID=\(requestID.uuidString) nextID=\(recovered.nextID ?? "nil") neighbors=\(recovered.neighbors.count)")
+                            if let dumpURL {
+                                debugAppend("""
+
+                                --- DECODE WARNING ---
+                                Recovered response via lenient parse (response was not valid JSON).
+
+                                """, to: dumpURL)
+                            }
+#endif
+                            return ThreadsRecOutcome(response: recovered, errorDescription: nil, debugDumpPath: dumpPath)
+                        }
+
+                        return ThreadsRecOutcome(
+                            response: nil,
+                            errorDescription: "Decode failed: \(String(describing: error))",
+                            debugDumpPath: dumpPath
+                        )
+                    }
+                } catch {
+#if DEBUG
+                    debugLog("Session error requestID=\(requestID.uuidString) error=\(String(describing: error))")
+                    if let dumpURL {
+                        debugAppend("""
+
+                        --- SESSION ERROR ---
+                        \(String(describing: error))
+
+                        """, to: dumpURL)
+                    }
+#endif
+                    return ThreadsRecOutcome(
+                        response: nil,
+                        errorDescription: "Session error: \(String(describing: error))",
+                        debugDumpPath: dumpPath
+                    )
+                }
+
+            case .unavailable:
+#if DEBUG
+                debugLog("Model unavailable requestID=\(requestID.uuidString)")
+#endif
+                return ThreadsRecOutcome(response: nil, errorDescription: "Model unavailable", debugDumpPath: nil)
+
+            @unknown default:
+#if DEBUG
+                debugLog("Model availability unknown requestID=\(requestID.uuidString)")
+#endif
+                return ThreadsRecOutcome(response: nil, errorDescription: "Model availability unknown", debugDumpPath: nil)
+            }
+        }
+#endif
+        return ThreadsRecOutcome(response: nil, errorDescription: "FoundationModels not available", debugDumpPath: nil)
+    }
+
+    private static func sanitizeJSON(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("```") else { return extractJSONObject(from: trimmed) }
+
+        var lines = trimmed.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        if let first = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+           first.hasPrefix("```") {
+            lines.removeFirst()
+        }
+
+        if let last = lines.last?.trimmingCharacters(in: .whitespacesAndNewlines),
+           last.hasPrefix("```") {
+            lines.removeLast()
+        }
+
+        let unfenced = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return extractJSONObject(from: unfenced)
+    }
+
+    private static func extractJSONObject(from raw: String) -> String {
+        guard let start = raw.firstIndex(of: "{"),
+              let end = raw.lastIndex(of: "}"),
+              start < end else {
+            return raw
+        }
+        return String(raw[start...end])
+    }
+
+#if DEBUG
+    private static func debugDumpURL(for requestID: UUID, mode: String) -> URL? {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let dir = caches.appendingPathComponent("ThreadsRecDebug", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+        return dir.appendingPathComponent("\(mode)_\(requestID.uuidString).txt")
+    }
+
+    private static func debugAppend(_ text: String, to url: URL) {
+        guard let data = text.data(using: .utf8) else { return }
+        if FileManager.default.fileExists(atPath: url.path),
+           let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            handle.closeFile()
+        } else {
+            try? data.write(to: url, options: [.atomic])
+        }
+    }
+
+    private static func debugLog(_ message: String) {
+        print("[ThreadsRecService] \(message)")
+    }
+
+    private static func debugLogLarge(_ label: String, _ text: String, requestID: UUID, maxChars: Int) {
+        guard maxChars > 0 else { return }
+        if text.count <= maxChars {
+            debugLog("\(label) requestID=\(requestID.uuidString):\n\(text)")
+            return
+        }
+
+        let half = maxChars / 2
+        let head = text.prefix(half)
+        let tail = text.suffix(maxChars - half)
+        debugLog("""
+        \(label) requestID=\(requestID.uuidString) (TRUNCATED chars=\(text.count)):
+        \(head)
+
+        … [truncated] …
+
+        \(tail)
+        """)
+    }
+#endif
+}
+
+private extension ThreadsRecService {
+    static func parseResponseLenient(from raw: String) -> ThreadsRecResponse? {
+        let nextID = extractNextIDLenient(from: raw)
+        let neighbors = extractNeighborsLenient(from: raw)
+        if nextID == nil && neighbors.isEmpty { return nil }
+        return ThreadsRecResponse(nextID: nextID, neighbors: neighbors)
+    }
+
+    static func extractNextIDLenient(from raw: String) -> String? {
+        let pattern = "\"nextID\"\\s*:\\s*(?:\"([^\"]+)\"|(\\d+(?:\\.\\d+)?))"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        let range = NSRange(raw.startIndex..<raw.endIndex, in: raw)
+        guard let match = regex.firstMatch(in: raw, options: [], range: range) else { return nil }
+
+        if let r1 = Range(match.range(at: 1), in: raw), !r1.isEmpty {
+            return String(raw[r1]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let r2 = Range(match.range(at: 2), in: raw), !r2.isEmpty {
+            return String(raw[r2]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    static func extractNeighborsLenient(from raw: String) -> [ThreadsRecNeighbor] {
+        // Finds `"id": <string|number>` followed by `"similarity": <number>` anywhere after it (even if extra keys exist).
+        let pattern = "\"id\"\\s*:\\s*(?:\"([^\"]+)\"|(\\d+(?:\\.\\d+)?))[^\\}]*?\"similarity\"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let range = NSRange(raw.startIndex..<raw.endIndex, in: raw)
+        let matches = regex.matches(in: raw, options: [], range: range)
+
+        var neighbors: [ThreadsRecNeighbor] = []
+        neighbors.reserveCapacity(min(matches.count, 60))
+
+        for match in matches.prefix(60) {
+            var id: String?
+            if let r1 = Range(match.range(at: 1), in: raw), !r1.isEmpty {
+                id = String(raw[r1]).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if let r2 = Range(match.range(at: 2), in: raw), !r2.isEmpty {
+                id = String(raw[r2]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            guard let id, !id.isEmpty else { continue }
+            guard let r3 = Range(match.range(at: 3), in: raw) else { continue }
+            let simString = raw[r3].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let sim = Double(simString) else { continue }
+
+            let clamped = max(0.0, min(1.0, sim))
+            neighbors.append(.init(id: id, similarity: clamped))
+        }
+
+        return neighbors
+    }
+}
+
+──────────────────────────────────────────────────────────────────────────────
+14) Implementing the UPVOTES → VISION_DESCRIPTION prompt swap (what changes, exactly)
+
+If you decide to apply the prompt swap in code (not just in documentation), the required touch points are:
+
+1) Update the user prompt labels + columns
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+- Replace `THUMBED_UPVOTES:` with `THUMBED_VISION_DESCRIPTION:`
+- Replace `CANDIDATES (ID<TAB>TITLE<TAB>UPVOTES):` with `CANDIDATES (ID<TAB>TITLE<TAB>VISION_DESCRIPTION):`
+- Replace the 3rd candidate column from integer upvotes → short vision summary text.
+
+2) Source “vision description” from the existing cache
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+- Vision cache: `sim.visionSummaryBySourceID[sourceID]`
+- That cache is populated by `ensureVisionSummary(for:reason:)`
+
+3) Keep the prompt parseable + under budget
+- Sanitize vision text to remove `\t`, `\n`, and `\r` (tabs/newlines will break the row format).
+- Clip vision text aggressively (64–96 chars per row).
+- Expect fewer candidates to fit inside the 8,192-char prompt budget once you add text in the 3rd column.
+
+4) Update the system prompts to match the new input schema
+File: Packages/SharedUI/Sources/SharedUI/ThreadsRecService.swift
+- Remove “Never output UPVOTES as an ID.” (or replace with “Never output TITLE or VISION_DESCRIPTION as an ID.”)
+- Replace “Upvotes are ~50% weighting” with a statement about vision description weighting/signal.
+
+5) What does NOT need to change
+- JSON response schema (`nextID`, `neighbors`) remains the same.
+- The app applies neighbor influence by the ORDER of `neighbors` (rank), not by the numeric `similarity` value.
+- History de-dupe / Next Up ordering logic is unchanged.

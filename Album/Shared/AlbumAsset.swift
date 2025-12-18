@@ -18,6 +18,7 @@ public struct AlbumLocation: Sendable, Codable, Hashable {
 public struct AlbumAsset: Sendable, Identifiable, Codable, Hashable {
     public let id: String
     public let localIdentifier: String
+    public let fileName: String?
     public let mediaType: AlbumMediaType
     public let creationDate: Date?
     public let location: AlbumLocation?
@@ -28,6 +29,7 @@ public struct AlbumAsset: Sendable, Identifiable, Codable, Hashable {
 
     public init(
         localIdentifier: String,
+        fileName: String? = nil,
         mediaType: AlbumMediaType,
         creationDate: Date?,
         location: AlbumLocation?,
@@ -39,6 +41,7 @@ public struct AlbumAsset: Sendable, Identifiable, Codable, Hashable {
         let trimmed = localIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
         self.localIdentifier = trimmed
         self.id = trimmed
+        self.fileName = fileName?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.mediaType = mediaType
         self.creationDate = creationDate
         self.location = location
@@ -56,4 +59,3 @@ public enum AlbumSamplingMode: String, Sendable, Codable, CaseIterable, Identifi
 
     public var id: String { rawValue }
 }
-

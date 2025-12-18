@@ -16,6 +16,8 @@ public struct AlbumPopOutAssetView: View {
         .onAppear {
             model.appendPoppedAsset(assetID)
         }
+        .onDisappear {
+            model.removePoppedAsset(assetID)
+        }
     }
 }
-

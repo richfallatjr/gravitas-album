@@ -53,7 +53,7 @@ actor AlbumFoundationModelsOracleEngine {
             )
         }
 
-        let session: LanguageModelSession
+        var session: LanguageModelSession
         switch feedback {
         case .up:
             if let existing = thumbUpSession {
@@ -73,79 +73,98 @@ actor AlbumFoundationModelsOracleEngine {
             }
         }
 
-        let candidateCounts = Self.candidateBudgets(total: snapshot.candidates.count)
-        var lastError: String? = nil
+        if Task.isCancelled {
+            AlbumLog.model.info("FoundationModels oracle cancelled requestID: \(requestID.uuidString, privacy: .public)")
+            return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: "Cancelled")
+        }
 
-        for maxCandidates in candidateCounts {
-            if Task.isCancelled {
-                AlbumLog.model.info("FoundationModels oracle cancelled requestID: \(requestID.uuidString, privacy: .public)")
+        let maxCandidates = snapshot.candidates.count
+        let prompt = Self.buildPrompt(snapshot: snapshot, feedback: feedback, requestID: requestID, maxCandidates: maxCandidates)
+        AlbumLLMDebugDump.dumpPrompt(requestID: requestID, feedback: feedback, maxCandidates: maxCandidates, prompt: prompt)
+
+        do {
+            AlbumLog.model.info("FoundationModels request: maxCandidates=\(maxCandidates) promptChars=\(prompt.count)")
+            var options = GenerationOptions()
+            options.sampling = .greedy
+            options.temperature = 0
+            options.maximumResponseTokens = 1200
+
+            let response = try await session.respond(to: prompt, options: options)
+            let candidates = Self.stringFields(from: response)
+            AlbumLLMDebugDump.dumpResponse(
+                requestID: requestID,
+                feedback: feedback,
+                maxCandidates: maxCandidates,
+                responseDescription: String(describing: response),
+                stringCandidates: candidates
+            )
+
+            if candidates.contains(where: Self.containsError) {
+                let error = "LLM refused or returned an error"
+                AlbumLog.model.info("FoundationModels error: \(error, privacy: .public)")
+                return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: error)
+            }
+
+            guard let decoded = Self.decodeResponse(from: response, allowNextPick: feedback == .up) else {
+                let error = "LLM JSON decode failed"
+                AlbumLog.model.info("FoundationModels error: \(error, privacy: .public)")
+                return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: error)
+            }
+
+            let mapped = Self.mapResponse(decoded, snapshot: snapshot, allowNextPick: feedback == .up)
+            guard !mapped.neighbors.isEmpty else {
+                let error = "LLM returned no usable neighbors"
+                AlbumLog.model.info("FoundationModels error: \(error, privacy: .public)")
+                return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: error)
+            }
+
+            AlbumLLMDebugDump.dumpParsedResponse(
+                requestID: requestID,
+                feedback: feedback,
+                maxCandidates: maxCandidates,
+                parsed: mapped
+            )
+            AlbumLog.model.info("FoundationModels success neighbors=\(mapped.neighbors.count) nextID=\(String(describing: mapped.nextID), privacy: .public)")
+            return AlbumRecOutcome(backend: .foundationModels, response: mapped, errorDescription: nil)
+        } catch {
+            if error is CancellationError {
+                AlbumLog.model.info("FoundationModels cancelled requestID: \(requestID.uuidString, privacy: .public)")
                 return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: "Cancelled")
             }
 
-            let prompt = Self.buildPrompt(snapshot: snapshot, feedback: feedback, requestID: requestID, maxCandidates: maxCandidates)
+            AlbumLLMDebugDump.dumpError(
+                requestID: requestID,
+                feedback: feedback,
+                maxCandidates: maxCandidates,
+                error: error,
+                prompt: prompt
+            )
 
-            do {
-                AlbumLog.model.info("FoundationModels request: maxCandidates=\(maxCandidates) promptChars=\(prompt.count)")
-                var options = GenerationOptions()
-                options.sampling = .greedy
-                options.temperature = 0
-                options.maximumResponseTokens = 1200
-
-                let response = try await session.respond(to: prompt, options: options)
-                let candidates = Self.stringFields(from: response)
-                if candidates.contains(where: Self.containsError) {
-                    lastError = "LLM refused or returned an error"
-                    AlbumLog.model.info("FoundationModels refusal detected; retrying with smaller candidate budget")
-                    continue
+            let errorDescription: String
+            if let generationError = error as? LanguageModelSession.GenerationError {
+                switch generationError {
+                case .exceededContextWindowSize(let context):
+                    errorDescription = "LLM context too large: \(context.debugDescription)"
+                case .unsupportedLanguageOrLocale(let context):
+                    errorDescription = "LLM unsupported language/locale (\(Locale.current.identifier)): \(context.debugDescription)"
+                case .assetsUnavailable(let context):
+                    errorDescription = "LLM assets unavailable: \(context.debugDescription)"
+                case .rateLimited(let context):
+                    errorDescription = "LLM rate limited: \(context.debugDescription)"
+                case .concurrentRequests(let context):
+                    errorDescription = "LLM concurrent requests: \(context.debugDescription)"
+                case .refusal(_, let context):
+                    errorDescription = "LLM refusal: \(context.debugDescription)"
+                default:
+                    errorDescription = generationError.localizedDescription
                 }
-
-                guard let decoded = Self.decodeResponse(from: response, allowNextPick: feedback == .up) else {
-                    lastError = "LLM JSON decode failed"
-                    AlbumLog.model.info("FoundationModels decode failed; retrying with smaller candidate budget")
-                    continue
-                }
-
-                let pruned = Self.prune(response: decoded, snapshot: snapshot, allowNextPick: feedback == .up)
-                guard !pruned.neighbors.isEmpty else {
-                    lastError = "LLM returned no usable neighbors"
-                    AlbumLog.model.info("FoundationModels returned no usable neighbors; retrying with smaller candidate budget")
-                    continue
-                }
-
-                AlbumLog.model.info("FoundationModels success neighbors=\(pruned.neighbors.count) nextID=\(String(describing: pruned.nextID), privacy: .public)")
-                return AlbumRecOutcome(backend: .foundationModels, response: pruned, errorDescription: nil)
-            } catch {
-                if let generationError = error as? LanguageModelSession.GenerationError {
-                    switch generationError {
-                    case .exceededContextWindowSize(let context):
-                        lastError = "LLM context too large: \(context.debugDescription)"
-                        AlbumLog.model.info("FoundationModels context too large; retrying with smaller candidate budget")
-                        continue
-                    case .assetsUnavailable(let context):
-                        lastError = "LLM assets unavailable: \(context.debugDescription)"
-                    case .rateLimited(let context):
-                        lastError = "LLM rate limited: \(context.debugDescription)"
-                    case .concurrentRequests(let context):
-                        lastError = "LLM concurrent requests: \(context.debugDescription)"
-                    case .refusal(_, let context):
-                        lastError = "LLM refusal: \(context.debugDescription)"
-                    default:
-                        lastError = generationError.localizedDescription
-                    }
-                } else if error is CancellationError {
-                    lastError = "Cancelled"
-                    AlbumLog.model.info("FoundationModels cancelled requestID: \(requestID.uuidString, privacy: .public)")
-                    return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: lastError)
-                } else {
-                    lastError = error.localizedDescription
-                }
-                if let lastError {
-                    AlbumLog.model.info("FoundationModels error: \(lastError, privacy: .public)")
-                }
+            } else {
+                errorDescription = error.localizedDescription
             }
-        }
 
-        return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: lastError ?? "LLM failed")
+            AlbumLog.model.info("FoundationModels error: \(errorDescription, privacy: .public)")
+            return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: errorDescription)
+        }
     }
 
     private func acquireResponseLock() async {
@@ -167,21 +186,24 @@ actor AlbumFoundationModelsOracleEngine {
         isResponding = false
     }
 
-    private static func candidateBudgets(total: Int) -> [Int] {
-        let capped = max(0, total)
-        if capped <= 120 { return [capped] }
-        if capped <= 240 { return [capped, 120] }
-        return [min(capped, 320), 200, 120]
-    }
-
     private static func instructions(feedback: AlbumThumbFeedback) -> String {
         let modeLine = (feedback == .up)
-            ? "Goal: pick 20 conceptually similar neighbors; also pick nextID for a good next anchor."
-            : "Goal: pick 20 conceptually similar neighbors to suppress/repel; nextID must be null."
+            ? "Goal: pick up to 20 conceptually similar neighbors; nextID is optional."
+            : "Goal: pick up to 20 conceptually similar neighbors to suppress/repel; nextID must be null."
+
+        let nextIDRule = (feedback == .up)
+            ? "- nextID MAY be null, but if present it must be a candidate id."
+            : "- nextID MUST be null."
 
         return """
-You are a recommendation engine for a private photo/video library.
+You are a recommendation engine for a private media library.
 \(modeLine)
+
+The prompt provides lines in this exact format:
+id<TAB>fileName<TAB>visionSummary
+
+The first line is the anchor (id is "A").
+All remaining lines are candidates.
 
 You MUST output JSON only (no markdown, no code fences, no commentary).
 
@@ -193,9 +215,8 @@ Rules:
 - similarity MUST be in [0, 1].
 - Every id MUST be one of the candidate ids provided.
 - Do not repeat ids.
-- Do not include the anchor id.
-- If feedback is DOWN: nextID MUST be null.
-- If feedback is UP: nextID MAY be null, but if present it must be a candidate id and must not be in alreadySeenIDs.
+- Do not include the anchor id ("A").
+\(nextIDRule)
 """
     }
 
@@ -203,107 +224,78 @@ Rules:
         let cap = max(0, min(snapshot.candidates.count, maxCandidates))
         let candidates = snapshot.candidates.prefix(cap)
 
-        func safe(_ value: String?, fallback: String = "-") -> String {
-            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return trimmed.isEmpty ? fallback : trimmed
-        }
-
-        func title(mediaType: AlbumMediaType, createdYearMonth: String?, locationBucket: String?) -> String {
-            var parts: [String] = []
-            parts.reserveCapacity(3)
-
-            let datePart = safe(createdYearMonth, fallback: "Unknown")
-            if datePart != "-" {
-                parts.append(datePart)
-            }
-
-            parts.append(mediaType == .video ? "Video" : "Photo")
-
-            let loc = safe(locationBucket)
-            if loc != "-" {
-                parts.append(loc)
-            }
-
-            return parts.joined(separator: " • ")
-        }
-
-        func sanitizeText(_ text: String, maxLen: Int) -> String {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmed.count > maxLen else { return trimmed }
-            return String(trimmed.prefix(maxLen))
+        func field(_ value: String) -> String {
+            value
+                .replacingOccurrences(of: "\t", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         let anchorLine = [
-            snapshot.thumbedAssetID,
-            title(mediaType: snapshot.thumbedMediaType, createdYearMonth: snapshot.thumbedCreatedYearMonth, locationBucket: snapshot.thumbedLocationBucket),
-            sanitizeText(snapshot.thumbedVisionSummary, maxLen: 160)
+            "A",
+            field(snapshot.thumbedFileName),
+            field(snapshot.thumbedVisionSummary)
         ].joined(separator: "\t")
-
-        let seen = snapshot.alreadySeenKeys.sorted()
-        let seenBlock = seen.prefix(80).joined(separator: ",")
 
         var candidateLines: [String] = []
         candidateLines.reserveCapacity(cap)
 
         for c in candidates {
             candidateLines.append([
-                c.key,
-                title(mediaType: c.mediaType, createdYearMonth: c.createdYearMonth, locationBucket: c.locationBucket),
-                sanitizeText(c.visionSummary, maxLen: 140)
+                field(c.promptID),
+                field(c.fileName),
+                field(c.visionSummary)
             ].joined(separator: "\t"))
         }
 
-        return """
-RequestID: \(requestID.uuidString)
-Feedback: \(feedback.rawValue)
-
-Anchor (id\\ttitle\\tvisionSummary):
-\(anchorLine)
-
-alreadySeenIDs (comma-separated, may be partial): \(seenBlock)
-
-Candidates (id\\ttitle\\tvisionSummary):
-\(candidateLines.joined(separator: "\n"))
-"""
+        return ([anchorLine] + candidateLines).joined(separator: "\n")
     }
 
     private static func decodeResponse(from reply: Any, allowNextPick: Bool) -> AlbumRecResponse? {
         decodeJSON(AlbumRecResponse.self, from: reply)
     }
 
-    private static func prune(response: AlbumRecResponse, snapshot: AlbumOracleSnapshot, allowNextPick: Bool) -> AlbumRecResponse {
-        let validIDs = Set(snapshot.candidates.map(\.key))
-        let anchor = snapshot.thumbedAssetID
+    private static func mapResponse(_ response: AlbumRecResponse, snapshot: AlbumOracleSnapshot, allowNextPick: Bool) -> AlbumRecResponse {
+        let byPromptID = Dictionary(uniqueKeysWithValues: snapshot.candidates.map { ($0.promptID, $0) })
+        let anchorAssetID = snapshot.thumbedAssetID.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let nextID: String? = {
+        func assetID(forPromptID raw: String?) -> String? {
+            guard let raw else { return nil }
+            let promptID = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !promptID.isEmpty else { return nil }
+            guard let candidate = byPromptID[promptID] else { return nil }
+            let assetID = candidate.assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !assetID.isEmpty else { return nil }
+            guard assetID != anchorAssetID else { return nil }
+            return assetID
+        }
+
+        let nextAssetID: String? = {
             guard allowNextPick else { return nil }
-            guard let raw = response.nextID?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
-            guard raw != anchor else { return nil }
-            guard validIDs.contains(raw) else { return nil }
-            guard !snapshot.alreadySeenKeys.contains(raw) else { return nil }
-            return raw
+            guard let mapped = assetID(forPromptID: response.nextID) else { return nil }
+            guard !snapshot.alreadySeenAssetIDs.contains(mapped) else { return nil }
+            return mapped
         }()
 
-        var seen = Set<String>()
-        seen.insert(anchor)
-        if let nextID { seen.insert(nextID) }
+        var seenAssetIDs = Set<String>()
+        seenAssetIDs.insert(anchorAssetID)
+        if let nextAssetID { seenAssetIDs.insert(nextAssetID) }
 
         var neighbors: [AlbumRecNeighbor] = []
         neighbors.reserveCapacity(20)
 
         for n in response.neighbors {
             if neighbors.count >= 20 { break }
-            let id = n.id.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !id.isEmpty else { continue }
-            guard validIDs.contains(id) else { continue }
-            guard !seen.contains(id) else { continue }
-            seen.insert(id)
+            guard let assetID = assetID(forPromptID: n.id) else { continue }
+            guard !seenAssetIDs.contains(assetID) else { continue }
+            seenAssetIDs.insert(assetID)
 
-            let sim = max(0.0, min(1.0, n.similarity))
-            neighbors.append(.init(id: id, similarity: sim))
+            let similarity = max(0.0, min(1.0, n.similarity))
+            neighbors.append(.init(id: assetID, similarity: similarity))
         }
 
-        return AlbumRecResponse(nextID: nextID, neighbors: neighbors)
+        return AlbumRecResponse(nextID: nextAssetID, neighbors: neighbors)
     }
 
     private static func containsError(_ text: String) -> Bool {

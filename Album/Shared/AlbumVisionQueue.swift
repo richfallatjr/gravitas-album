@@ -131,7 +131,19 @@ public actor AlbumVisionQueue {
                 return
             }
 
+            if Task.isCancelled {
+                await queue.publishCompletion(assetID: id)
+                await queue.finish(assetID: id)
+                return
+            }
+
             guard let result = AlbumVisionSummarizer.summarize(imageData: data, maxDimension: config.visionThumbnailMaxDimension) else {
+                await queue.publishCompletion(assetID: id)
+                await queue.finish(assetID: id)
+                return
+            }
+
+            if Task.isCancelled {
                 await queue.publishCompletion(assetID: id)
                 await queue.finish(assetID: id)
                 return
@@ -147,6 +159,12 @@ public actor AlbumVisionQueue {
                 modelVersion: result.modelVersion
             )
 
+            if Task.isCancelled {
+                await queue.publishCompletion(assetID: id)
+                await queue.finish(assetID: id)
+                return
+            }
+
             if config.neighborInferenceRadius > 0 {
                 await Self.propagateInference(
                     libraryIndexStore: libraryIndexStore,
@@ -158,6 +176,12 @@ public actor AlbumVisionQueue {
                     radius: config.neighborInferenceRadius,
                     inferredConfidence: config.inferredConfidence
                 )
+            }
+
+            if Task.isCancelled {
+                await queue.publishCompletion(assetID: id)
+                await queue.finish(assetID: id)
+                return
             }
 
             await queue.publishUpdate(
@@ -264,5 +288,13 @@ public actor AlbumVisionQueue {
 
     private func finish(assetID: String) async {
         inflight[assetID] = nil
+    }
+
+    public func cancelAll() async {
+        let tasks = Array(inflight.values)
+        inflight.removeAll(keepingCapacity: true)
+        for task in tasks {
+            task.cancel()
+        }
     }
 }

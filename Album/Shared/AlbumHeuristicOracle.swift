@@ -13,7 +13,7 @@ public struct AlbumHeuristicOracle: AlbumOracle {
 
     private func buildResponse(snapshot: AlbumOracleSnapshot, allowNextPick: Bool) -> AlbumRecResponse {
         struct Scored: Sendable {
-            let key: String
+            let assetID: String
             let score: Double
         }
 
@@ -31,14 +31,14 @@ public struct AlbumHeuristicOracle: AlbumOracle {
             if let a = c.locationBucket, let b = snapshot.thumbedLocationBucket, a == b { bonus += 0.10 }
 
             let score = min(1.0, base + bonus)
-            scored.append(.init(key: c.key, score: score))
+            scored.append(.init(assetID: c.assetID, score: score))
         }
 
         scored.sort { $0.score > $1.score }
 
         let nextID: String?
         if allowNextPick {
-            nextID = scored.first(where: { !snapshot.alreadySeenKeys.contains($0.key) })?.key
+            nextID = scored.first(where: { !snapshot.alreadySeenAssetIDs.contains($0.assetID) })?.assetID
         } else {
             nextID = nil
         }
@@ -48,8 +48,8 @@ public struct AlbumHeuristicOracle: AlbumOracle {
 
         for s in scored {
             if neighbors.count >= 20 { break }
-            if s.key == nextID { continue }
-            neighbors.append(.init(id: s.key, similarity: s.score))
+            if s.assetID == nextID { continue }
+            neighbors.append(.init(id: s.assetID, similarity: s.score))
         }
 
         return AlbumRecResponse(nextID: nextID, neighbors: neighbors)

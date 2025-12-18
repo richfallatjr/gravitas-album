@@ -5,7 +5,7 @@ struct GravitasAlbumApp: App {
     @StateObject private var model = AlbumModel()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "album-control") {
             AlbumControlView()
                 .environmentObject(model)
         }

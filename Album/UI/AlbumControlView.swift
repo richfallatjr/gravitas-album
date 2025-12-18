@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Darwin
 
 public struct AlbumControlView: View {
@@ -405,6 +406,14 @@ public struct AlbumControlView: View {
             Button {
                 AlbumLog.ui.info("Quit pressed; tearing down immersive + windows then exiting")
                 let popoutIDs = model.poppedAssetIDs
+                model.shutdownForQuit()
+
+                Task.detached(priority: .userInitiated) {
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    exit(0)
+                }
+
+                UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
                 Task { @MainActor in
                     let result = await dismissImmersiveSpace()
                     AlbumLog.immersive.info("dismissImmersiveSpace result: \(String(describing: result), privacy: .public)")
@@ -413,6 +422,7 @@ public struct AlbumControlView: View {
                     for assetID in popoutIDs {
                         dismissWindow(value: AlbumPopOutPayload(assetID: assetID))
                     }
+                    dismissWindow(id: "album-control")
 
                     try? await Task.sleep(nanoseconds: 250_000_000)
                     exit(0)
