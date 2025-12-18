@@ -233,16 +233,7 @@ public actor AlbumVisionQueue {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }
 
-        let size = CGSize(width: max(64, maxDimension), height: max(64, maxDimension))
-        let image = await assetProvider.requestThumbnail(localIdentifier: id, targetSize: size)
-
-#if canImport(UIKit)
-        return image?.jpegData(compressionQuality: 0.90) ?? image?.pngData()
-#elseif canImport(AppKit)
-        return image?.tiffRepresentation
-#else
-        return nil
-#endif
+        return await assetProvider.requestVisionThumbnailData(localIdentifier: id, maxDimension: maxDimension)
     }
 
     private static func propagateInference(

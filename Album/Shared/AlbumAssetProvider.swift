@@ -36,6 +36,7 @@ public protocol AlbumAssetProvider {
     func fetchUserAlbums() async throws -> [AlbumUserAlbum]
 
     func requestThumbnail(localIdentifier: String, targetSize: CGSize) async -> AlbumImage?
+    func requestVisionThumbnailData(localIdentifier: String, maxDimension: Int) async -> Data?
     func requestVideoURL(localIdentifier: String) async -> URL?
 }
 
@@ -66,4 +67,16 @@ public extension AlbumAssetProvider {
     func fetchUserAlbums() async throws -> [AlbumUserAlbum] { [] }
 
     func fetchAssets(localIdentifiers: [String]) async throws -> [AlbumAsset] { [] }
+
+    func requestVisionThumbnailData(localIdentifier: String, maxDimension: Int) async -> Data? {
+        let size = CGSize(width: max(64, maxDimension), height: max(64, maxDimension))
+        let image = await requestThumbnail(localIdentifier: localIdentifier, targetSize: size)
+#if canImport(UIKit)
+        return image?.jpegData(compressionQuality: 0.90) ?? image?.pngData()
+#elseif canImport(AppKit)
+        return image?.tiffRepresentation
+#else
+        return nil
+#endif
+    }
 }

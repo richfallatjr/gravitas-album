@@ -27,6 +27,21 @@ public struct AlbumHistoryList: View {
 
     public var body: some View {
         let palette = model.palette
+        let recommendationsToShow: [String] = {
+            guard !recommendedAssetIDs.isEmpty else { return [] }
+            let historyIDs = Set(historyAssetIDs)
+            var used = Set<String>()
+            used.reserveCapacity(min(recommendedAssetIDs.count, 16))
+            var result: [String] = []
+            result.reserveCapacity(min(recommendedAssetIDs.count, 16))
+
+            for id in recommendedAssetIDs {
+                guard used.insert(id).inserted else { continue }
+                guard !historyIDs.contains(id) else { continue }
+                result.append(id)
+            }
+            return result
+        }()
 
         VStack(alignment: .leading, spacing: 10) {
             Text("History")
@@ -34,9 +49,9 @@ public struct AlbumHistoryList: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    if !recommendedAssetIDs.isEmpty {
+                    if !recommendationsToShow.isEmpty {
                         SectionHeader(title: "Recommended")
-                        ForEach(recommendedAssetIDs, id: \.self) { id in
+                        ForEach(recommendationsToShow, id: \.self) { id in
                             HistoryRow(
                                 assetID: id,
                                 isActive: id == currentAssetID,

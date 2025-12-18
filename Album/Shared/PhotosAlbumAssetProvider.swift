@@ -190,6 +190,84 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
         }
     }
 
+    public func requestVisionThumbnailData(localIdentifier: String, maxDimension: Int) async -> Data? {
+        let id = localIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return nil }
+
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+        guard let asset = assets.firstObject else { return nil }
+
+        let dimension = max(64, maxDimension)
+        let targetSize = CGSize(width: dimension, height: dimension)
+
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .opportunistic
+        options.resizeMode = .fast
+        options.version = .current
+        options.isSynchronous = false
+
+        let timeoutNanos: UInt64 = 18_000_000_000
+
+        return await withCheckedContinuation { continuation in
+            var didResume = false
+            var bestData: Data? = nil
+            var requestID: PHImageRequestID = PHInvalidImageRequestID
+
+            func finish(_ data: Data?) {
+                guard !didResume else { return }
+                didResume = true
+                continuation.resume(returning: data)
+            }
+
+            let timeoutTask = Task.detached(priority: .background) {
+                try? await Task.sleep(nanoseconds: timeoutNanos)
+                await MainActor.run {
+                    guard !didResume else { return }
+                    if requestID != PHInvalidImageRequestID {
+                        PHImageManager.default().cancelImageRequest(requestID)
+                    }
+                    finish(bestData)
+                }
+            }
+
+            requestID = PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: targetSize,
+                contentMode: .aspectFit,
+                options: options
+            ) { image, info in
+                Task { @MainActor in
+                    guard !didResume else { return }
+
+                    let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
+                    let error = info?[PHImageErrorKey] as? NSError
+                    if cancelled || error != nil {
+                        timeoutTask.cancel()
+                        finish(bestData)
+                        return
+                    }
+
+                    if let image {
+#if canImport(UIKit)
+                        bestData = image.jpegData(compressionQuality: 0.90) ?? image.pngData() ?? bestData
+#elseif canImport(AppKit)
+                        bestData = image.tiffRepresentation ?? bestData
+#endif
+                    }
+
+                    let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                    if isDegraded {
+                        return
+                    }
+
+                    timeoutTask.cancel()
+                    finish(bestData)
+                }
+            }
+        }
+    }
+
     public func requestVideoURL(localIdentifier: String) async -> URL? {
         let id = localIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }

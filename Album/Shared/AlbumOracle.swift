@@ -31,9 +31,23 @@ public struct AlbumRecNeighbor: Sendable, Decodable {
         case similarity
     }
 
+    private static func decodeStringOrInt(container: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) -> String? {
+        if let s = try? container.decode(String.self, forKey: key) {
+            return s
+        }
+        if let i = try? container.decode(Int.self, forKey: key) {
+            return String(i)
+        }
+        if let d = try? container.decode(Double.self, forKey: key) {
+            if d.rounded() == d { return String(Int(d)) }
+            return String(d)
+        }
+        return nil
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
+        id = Self.decodeStringOrInt(container: container, key: .id) ?? ""
 
         if let value = try? container.decode(Double.self, forKey: .similarity) {
             similarity = value
@@ -57,6 +71,31 @@ public struct AlbumRecResponse: Sendable, Decodable {
     public init(nextID: String?, neighbors: [AlbumRecNeighbor]) {
         self.nextID = nextID
         self.neighbors = neighbors
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case nextID
+        case neighbors
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        if let nextString = try? container.decode(String.self, forKey: .nextID) {
+            nextID = nextString
+        } else if let nextInt = try? container.decode(Int.self, forKey: .nextID) {
+            nextID = String(nextInt)
+        } else if let nextDouble = try? container.decode(Double.self, forKey: .nextID) {
+            if nextDouble.rounded() == nextDouble {
+                nextID = String(Int(nextDouble))
+            } else {
+                nextID = String(nextDouble)
+            }
+        } else {
+            nextID = nil
+        }
+
+        neighbors = (try? container.decode([AlbumRecNeighbor].self, forKey: .neighbors)) ?? []
     }
 }
 

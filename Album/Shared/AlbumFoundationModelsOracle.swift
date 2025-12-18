@@ -1,7 +1,7 @@
 import Foundation
 
 #if canImport(FoundationModels)
-import FoundationModels
+@_weakLinked import FoundationModels
 #endif
 
 #if canImport(FoundationModels)
@@ -21,9 +21,8 @@ public struct AlbumFoundationModelsOracle: AlbumOracle {
 @available(visionOS 26.0, *)
 actor AlbumFoundationModelsOracleEngine {
     static let shared = AlbumFoundationModelsOracleEngine()
-
-    private var thumbUpSession: LanguageModelSession?
-    private var thumbDownSession: LanguageModelSession?
+    private static let maxUserPromptChars = 8_192
+    private static let maximumResponseTokens = 512
 
     private var isResponding: Bool = false
     private var responseWaiters: [CheckedContinuation<Void, Never>] = []
@@ -52,25 +51,12 @@ actor AlbumFoundationModelsOracleEngine {
                 errorDescription: "FoundationModels unavailable: \(reason)"
             )
         }
-
-        var session: LanguageModelSession
-        switch feedback {
-        case .up:
-            if let existing = thumbUpSession {
-                session = existing
-            } else {
-                let created = LanguageModelSession(model: model, instructions: Self.instructions(feedback: feedback))
-                thumbUpSession = created
-                session = created
-            }
-        case .down:
-            if let existing = thumbDownSession {
-                session = existing
-            } else {
-                let created = LanguageModelSession(model: model, instructions: Self.instructions(feedback: feedback))
-                thumbDownSession = created
-                session = created
-            }
+        if !model.supportsLocale() {
+            return AlbumRecOutcome(
+                backend: .foundationModels,
+                response: nil,
+                errorDescription: "LLM unsupported language/locale (\(Locale.current.identifier))"
+            )
         }
 
         if Task.isCancelled {
@@ -78,23 +64,35 @@ actor AlbumFoundationModelsOracleEngine {
             return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: "Cancelled")
         }
 
-        let maxCandidates = snapshot.candidates.count
-        let prompt = Self.buildPrompt(snapshot: snapshot, feedback: feedback, requestID: requestID, maxCandidates: maxCandidates)
-        AlbumLLMDebugDump.dumpPrompt(requestID: requestID, feedback: feedback, maxCandidates: maxCandidates, prompt: prompt)
+        let system = Self.instructions(feedback: feedback)
+        let prompt = Self.buildPrompt(snapshot: snapshot)
+        if prompt.count > Self.maxUserPromptChars {
+            return AlbumRecOutcome(
+                backend: .foundationModels,
+                response: nil,
+                errorDescription: "LLM prompt too large (\(prompt.count) chars; max \(Self.maxUserPromptChars))"
+            )
+        }
+
+        AlbumLLMDebugDump.dumpPrompt(
+            requestID: requestID,
+            feedback: feedback,
+            maxCandidates: snapshot.candidates.count,
+            prompt: "SYSTEM:\n\(system)\n\nPROMPT:\n\(prompt)\n"
+        )
 
         do {
-            AlbumLog.model.info("FoundationModels request: maxCandidates=\(maxCandidates) promptChars=\(prompt.count)")
+            AlbumLog.model.info("FoundationModels request: promptChars=\(prompt.count)")
             var options = GenerationOptions()
-            options.sampling = .greedy
-            options.temperature = 0
-            options.maximumResponseTokens = 1200
+            options.maximumResponseTokens = Self.maximumResponseTokens
 
+            let session = LanguageModelSession(model: model, instructions: system)
             let response = try await session.respond(to: prompt, options: options)
             let candidates = Self.stringFields(from: response)
             AlbumLLMDebugDump.dumpResponse(
                 requestID: requestID,
                 feedback: feedback,
-                maxCandidates: maxCandidates,
+                maxCandidates: snapshot.candidates.count,
                 responseDescription: String(describing: response),
                 stringCandidates: candidates
             )
@@ -121,7 +119,7 @@ actor AlbumFoundationModelsOracleEngine {
             AlbumLLMDebugDump.dumpParsedResponse(
                 requestID: requestID,
                 feedback: feedback,
-                maxCandidates: maxCandidates,
+                maxCandidates: snapshot.candidates.count,
                 parsed: mapped
             )
             AlbumLog.model.info("FoundationModels success neighbors=\(mapped.neighbors.count) nextID=\(String(describing: mapped.nextID), privacy: .public)")
@@ -135,9 +133,9 @@ actor AlbumFoundationModelsOracleEngine {
             AlbumLLMDebugDump.dumpError(
                 requestID: requestID,
                 feedback: feedback,
-                maxCandidates: maxCandidates,
+                maxCandidates: snapshot.candidates.count,
                 error: error,
-                prompt: prompt
+                prompt: "SYSTEM:\n\(system)\n\nPROMPT:\n\(prompt)\n"
             )
 
             let errorDescription: String
@@ -187,43 +185,42 @@ actor AlbumFoundationModelsOracleEngine {
     }
 
     private static func instructions(feedback: AlbumThumbFeedback) -> String {
-        let modeLine = (feedback == .up)
-            ? "Goal: pick up to 20 conceptually similar neighbors; nextID is optional."
-            : "Goal: pick up to 20 conceptually similar neighbors to suppress/repel; nextID must be null."
-
-        let nextIDRule = (feedback == .up)
-            ? "- nextID MAY be null, but if present it must be a candidate id."
-            : "- nextID MUST be null."
+        let nextIDRule: String = {
+            switch feedback {
+            case .up:
+                return "- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS."
+            case .down:
+                return "- nextID MUST be null."
+            }
+        }()
 
         return """
-You are a recommendation engine for a private media library.
-\(modeLine)
+You are a recommendation engine for Gravitas Album.
+Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
 
-The prompt provides lines in this exact format:
-id<TAB>fileName<TAB>visionSummary
+The user prompt provides:
+- THUMBED_FILE: the focused item's filename
+- THUMBED_VISION: the focused item's vision description
+- ALREADY_SEEN_IDS: optional comma-separated list of candidate IDs (small integers)
+- CANDIDATES (ID<TAB>FILE<TAB>VISION): tab-separated candidate lines
 
-The first line is the anchor (id is "A").
-All remaining lines are candidates.
-
-You MUST output JSON only (no markdown, no code fences, no commentary).
-
-Output schema (exact keys):
-{"nextID": string or null, "neighbors":[{"id":string,"similarity":number}, ...]}
+Response shape:
+- nextID: String candidate ID (or null)
+- neighbors: Array<{id: String candidate ID, similarity: Int rank (1..20)}>
 
 Rules:
-- neighbors MUST contain up to 20 items, ordered from most similar to least similar.
-- similarity MUST be in [0, 1].
-- Every id MUST be one of the candidate ids provided.
-- Do not repeat ids.
-- Do not include the anchor id ("A").
+- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (small integers like 0,1,2...). Never output filenames as IDs.
+- Never output "..." or placeholder text.
 \(nextIDRule)
+- neighbors MUST contain the most conceptually related candidates to the thumbed item.
+- neighbors MUST be ranked best→worst.
+- Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
+- neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
+- Return at most 20 neighbors.
 """
     }
 
-    private static func buildPrompt(snapshot: AlbumOracleSnapshot, feedback: AlbumThumbFeedback, requestID: UUID, maxCandidates: Int) -> String {
-        let cap = max(0, min(snapshot.candidates.count, maxCandidates))
-        let candidates = snapshot.candidates.prefix(cap)
-
+    private static func buildPrompt(snapshot: AlbumOracleSnapshot) -> String {
         func field(_ value: String) -> String {
             value
                 .replacingOccurrences(of: "\t", with: " ")
@@ -232,24 +229,40 @@ Rules:
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        let anchorLine = [
-            "A",
-            field(snapshot.thumbedFileName),
-            field(snapshot.thumbedVisionSummary)
-        ].joined(separator: "\t")
+        let alreadySeenIDs: [String] = snapshot.candidates.compactMap { c in
+            snapshot.alreadySeenAssetIDs.contains(c.assetID) ? c.promptID : nil
+        }
 
-        var candidateLines: [String] = []
-        candidateLines.reserveCapacity(cap)
+        let withoutIDs = "ALREADY_SEEN_IDS:"
+        let withIDs = alreadySeenIDs.isEmpty ? withoutIDs : "ALREADY_SEEN_IDS: \(alreadySeenIDs.joined(separator: ","))"
 
-        for c in candidates {
-            candidateLines.append([
+        var lines: [String] = []
+        lines.reserveCapacity(8 + snapshot.candidates.count)
+
+        lines.append("THUMBED_FILE: \(field(snapshot.thumbedFileName))")
+        lines.append("THUMBED_VISION: \(field(snapshot.thumbedVisionSummary))")
+        lines.append(withoutIDs)
+        lines.append("CANDIDATES (ID\\tFILE\\tVISION):")
+
+        for c in snapshot.candidates {
+            lines.append([
                 field(c.promptID),
                 field(c.fileName),
                 field(c.visionSummary)
             ].joined(separator: "\t"))
         }
 
-        return ([anchorLine] + candidateLines).joined(separator: "\n")
+        var prompt = lines.joined(separator: "\n")
+        if withIDs != withoutIDs {
+            var linesWith = lines
+            linesWith[2] = withIDs
+            let candidate = linesWith.joined(separator: "\n")
+            if candidate.count <= Self.maxUserPromptChars {
+                prompt = candidate
+            }
+        }
+
+        return prompt
     }
 
     private static func decodeResponse(from reply: Any, allowNextPick: Bool) -> AlbumRecResponse? {
@@ -291,8 +304,8 @@ Rules:
             guard !seenAssetIDs.contains(assetID) else { continue }
             seenAssetIDs.insert(assetID)
 
-            let similarity = max(0.0, min(1.0, n.similarity))
-            neighbors.append(.init(id: assetID, similarity: similarity))
+            let rank = max(1.0, min(20.0, n.similarity))
+            neighbors.append(.init(id: assetID, similarity: rank))
         }
 
         return AlbumRecResponse(nextID: nextAssetID, neighbors: neighbors)

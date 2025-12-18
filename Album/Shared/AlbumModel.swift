@@ -245,6 +245,30 @@ public final class AlbumModel: ObservableObject {
         absorbNowRequestID = UUID()
     }
 
+    public func startLibraryAnalysis() {
+        guard datasetSource == .photos else {
+            AlbumLog.model.info("Analyze Library pressed, but datasetSource is not photos")
+            return
+        }
+
+        guard libraryAuthorization == .authorized || libraryAuthorization == .limited else {
+            AlbumLog.model.info("Analyze Library pressed, but Photos access is not authorized")
+            return
+        }
+
+        AlbumLog.model.info("Analyze Library pressed; starting backfill")
+        Task(priority: .background) { [backfillCoordinator] in
+            await backfillCoordinator.startIfNeeded(source: .photos)
+        }
+    }
+
+    public func pauseLibraryAnalysis() {
+        AlbumLog.model.info("Pause Analysis pressed; pausing backfill")
+        Task(priority: .background) { [backfillCoordinator] in
+            await backfillCoordinator.pause()
+        }
+    }
+
     public func shutdownForQuit() {
         AlbumLog.model.info("Shutdown requested (quit button)")
         isPaused = true
@@ -1137,9 +1161,40 @@ public final class AlbumModel: ObservableObject {
     }
 
     private func buildOracleSnapshot(thumbed: AlbumItem) async -> AlbumOracleSnapshot {
-        func promptID(for index: Int) -> String {
-            let clamped = max(0, index)
-            return "c\(clamped + 1)"
+        // Keep prompts comfortably under the model context window.
+        let maxCandidates = 400
+        let maxPromptChars = 5_500
+
+        func promptField(_ value: String) -> String {
+            value
+                .replacingOccurrences(of: "\t", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        func tokenize(_ text: String) -> Set<String> {
+            let lowered = text.lowercased()
+            let parts = lowered.split { ch in
+                !(ch.isLetter || ch.isNumber)
+            }
+            var tokens = Set<String>()
+            tokens.reserveCapacity(min(parts.count, 32))
+            for p in parts {
+                guard p.count >= 3 else { continue }
+                tokens.insert(String(p))
+            }
+            return tokens
+        }
+
+        func jaccardSimilarity(thumbTokens: Set<String>, candidateText: String) -> Double {
+            guard !thumbTokens.isEmpty else { return 0 }
+            let candidateTokens = tokenize(candidateText)
+            guard !candidateTokens.isEmpty else { return 0 }
+            let intersection = thumbTokens.intersection(candidateTokens).count
+            if intersection == 0 { return 0 }
+            let union = thumbTokens.union(candidateTokens).count
+            return union > 0 ? Double(intersection) / Double(union) : 0
         }
 
         func fileNameOrFallback(for asset: AlbumAsset) -> String {
@@ -1148,7 +1203,8 @@ public final class AlbumModel: ObservableObject {
         }
 
         if datasetSource == .demo {
-            let thumbedHandle = semanticHandle(for: thumbed)
+            let thumbedHandle = promptField(semanticHandle(for: thumbed))
+            let thumbTokens = tokenize(thumbedHandle)
 
             let candidateItems: [AlbumAsset] = items.compactMap { item in
                 if item.id == thumbed.id { return nil }
@@ -1156,15 +1212,56 @@ public final class AlbumModel: ObservableObject {
                 return item
             }
 
-            let candidates: [AlbumOracleCandidate] = candidateItems.enumerated().map { idx, item in
-                AlbumOracleCandidate(
-                    assetID: item.id,
-                    promptID: promptID(for: idx),
-                    fileName: fileNameOrFallback(for: item),
-                    visionSummary: semanticHandle(for: item),
-                    mediaType: item.mediaType,
-                    createdYearMonth: createdYearMonth(for: item),
-                    locationBucket: locationBucket(for: item)
+            struct ScoredCandidate {
+                let asset: AlbumAsset
+                let summary: String
+                let score: Double
+            }
+
+            var scored: [ScoredCandidate] = []
+            scored.reserveCapacity(candidateItems.count)
+
+            for item in candidateItems {
+                let summary = promptField(semanticHandle(for: item))
+                let score = jaccardSimilarity(thumbTokens: thumbTokens, candidateText: summary)
+                scored.append(.init(asset: item, summary: summary, score: score))
+            }
+
+            scored.sort {
+                if $0.score != $1.score { return $0.score > $1.score }
+                return $0.asset.id < $1.asset.id
+            }
+
+            let baseLines: [String] = [
+                "THUMBED_FILE: \(promptField(fileNameOrFallback(for: thumbed)))",
+                "THUMBED_VISION: \(thumbedHandle)",
+                "ALREADY_SEEN_IDS:",
+                "CANDIDATES (ID\\tFILE\\tVISION):"
+            ]
+            var promptChars = baseLines.reduce(0) { $0 + $1.count } + (baseLines.count - 1)
+
+            var candidates: [AlbumOracleCandidate] = []
+            candidates.reserveCapacity(min(scored.count, maxCandidates))
+
+            for entry in scored {
+                guard candidates.count < maxCandidates else { break }
+                let key = String(candidates.count)
+                let line = "\(key)\t\(promptField(fileNameOrFallback(for: entry.asset)))\t\(entry.summary)"
+
+                let projected = promptChars + line.count + 1
+                guard projected <= maxPromptChars else { break }
+                promptChars = projected
+
+                candidates.append(
+                    AlbumOracleCandidate(
+                        assetID: entry.asset.id,
+                        promptID: key,
+                        fileName: fileNameOrFallback(for: entry.asset),
+                        visionSummary: entry.summary,
+                        mediaType: entry.asset.mediaType,
+                        createdYearMonth: createdYearMonth(for: entry.asset),
+                        locationBucket: locationBucket(for: entry.asset)
+                    )
                 )
             }
 
@@ -1252,24 +1349,67 @@ public final class AlbumModel: ObservableObject {
             idsNeedingCompute.insert(id)
         }
 
+        let thumbedVision = oracleVisionSummary(assetID: thumbed.id, mediaType: thumbed.mediaType)
         noteIfNeedsCompute(assetID: thumbed.id)
 
-        let candidates: [AlbumOracleCandidate] = candidateItems.enumerated().map { idx, item in
+        let thumbTokens = tokenize(thumbedVision)
+
+        struct ScoredCandidate {
+            let asset: AlbumAsset
+            let summary: String
+            let score: Double
+        }
+
+        var scored: [ScoredCandidate] = []
+        scored.reserveCapacity(candidateItems.count)
+
+        for item in candidateItems {
             let summary = oracleVisionSummary(assetID: item.id, mediaType: item.mediaType)
-            if summary.lowercased().hasPrefix("unlabeled") {
-                noteIfNeedsCompute(assetID: item.id)
-            } else if recordByID[item.id]?.visionSource == .inferred {
-                noteIfNeedsCompute(assetID: item.id)
+            let score = jaccardSimilarity(thumbTokens: thumbTokens, candidateText: summary)
+            scored.append(.init(asset: item, summary: summary, score: score))
+        }
+
+        scored.sort {
+            if $0.score != $1.score { return $0.score > $1.score }
+            return $0.asset.id < $1.asset.id
+        }
+
+        let baseLines: [String] = [
+            "THUMBED_FILE: \(promptField(fileNameOrFallback(for: thumbed)))",
+            "THUMBED_VISION: \(promptField(thumbedVision))",
+            "ALREADY_SEEN_IDS:",
+            "CANDIDATES (ID\\tFILE\\tVISION):"
+        ]
+        var promptChars = baseLines.reduce(0) { $0 + $1.count } + (baseLines.count - 1)
+
+        var candidates: [AlbumOracleCandidate] = []
+        candidates.reserveCapacity(min(scored.count, maxCandidates))
+
+        for entry in scored {
+            guard candidates.count < maxCandidates else { break }
+            let key = String(candidates.count)
+            let line = "\(key)\t\(promptField(fileNameOrFallback(for: entry.asset)))\t\(promptField(entry.summary))"
+
+            let projected = promptChars + line.count + 1
+            guard projected <= maxPromptChars else { break }
+            promptChars = projected
+
+            if entry.summary.lowercased().hasPrefix("unlabeled") {
+                noteIfNeedsCompute(assetID: entry.asset.id)
+            } else if recordByID[entry.asset.id]?.visionSource == .inferred {
+                noteIfNeedsCompute(assetID: entry.asset.id)
             }
 
-            return AlbumOracleCandidate(
-                assetID: item.id,
-                promptID: promptID(for: idx),
-                fileName: fileNameOrFallback(for: item),
-                visionSummary: summary,
-                mediaType: item.mediaType,
-                createdYearMonth: createdYearMonth(for: item),
-                locationBucket: locationBucket(for: item)
+            candidates.append(
+                AlbumOracleCandidate(
+                    assetID: entry.asset.id,
+                    promptID: key,
+                    fileName: fileNameOrFallback(for: entry.asset),
+                    visionSummary: entry.summary,
+                    mediaType: entry.asset.mediaType,
+                    createdYearMonth: createdYearMonth(for: entry.asset),
+                    locationBucket: locationBucket(for: entry.asset)
+                )
             )
         }
 
@@ -1285,7 +1425,7 @@ public final class AlbumModel: ObservableObject {
             thumbedMediaType: thumbed.mediaType,
             thumbedCreatedYearMonth: createdYearMonth(for: thumbed),
             thumbedLocationBucket: locationBucket(for: thumbed),
-            thumbedVisionSummary: oracleVisionSummary(assetID: thumbed.id, mediaType: thumbed.mediaType),
+            thumbedVisionSummary: thumbedVision,
             candidates: candidates,
             alreadySeenAssetIDs: alreadySeen
         )
@@ -1304,47 +1444,22 @@ public final class AlbumModel: ObservableObject {
 
         switch feedback {
         case .up:
-            let nextUpID = chooseNextUpAssetID(snapshot: snapshot, response: result)
-            recommendedAssetID = nextUpID
-            if let nextUpID {
-                aiNextAssetIDs = [nextUpID]
+            if let nextUpID = result.nextID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !nextUpID.isEmpty,
+               nextUpID != anchorID,
+               !hiddenIDs.contains(nextUpID),
+               item(for: nextUpID) != nil,
+               !snapshot.alreadySeenAssetIDs.contains(nextUpID) {
+                recommendedAssetID = nextUpID
                 pushRecommendedAsset(nextUpID)
-            } else {
-                aiNextAssetIDs.removeAll()
+                appendToHistoryIfNew(assetID: nextUpID)
+                aiNextAssetIDs.insert(nextUpID)
             }
         case .down:
-            recommendedAssetID = nil
-            aiNextAssetIDs.removeAll()
+            break
         }
 
         tuningDeltaRequest = AlbumTuningDeltaRequest(deltas: computeTuningDeltas(feedback: feedback, anchorID: anchorID, neighbors: result.neighbors))
-    }
-
-    private func chooseNextUpAssetID(snapshot: AlbumOracleSnapshot, response: AlbumRecResponse) -> String? {
-        let anchorID = snapshot.thumbedAssetID.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let orderedCandidates = [response.nextID].compactMap { $0 } + response.neighbors.map(\.id)
-
-        for id in orderedCandidates {
-            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            guard trimmed != anchorID else { continue }
-            guard !hiddenIDs.contains(trimmed) else { continue }
-            guard item(for: trimmed) != nil else { continue }
-            guard !snapshot.alreadySeenAssetIDs.contains(trimmed) else { continue }
-            return trimmed
-        }
-
-        for id in orderedCandidates {
-            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            guard trimmed != anchorID else { continue }
-            guard !hiddenIDs.contains(trimmed) else { continue }
-            guard item(for: trimmed) != nil else { continue }
-            return trimmed
-        }
-
-        return nil
     }
 
     private func restoreCachedRecommendsIfAvailable(for assetID: String) {
@@ -1357,44 +1472,15 @@ public final class AlbumModel: ObservableObject {
         recommendItems = cached.neighbors.compactMap { item(for: $0.id) }
             .filter { $0.id != id && !hiddenIDs.contains($0.id) }
         neighborsReady = !recommendItems.isEmpty
-
-        guard recommendsFeedbackByAnchorID[id] == .up else {
-            recommendedAssetID = nil
-            aiNextAssetIDs.removeAll()
-            return
-        }
-
-        let nextUp: String? = {
-            if let next = cached.nextID?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !next.isEmpty,
-               next != id,
-               !hiddenIDs.contains(next),
-               item(for: next) != nil {
-                return next
-            }
-            if let firstNeighbor = cached.neighbors.first?.id,
-               !hiddenIDs.contains(firstNeighbor),
-               firstNeighbor != id,
-               item(for: firstNeighbor) != nil {
-                return firstNeighbor
-            }
-            return nil
-        }()
-
-        recommendedAssetID = nextUp
-        if let nextUp {
-            aiNextAssetIDs = [nextUp]
-        } else {
-            aiNextAssetIDs.removeAll()
-        }
     }
 
     private func computeTuningDeltas(feedback: AlbumThumbFeedback, anchorID: String, neighbors: [AlbumRecNeighbor]) -> [AlbumItemTuningDelta] {
         let trimmedAnchor = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
         let maxNeighbors = 20
 
-        let maxSim = neighbors.prefix(maxNeighbors).map(\.similarity).max() ?? 0
-        let denom = max(maxSim, 0.0001)
+        // LLM returns similarity as a rank (1 = most similar, up to 20).
+        let maxRankRaw = neighbors.prefix(maxNeighbors).map(\.similarity).max() ?? 1
+        let maxRank = max(1.0, min(20.0, maxRankRaw))
 
         var deltas: [AlbumItemTuningDelta] = []
         deltas.reserveCapacity(min(neighbors.count, maxNeighbors))
@@ -1405,7 +1491,8 @@ public final class AlbumModel: ObservableObject {
             if id == trimmedAnchor { continue }
             if hiddenIDs.contains(id) { continue }
 
-            let w0 = max(0.0, min(1.0, neighbor.similarity / denom))
+            let rank = max(1.0, min(maxRank, neighbor.similarity))
+            let w0 = (maxRank + 1.0 - rank) / maxRank
             let w = pow(Float(w0), 1.25)
 
             let massMul: Float

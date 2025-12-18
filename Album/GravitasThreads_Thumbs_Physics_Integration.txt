@@ -1,0 +1,298 @@
+Gravitas Threads (visionOS) — Thumbs Up/Down → Physics Tuning (mass + acceleration) integration
+Generated: 2025-12-18
+
+Goal of this note:
+- Explain exactly how 👍 / 👎 feedback turns into deterministic, per-sphere physics changes in the 3D simulation.
+- Include the key code paths (UI → model → immersive → tuning → physics integration → absorption behavior).
+
+High-level pipeline:
+1) User taps 👍 or 👎 in the SwiftUI media panel.
+2) `GravitasModel.sendThumb(...)` publishes a `ThumbRequest`.
+3) `ImmersiveRootView` observes `sim.thumbRequest` and runs an async thumb handler.
+4) The handler gets a ranked neighbor list (LLM or fallback) and calls `applyNeighborDeltas(...)`.
+5) `applyNeighborDeltas(...)` mutates each neighbor sphere’s `DataNodeTuningComponent`:
+   - 👍 increases `mass`
+   - 👎 decreases `mass` AND increases `accelerationMultiplier`
+6) The per-frame `physicsStep(...)` reads those tuning values and changes each sphere’s acceleration + per-body caps.
+
+──────────────────────────────────────────────────────────────────────────────
+1) The physics knobs we actually mutate: `DataNodeTuningComponent`
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+public struct DataNodeTuningComponent: Component, Codable {
+    public var mass: Float
+    public var accelerationMultiplier: Float
+
+    public init(mass: Float = 1, accelerationMultiplier: Float = 1) {
+        self.mass = mass
+        self.accelerationMultiplier = accelerationMultiplier
+    }
+}
+
+Important:
+- This is a RealityKit `Component` attached to each data node sphere (`ModelEntity`).
+- Thumbs feedback does NOT directly move spheres. It only changes these per-sphere parameters.
+
+──────────────────────────────────────────────────────────────────────────────
+2) Baseline per-sphere tuning at spawn (before thumbs)
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+// Scale relative to subreddit's own distribution
+let upvoteCount = p.ups ?? p.score ?? 0
+let upvotes = max(Float(upvoteCount), 0)
+let normalized = min(upvotes / normalizationDenominator, 1)
+let scaleMultiplier = 1 + normalized * (maxDnScaleMultiplier - 1)
+ball.scale = SIMD3<Float>(repeating: scaleMultiplier)
+
+let baseMass: Float = 1.0 + normalized * 1.5
+ball.components.set(DataNodeTuningComponent(mass: baseMass, accelerationMultiplier: 1.0))
+
+Notes:
+- Spawned balls start with `accelerationMultiplier = 1.0`.
+- Spawned ball `mass` is roughly in ~[1.0, 2.5], before thumbs add deltas.
+
+──────────────────────────────────────────────────────────────────────────────
+3) UI → model: where thumbs are sent
+File: Packages/SharedUI/Sources/SharedUI/ControlView.swift
+
+Button {
+    g.sendThumb(.up, meta: meta)
+} label: {
+    Image(systemName: "hand.thumbsup")
+        .font(.title3)
+        .padding(8)
+}
+
+Button {
+    g.sendThumb(.down, meta: meta)
+} label: {
+    Image(systemName: "hand.thumbsdown")
+        .font(.title3)
+        .padding(8)
+}
+
+File: Packages/GAEngine/Sources/GAEngine/GravitasModel.swift
+
+public func sendThumb(_ feedback: ThumbFeedback, meta: MetaInfo) {
+    thumbFeedbackByMetaID[meta.id] = feedback
+    thumbRequest = ThumbRequest(meta: meta, feedback: feedback)
+}
+
+What matters for physics:
+- `thumbRequest` is the signal that kicks off neighbor tuning.
+- `thumbFeedbackByMetaID` is UI state (e.g., history coloring), not used by physics.
+
+──────────────────────────────────────────────────────────────────────────────
+4) Model → immersive: thumb requests are handled asynchronously
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+.onChange(of: sim.thumbRequest) { req in
+    guard let req else { return }
+    latestThumbRequestID = req.id
+    sim.thumbThinkingSince = Date()
+    sim.thumbThinkingFeedback = req.feedback
+    sim.thumbStatusMessage = nil
+
+    let task = Task { await handleThumb(req) }
+    thumbTasks[req.id] = task
+}
+
+Notes:
+- `handleThumb(req)` eventually calls `applyThumbResult(...)`, which calls `applyNeighborDeltas(...)`.
+- The neighbor list itself comes from `ThreadsRecService` (Foundation Models) or a deterministic fallback.
+
+──────────────────────────────────────────────────────────────────────────────
+5) The core: applying thumbs feedback to physics tuning (`applyNeighborDeltas`)
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+@MainActor
+private func applyNeighborDeltas(
+    feedback: ThumbFeedback,
+    neighbors: [ThreadsRecNeighbor],
+    keyToMetaID: [String: UUID],
+    upvoteToMetaID: [Int: UUID],
+    candidateCount: Int,
+    excludedMetaID: UUID?,
+    idToBall: [UUID: ModelEntity]
+) -> NeighborDeltaResult {
+    let maxNeighbors = 20
+    let similarityExponent: Float = 1.0
+
+    // Debug-tuned: 10× stronger deltas (requested) so effects are unmistakable.
+    let massGain: Float = 75.0
+    let massLoss: Float = 105.0
+    let accelGain: Float = 525.0
+
+    let minMass: Float = 0.05
+    let maxMass: Float = 80.0
+    let maxAccelMul: Float = 120.0
+
+    var used = Set<UUID>()
+    used.reserveCapacity(min(neighbors.count, maxNeighbors))
+    var applied = 0
+    var invalidSample: [String] = []
+    invalidSample.reserveCapacity(3)
+
+    for neighbor in neighbors.prefix(maxNeighbors) {
+        let rawID = neighbor.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let metaID = resolveCandidateMetaID(from: rawID,
+                                                  keyToMetaID: keyToMetaID,
+                                                  upvoteToMetaID: upvoteToMetaID,
+                                                  candidateCount: candidateCount) else {
+            if invalidSample.count < 3, !rawID.isEmpty {
+                invalidSample.append(rawID)
+            }
+            continue
+        }
+        if let excludedMetaID, metaID == excludedMetaID {
+            continue
+        }
+        guard used.insert(metaID).inserted else { continue }
+        guard let ball = idToBall[metaID] else { continue }
+
+        // LLM provides a ranked list; we deterministically remap rank → influence weight here.
+        // Rank is 1-based in the *applied* (unique/valid) neighbor order: 1.0, 0.5, 0.333, …, 0.05 (at 20).
+        let rank = max(1, applied + 1)
+        let rankWeight = 1.0 / Float(rank)
+        let w = pow(rankWeight, similarityExponent)
+
+        var tuning = ball.components[DataNodeTuningComponent.self] ?? .init()
+
+        switch feedback {
+        case .up:
+            tuning.mass = min(maxMass, tuning.mass * (1 + massGain * w))
+
+        case .down:
+            tuning.mass = max(minMass, tuning.mass / (1 + massLoss * w))
+            tuning.accelerationMultiplier = min(maxAccelMul, tuning.accelerationMultiplier * (1 + accelGain * w))
+        }
+
+        ball.components.set(tuning)
+        applied += 1
+    }
+
+    let sampleString: String?
+    if invalidSample.isEmpty {
+        sampleString = nil
+    } else {
+        sampleString = invalidSample.joined(separator: ", ")
+    }
+    return NeighborDeltaResult(applied: applied, invalidIDSample: sampleString)
+}
+
+Key points (this is the “we figured it out” behavior):
+- The LLM’s job is only to order neighbors best → worst.
+- Physics influence is NOT based on `neighbor.similarity` numeric values; it is based on neighbor ORDER.
+- We remap rank → weight deterministically: `w = (1/rank)^similarityExponent`.
+- Clamps (`minMass`, `maxMass`, `maxAccelMul`) keep the simulation stable.
+
+Intended physical effect:
+- 👍 makes the neighbor spheres “heavy” (large `mass`) so they accelerate less from PMNs and tend to move more slowly.
+- 👎 makes the neighbor spheres “light and frantic”:
+  - smaller `mass` increases acceleration (`force / mass`)
+  - larger `accelerationMultiplier` scales acceleration further and increases per-body caps (see next section)
+
+──────────────────────────────────────────────────────────────────────────────
+6) How tuning actually changes motion: `physicsStep(...)` reads tuning every frame
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+private func physicsStep(dt: Float, root: Entity) {
+    let sources = pmns.compactMap { e -> (SIMD3<Float>, Float)? in
+        guard let m = e.components[PMNComponent.self]?.mass else { return nil }
+        return (e.position(relativeTo: root), m)
+    }
+
+    let softSquared = soft * soft
+
+    for b in balls {
+        var v = b.components[VelocityComponent.self]?.v ?? .zero
+        let p = b.position(relativeTo: root)
+
+        let tuning = b.components[DataNodeTuningComponent.self] ?? .init()
+        let mass = max(tuning.mass, 0.05)
+        let accelMul = max(tuning.accelerationMultiplier, 0.05)
+
+        // Keep baseline behavior intact while making thumb deltas obvious by letting
+        // `mass` and `accelerationMultiplier` widen per-body accel/speed caps.
+        //
+        // Note: spawned balls use `mass` in ~[1, 2.5]; only thumb boosts should exceed that.
+        let accelFactor = sqrt(accelMul)
+        let baselineMassForCaps: Float = 3.0
+        let massFactor = sqrt(max(mass / baselineMassForCaps, 1.0))
+        let maxAForBall = min(maxA * 12, (maxA * accelFactor) / massFactor)
+        let maxSForBall = min(maxS * 12, (maxS * accelFactor) / massFactor)
+
+        var force = SIMD3<Float>.zero
+        for (src, m) in sources {
+            let r  = src - p
+            let r2 = max(simd_length_squared(r), softSquared)
+            let invR = 1 / sqrt(r2)
+            let invR3 = invR / r2
+            force += r * (G * m * invR3)
+        }
+        var a = (force / mass) * accelMul
+        if length(a) > maxAForBall { a = normalize(a) * maxAForBall }
+
+        // Wander
+        a += SIMD3<Float>(
+            .random(in:-wander...wander),
+            .random(in:-wander...wander),
+            .random(in:-wander...wander))
+
+        v += a * dt
+        let s = length(v)
+        if s < minS {
+            v = normalize(SIMD3<Float>(
+                .random(in:-1...1),
+                .random(in:-1...1),
+                .random(in:-1...1))) * minS
+        } else if s > maxSForBall {
+            v *= maxSForBall / s
+        }
+
+        b.position += v * dt
+        b.components.set(VelocityComponent(v: v))
+    }
+}
+
+Exactly how thumbs influence this:
+- Higher `mass` (👍) reduces acceleration directly via `(force / mass)` and also reduces `maxAForBall/maxSForBall` once mass exceeds `baselineMassForCaps`.
+- Higher `accelerationMultiplier` (👎) increases acceleration via `* accelMul` and increases caps via `accelFactor = sqrt(accelMul)`.
+
+──────────────────────────────────────────────────────────────────────────────
+7) How physics changes affect absorption (why “heavier = more likely to absorb”)
+File: Packages/SharedUI/Sources/SharedUI/ImmersiveRootView.swift
+
+Absorption chooses, among the closest candidates, the SLOWEST sphere:
+
+let proximityWindowSize = 5
+// ...
+candidates.sort(by: { $0.dist < $1.dist })
+
+while !candidates.isEmpty {
+    let windowEnd = min(proximityWindowSize, candidates.count)
+    let window = candidates[0..<windowEnd]
+
+    guard let chosen = window.min(by: { $0.speed < $1.speed }) else { return }
+    // chosen sphere is removed from the scene and surfaced into UI/history
+    // ...
+}
+
+Why the thumb tuning matters:
+- 👍 makes neighbors heavier/slower, which increases the chance they become the slowest candidate near a PMN and get absorbed.
+- 👎 makes neighbors lighter/faster, which decreases that chance.
+
+──────────────────────────────────────────────────────────────────────────────
+8) Summary: the practical rule-set
+
+- 👍 (Thumbs Up):
+  - Apply a STRONG multiplicative `mass` increase to the top-ranked neighbor spheres.
+  - Effect in sim: they slow down and become “stickier” / more likely to be absorbed (due to slowest-in-window absorb selection).
+
+- 👎 (Thumbs Down):
+  - Apply a strong `mass` decrease AND a strong `accelerationMultiplier` increase.
+  - Effect in sim: they move faster/more erratically and are less likely to be absorbed.
+
+The important “implementation detail” that makes this stable:
+- The LLM response is treated as an ORDERED list; we do deterministic weighting locally by rank.
+  This prevents the model from injecting unstable numeric magnitudes into the physics.

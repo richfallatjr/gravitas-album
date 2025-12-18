@@ -173,11 +173,7 @@ public struct AlbumControlView: View {
                     .font(.caption2)
                     .foregroundStyle(palette.panelSecondaryText)
 
-                if model.backfillIsRunning, model.backfillTargetCount > 0 {
-                    Text("Indexing memories… \(model.backfillCompletedCount)/\(model.backfillTargetCount)")
-                        .font(.caption2)
-                        .foregroundStyle(palette.panelSecondaryText)
-                }
+                libraryAnalysisStatus
             } else {
                 Text("Photos access: \(accessLabel)")
                     .font(.caption2)
@@ -243,6 +239,47 @@ public struct AlbumControlView: View {
                     .font(.caption2)
                     .foregroundStyle(palette.panelSecondaryText)
                     .lineLimit(2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var libraryAnalysisStatus: some View {
+        let palette = model.palette
+
+        if model.libraryAuthorization == .authorized || model.libraryAuthorization == .limited {
+            let target = max(0, model.backfillTargetCount)
+            let completed = max(0, model.backfillCompletedCount)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Button(model.backfillIsRunning ? "Pause Analysis" : "Analyze Library") {
+                        if model.backfillIsRunning {
+                            model.pauseLibraryAnalysis()
+                        } else {
+                            model.startLibraryAnalysis()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(palette.historyButtonColor)
+
+                    if model.backfillIsRunning {
+                        Text("Thinking…")
+                            .font(.caption2)
+                            .foregroundStyle(palette.panelSecondaryText)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                if target > 0 {
+                    ProgressView(value: Double(completed), total: Double(target))
+                        .progressViewStyle(.linear)
+
+                    Text("Indexing memories… \(completed)/\(target)")
+                        .font(.caption2)
+                        .foregroundStyle(palette.panelSecondaryText)
+                }
             }
         }
     }
