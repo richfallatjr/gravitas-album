@@ -1,0 +1,4 @@
+Target dependency graph (2 targets)
+Target 'GravitasAlbum' in project 'GravitasAlbum'
+➜ Explicit dependency on target 'CurvedLayoutKit' in project 'GravitasAlbum'
+Target 'CurvedLayoutKit' in project 'GravitasAlbum' (no dependencies)

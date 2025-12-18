@@ -1,0 +1,30 @@
+{
+  "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "object" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps"
+  },
+  "/Users/richardfallat/Projects/dev/gravitas-album/Album/GravitasAlbumApp.swift" : {
+    "const-values" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GravitasAlbumApp.swiftconstvalues",
+    "dependencies" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GravitasAlbumApp.d",
+    "diagnostics" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GravitasAlbumApp.dia",
+    "object" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GravitasAlbumApp.o",
+    "swift-dependencies" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GravitasAlbumApp.swiftdeps"
+  },
+  "/Users/richardfallat/Projects/dev/gravitas-album/Album/Shared/PhotosAlbumAssetProvider.swift" : {
+    "const-values" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/PhotosAlbumAssetProvider.swiftconstvalues",
+    "dependencies" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/PhotosAlbumAssetProvider.d",
+    "diagnostics" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/PhotosAlbumAssetProvider.dia",
+    "object" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/PhotosAlbumAssetProvider.o",
+    "swift-dependencies" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/PhotosAlbumAssetProvider.swiftdeps"
+  },
+  "/Users/richardfallat/Projects/dev/gravitas-album/Album/UI/GlassBackground.swift" : {
+    "const-values" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GlassBackground.swiftconstvalues",
+    "dependencies" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GlassBackground.d",
+    "diagnostics" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GlassBackground.dia",
+    "object" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GlassBackground.o",
+    "swift-dependencies" : "/Users/richardfallat/Projects/dev/gravitas-album/.derivedData/Build/Intermediates.noindex/GravitasAlbum.build/Debug-xros/GravitasAlbum.build/Objects-normal/arm64/GlassBackground.swiftdeps"
+  }
+}

@@ -16,13 +16,8 @@ public struct AlbumSidecarKey: Codable, Hashable, Sendable {
     }
 }
 
-public enum AlbumVisionSource: String, Codable, Sendable, CaseIterable {
-    case computed
-    case inferred
-}
-
 public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
-    public static let currentSchemaVersion: Int = 1
+    public static let currentSchemaVersion: Int = 2
 
     public var schemaVersion: Int
     public var key: AlbumSidecarKey
@@ -31,14 +26,60 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
     public var rating: Int
     public var hidden: Bool
 
-    public var visionSummary: String?
-    public var visionTags: [String]?
-    public var visionSource: AlbumVisionSource?
-    public var visionConfidence: Float?
-    public var visionDerivedFromID: String?
-    public var visionInferenceMethod: String?
-    public var visionComputedAt: Date?
-    public var visionModelVersion: String?
+    public enum VisionFillState: String, Codable, Sendable, CaseIterable {
+        case none          // no visionSummary
+        case autofilled    // inferred/proxy text
+        case computed      // actual Vision result
+        case failed        // last attempt failed
+    }
+
+    public enum AutofillSource: String, Codable, Sendable, CaseIterable {
+        case seedNeighbor      // inferred from seed results
+        case thumbUpNeighbor   // inferred from thumbs up anchor
+        case timelineNeighbor  // inferred from adjacent-by-date
+    }
+
+    public struct VisionInfo: Codable, Hashable, Sendable {
+        public var state: VisionFillState
+        public var summary: String?
+        public var tags: [String]?
+        public var confidence: Float?
+        public var source: AutofillSource?
+        public var derivedFromID: String?
+        public var computedAt: Date?
+        public var modelVersion: String?
+        public var lastError: String?
+        public var attemptCount: Int?
+        public var lastAttemptAt: Date?
+
+        public init(
+            state: VisionFillState = .none,
+            summary: String? = nil,
+            tags: [String]? = nil,
+            confidence: Float? = nil,
+            source: AutofillSource? = nil,
+            derivedFromID: String? = nil,
+            computedAt: Date? = nil,
+            modelVersion: String? = nil,
+            lastError: String? = nil,
+            attemptCount: Int? = nil,
+            lastAttemptAt: Date? = nil
+        ) {
+            self.state = state
+            self.summary = summary
+            self.tags = tags
+            self.confidence = confidence
+            self.source = source
+            self.derivedFromID = derivedFromID
+            self.computedAt = computedAt
+            self.modelVersion = modelVersion
+            self.lastError = lastError
+            self.attemptCount = attemptCount
+            self.lastAttemptAt = lastAttemptAt
+        }
+    }
+
+    public var vision: VisionInfo
 
     public init(
         schemaVersion: Int = AlbumSidecarRecord.currentSchemaVersion,
@@ -46,28 +87,102 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         updatedAt: Date = Date(),
         rating: Int = 0,
         hidden: Bool = false,
-        visionSummary: String? = nil,
-        visionTags: [String]? = nil,
-        visionSource: AlbumVisionSource? = nil,
-        visionConfidence: Float? = nil,
-        visionDerivedFromID: String? = nil,
-        visionInferenceMethod: String? = nil,
-        visionComputedAt: Date? = nil,
-        visionModelVersion: String? = nil
+        vision: VisionInfo = VisionInfo()
     ) {
         self.schemaVersion = schemaVersion
         self.key = key
         self.updatedAt = updatedAt
         self.rating = max(-1, min(1, rating))
         self.hidden = hidden
-        self.visionSummary = visionSummary
-        self.visionTags = visionTags
-        self.visionSource = visionSource
-        self.visionConfidence = visionConfidence
-        self.visionDerivedFromID = visionDerivedFromID
-        self.visionInferenceMethod = visionInferenceMethod
-        self.visionComputedAt = visionComputedAt
-        self.visionModelVersion = visionModelVersion
+        self.vision = vision
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case key
+        case updatedAt
+        case rating
+        case hidden
+        case vision
+
+        // Legacy keys (v1)
+        case visionSummary
+        case visionTags
+        case visionSource
+        case visionConfidence
+        case visionDerivedFromID
+        case visionInferenceMethod
+        case visionComputedAt
+        case visionModelVersion
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let decodedSchema = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        schemaVersion = decodedSchema
+        key = try container.decode(AlbumSidecarKey.self, forKey: .key)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        rating = max(-1, min(1, try container.decodeIfPresent(Int.self, forKey: .rating) ?? 0))
+        hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
+
+        if let vision = try container.decodeIfPresent(VisionInfo.self, forKey: .vision) {
+            self.vision = vision
+            schemaVersion = AlbumSidecarRecord.currentSchemaVersion
+            return
+        }
+
+        let legacySummary = try container.decodeIfPresent(String.self, forKey: .visionSummary)
+        let legacyTags = try container.decodeIfPresent([String].self, forKey: .visionTags)
+        let legacySource = try container.decodeIfPresent(String.self, forKey: .visionSource)
+        let legacyConfidence = try container.decodeIfPresent(Float.self, forKey: .visionConfidence)
+        let legacyDerivedFromID = try container.decodeIfPresent(String.self, forKey: .visionDerivedFromID)
+        let legacyInferenceMethod = try container.decodeIfPresent(String.self, forKey: .visionInferenceMethod)
+        let legacyComputedAt = try container.decodeIfPresent(Date.self, forKey: .visionComputedAt)
+        let legacyModelVersion = try container.decodeIfPresent(String.self, forKey: .visionModelVersion)
+
+        let trimmed = legacySummary?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasSummary = (trimmed?.isEmpty == false)
+
+        let inferredSource: AutofillSource? = {
+            guard let method = legacyInferenceMethod?.lowercased() else { return nil }
+            if method.contains("thumb") { return .thumbUpNeighbor }
+            if method.contains("seed") { return .seedNeighbor }
+            if method.contains("timeline") { return .timelineNeighbor }
+            return .timelineNeighbor
+        }()
+
+        let state: VisionFillState = {
+            if !hasSummary { return .none }
+            if legacySource == "computed" { return .computed }
+            return .autofilled
+        }()
+
+        self.vision = VisionInfo(
+            state: state,
+            summary: hasSummary ? trimmed : nil,
+            tags: legacyTags,
+            confidence: legacyConfidence,
+            source: state == .autofilled ? inferredSource : nil,
+            derivedFromID: legacyDerivedFromID,
+            computedAt: state == .computed ? legacyComputedAt : nil,
+            modelVersion: state == .computed ? legacyModelVersion : nil,
+            lastError: nil,
+            attemptCount: nil,
+            lastAttemptAt: nil
+        )
+
+        schemaVersion = AlbumSidecarRecord.currentSchemaVersion
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(AlbumSidecarRecord.currentSchemaVersion, forKey: .schemaVersion)
+        try container.encode(key, forKey: .key)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(rating, forKey: .rating)
+        try container.encode(hidden, forKey: .hidden)
+        try container.encode(vision, forKey: .vision)
     }
 }
 
@@ -135,13 +250,19 @@ public actor AlbumSidecarStore {
                     updatedAt: legacy.updatedAt,
                     rating: rating,
                     hidden: legacy.hiddenLocalIdentifiers.contains(trimmed),
-                    visionSummary: hasSummary ? summary : nil,
-                    visionTags: nil,
-                    visionSource: hasSummary ? .computed : nil,
-                    visionConfidence: hasSummary ? 0.65 : nil,
-                    visionDerivedFromID: nil,
-                    visionComputedAt: hasSummary ? legacy.updatedAt : nil,
-                    visionModelVersion: hasSummary ? "legacy" : nil
+                    vision: AlbumSidecarRecord.VisionInfo(
+                        state: hasSummary ? .computed : .none,
+                        summary: hasSummary ? summary : nil,
+                        tags: nil,
+                        confidence: hasSummary ? 0.65 : nil,
+                        source: nil,
+                        derivedFromID: nil,
+                        computedAt: hasSummary ? legacy.updatedAt : nil,
+                        modelVersion: hasSummary ? "legacy" : nil,
+                        lastError: nil,
+                        attemptCount: nil,
+                        lastAttemptAt: nil
+                    )
                 )
 
                 await upsert(record)
@@ -251,22 +372,26 @@ public actor AlbumSidecarStore {
         guard !trimmedSummary.isEmpty else { return }
 
         await mutate(key) { record in
-            record.visionSummary = trimmedSummary
-            record.visionTags = tags?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            record.visionSource = .computed
-            record.visionConfidence = max(0, min(1, confidence))
-            record.visionDerivedFromID = nil
-            record.visionInferenceMethod = nil
-            record.visionComputedAt = computedAt
-            record.visionModelVersion = modelVersion
+            record.vision.state = .computed
+            record.vision.summary = trimmedSummary
+            record.vision.tags = tags?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            record.vision.confidence = max(0, min(1, confidence))
+            record.vision.source = nil
+            record.vision.derivedFromID = nil
+            record.vision.computedAt = computedAt
+            record.vision.modelVersion = modelVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+            record.vision.lastError = nil
+            record.vision.attemptCount = nil
+            record.vision.lastAttemptAt = nil
         }
     }
 
-    public func setVisionInferred(
+    public func setVisionAutofilledIfMissing(
         _ key: AlbumSidecarKey,
         summary: String,
         tags: [String]?,
         confidence: Float,
+        source: AlbumSidecarRecord.AutofillSource,
         derivedFromID: String?
     ) async {
         let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -276,59 +401,46 @@ public actor AlbumSidecarStore {
         let derivedNormalized = (derived?.isEmpty == false) ? derived : nil
 
         await mutate(key) { record in
-            if let existing = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !existing.isEmpty {
-                return
-            }
+            guard record.vision.state != .computed else { return }
+            guard record.vision.state == .none else { return }
 
-            record.visionSummary = trimmedSummary
-            record.visionTags = tags?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            record.visionSource = .inferred
-            record.visionConfidence = max(0, min(1, confidence))
-            record.visionDerivedFromID = derivedNormalized
-            record.visionInferenceMethod = "autopopulated_neighbor_fill_v1"
-            if record.visionComputedAt != nil {
-                record.visionComputedAt = nil
-            }
-            if record.visionModelVersion != nil {
-                record.visionModelVersion = nil
-            }
+            record.vision.state = .autofilled
+            record.vision.summary = trimmedSummary
+            record.vision.tags = tags?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            record.vision.confidence = max(0, min(1, confidence))
+            record.vision.source = source
+            record.vision.derivedFromID = derivedNormalized
+            record.vision.computedAt = nil
+            record.vision.modelVersion = nil
+            record.vision.lastError = nil
         }
     }
 
-    public func overwriteVisionInferredIfAutotagged(
+    public func setVisionFailed(
         _ key: AlbumSidecarKey,
-        summary: String,
-        tags: [String]?,
-        confidence: Float,
-        derivedFromID: String?,
-        inferenceMethod: String
+        error: String,
+        attemptedAt: Date
     ) async {
-        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedSummary.isEmpty else { return }
-
-        let method = inferenceMethod.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !method.isEmpty else { return }
-
-        let derived = derivedFromID?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let derivedNormalized = (derived?.isEmpty == false) ? derived : nil
+        let trimmedError = error.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedError.isEmpty else { return }
 
         await mutate(key) { record in
-            guard record.visionSource == .inferred else { return }
-            guard record.visionInferenceMethod != nil else { return }
+            guard record.vision.state != .computed else { return }
+            record.vision.state = .failed
+            record.vision.lastError = trimmedError
 
-            record.visionSummary = trimmedSummary
-            record.visionTags = tags?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            record.visionSource = .inferred
-            record.visionConfidence = max(0, min(1, confidence))
-            record.visionDerivedFromID = derivedNormalized
-            record.visionInferenceMethod = method
-            if record.visionComputedAt != nil {
-                record.visionComputedAt = nil
-            }
-            if record.visionModelVersion != nil {
-                record.visionModelVersion = nil
-            }
+            let previousAttempts = record.vision.attemptCount ?? 0
+            record.vision.attemptCount = max(0, previousAttempts) + 1
+            record.vision.lastAttemptAt = attemptedAt
+        }
+    }
+
+    public func resetVisionFailures(_ key: AlbumSidecarKey) async {
+        await mutate(key) { record in
+            guard record.vision.state == .failed else { return }
+            record.vision.attemptCount = 0
+            record.vision.lastAttemptAt = nil
+            record.vision.lastError = nil
         }
     }
 

@@ -32,13 +32,13 @@ actor AlbumAsyncSemaphore {
 public struct AlbumVisionUpdate: Sendable, Hashable {
     public let assetID: String
     public let summary: String
-    public let source: AlbumVisionSource
+    public let state: AlbumSidecarRecord.VisionFillState
     public let confidence: Float
 
-    public init(assetID: String, summary: String, source: AlbumVisionSource, confidence: Float) {
+    public init(assetID: String, summary: String, state: AlbumSidecarRecord.VisionFillState, confidence: Float) {
         self.assetID = assetID
         self.summary = summary
-        self.source = source
+        self.state = state
         self.confidence = confidence
     }
 }
@@ -209,7 +209,7 @@ public actor AlbumVisionQueue {
                 AlbumVisionUpdate(
                     assetID: id,
                     summary: result.summary,
-                    source: .computed,
+                    state: .computed,
                     confidence: result.confidence
                 ),
                 reason: reason
@@ -277,11 +277,12 @@ public actor AlbumVisionQueue {
 
         for neighborID in neighbors {
             let key = AlbumSidecarKey(source: source, id: neighborID)
-            await sidecarStore.setVisionInferred(
+            await sidecarStore.setVisionAutofilledIfMissing(
                 key,
                 summary: seedSummary,
                 tags: seedTags,
                 confidence: inferredConfidence,
+                source: .timelineNeighbor,
                 derivedFromID: seedAssetID
             )
         }

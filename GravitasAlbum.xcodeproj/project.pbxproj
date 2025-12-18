@@ -28,6 +28,7 @@
 		623E075AA5ADF02C6D4C1CD7 /* front.png in Resources */ = {isa = PBXBuildFile; fileRef = 90B90A3CEEDE40373369DD17 /* front.png */; };
 		6A5E589C2CFFB3A07961544A /* AlbumTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B15FBA4C9074577DEADB361 /* AlbumTheme.swift */; };
 		6D585CCFB6EA9708A560F359 /* AlbumCurvedLayoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B5132E99D021A1112304934 /* AlbumCurvedLayoutModels.swift */; };
+		6EC9FBD93F7BC9B7A31AEC29 /* AlbumBackfillManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED357F7814566660C2FFF2DC /* AlbumBackfillManager.swift */; };
 		7424634A17E3FE483E331791 /* middle.png in Resources */ = {isa = PBXBuildFile; fileRef = 42D23FC392308A361F50EC57 /* middle.png */; };
 		755491FFB50163CAFA8ED0ED /* GravitasAlbumApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E3AD7B137BCC9EF20517DA /* GravitasAlbumApp.swift */; };
 		75B7BA637068B4125CE285B3 /* PhotosAlbumAssetProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76ABF5D96E49C19E9D6A5F3D /* PhotosAlbumAssetProvider.swift */; };
@@ -137,6 +138,7 @@
 		EB91B0A8E5FA94F7381B1917 /* AlbumItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumItem.swift; sourceTree = "<group>"; };
 		EC183209D3F2099BDAB32FC2 /* AlbumPopOutPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumPopOutPayload.swift; sourceTree = "<group>"; };
 		EC505166E6E86AE193870785 /* AlbumPopOutAssetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumPopOutAssetView.swift; sourceTree = "<group>"; };
+		ED357F7814566660C2FFF2DC /* AlbumBackfillManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumBackfillManager.swift; sourceTree = "<group>"; };
 		EFBDDE560B3260E37092A64A /* AlbumControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumControlView.swift; sourceTree = "<group>"; };
 		F100E79AA29644F73D88D15F /* AlbumOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumOracle.swift; sourceTree = "<group>"; };
 		F92F099F62B2B58785026FFF /* AlbumAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumAsset.swift; sourceTree = "<group>"; };
@@ -210,6 +212,7 @@
 				50ED7BAAE001591EC877111D /* AlbumAssetProvider.swift */,
 				7C2ADE9155595B1FEDD4DE44 /* AlbumAutoOracle.swift */,
 				8538D3EED24ECD7E1DEB909D /* AlbumBackfillCoordinator.swift */,
+				ED357F7814566660C2FFF2DC /* AlbumBackfillManager.swift */,
 				33B7F74EF2E77045AF99FD1E /* AlbumDemoLibrary.swift */,
 				FBE9C43CA4AA5A85ED2DBE28 /* AlbumFoundationModelsOracle.swift */,
 				D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */,
@@ -387,6 +390,7 @@
 				10ADE7A29B17DC95138DBC93 /* AlbumAssetProvider.swift in Sources */,
 				2AF31F62E551E59F22EFD7B8 /* AlbumAutoOracle.swift in Sources */,
 				D6077979C29A83BD99490C04 /* AlbumBackfillCoordinator.swift in Sources */,
+				6EC9FBD93F7BC9B7A31AEC29 /* AlbumBackfillManager.swift in Sources */,
 				283ED72FC10960999485ECA9 /* AlbumControlView.swift in Sources */,
 				86B2E07E81F4DC1F0DFFDECC /* AlbumCurvedLayoutMath.swift in Sources */,
 				6D585CCFB6EA9708A560F359 /* AlbumCurvedLayoutModels.swift in Sources */,

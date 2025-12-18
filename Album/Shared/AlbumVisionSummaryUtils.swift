@@ -14,8 +14,7 @@ public enum AlbumVisionSummaryUtils {
     }
 
     public static func isMeaningfulComputed(_ record: AlbumSidecarRecord) -> Bool {
-        guard record.visionSource == .computed else { return false }
-        return !isPlaceholder(record.visionSummary)
+        guard record.vision.state == .computed else { return false }
+        return !isPlaceholder(record.vision.summary)
     }
 }
-

@@ -248,39 +248,79 @@ public struct AlbumControlView: View {
         let palette = model.palette
 
         if model.libraryAuthorization == .authorized || model.libraryAuthorization == .limited {
-            let target = max(0, model.backfillTargetCount)
-            let completed = max(0, model.backfillCompletedCount)
+            let status = model.backfillStatus
+            let total = max(0, status.totalAssets)
+            let computed = max(0, status.computed)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    Button(model.backfillIsRunning ? "Pause Analysis" : "Analyze Library") {
-                        if model.backfillIsRunning {
-                            model.pauseLibraryAnalysis()
+                    Button(status.paused ? "Resume" : "Pause") {
+                        if status.paused {
+                            model.resumeBackfill()
                         } else {
-                            model.startLibraryAnalysis()
+                            model.pauseBackfill()
                         }
                     }
                     .buttonStyle(.bordered)
                     .tint(palette.historyButtonColor)
 
-                    if model.backfillIsRunning {
-                        Text("Thinking…")
-                            .font(.caption2)
-                            .foregroundStyle(palette.panelSecondaryText)
+                    Button("Restart Indexing") {
+                        model.restartIndexing()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(palette.copyButtonFill)
+
+                    Button("Retry Failed") {
+                        model.retryFailedBackfill()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(palette.historyButtonColor)
+                    .disabled(status.failed <= 0)
+
+                    Spacer(minLength: 0)
+
+                    Text(status.paused ? "Paused" : (status.running ? "Running" : "Idle"))
+                        .font(.caption2)
+                        .foregroundStyle(palette.panelSecondaryText)
+                }
+
+                if total > 0 {
+                    ProgressView(value: Double(computed), total: Double(total))
+                        .progressViewStyle(.linear)
+                        .tint(palette.copyButtonFill)
+
+                    Text("Computed \(computed)/\(total) • Autofilled \(status.autofilled) • Missing \(status.missing) • Failed \(status.failed) • Queued \(status.queued) • Inflight \(status.inflight)")
+                        .font(.caption2)
+                        .foregroundStyle(palette.panelSecondaryText)
+                } else {
+                    Text("Queue: \(status.queued) queued • \(status.inflight) inflight • Failed \(status.failed)")
+                        .font(.caption2)
+                        .foregroundStyle(palette.panelSecondaryText)
+                }
+
+                if let err = status.lastError, !err.isEmpty {
+                    Text("Last error: \(err)")
+                        .font(.caption2)
+                        .foregroundStyle(palette.panelSecondaryText)
+                        .lineLimit(2)
+                }
+
+                HStack(spacing: 12) {
+                    Toggle("Thumb Up Autofill", isOn: $model.settings.autofillOnThumbUp)
+                        .toggleStyle(.switch)
+
+                    if model.settings.autofillOnThumbUp {
+                        Stepper(
+                            "Neighbors \(model.settings.thumbUpAutofillCount)",
+                            value: $model.settings.thumbUpAutofillCount,
+                            in: 0...20
+                        )
                     }
 
                     Spacer(minLength: 0)
                 }
-
-                if target > 0 {
-                    ProgressView(value: Double(completed), total: Double(target))
-                        .progressViewStyle(.linear)
-                        .tint(palette.copyButtonFill)
-
-                    Text("Indexing memories… \(completed)/\(target)")
-                        .font(.caption2)
-                        .foregroundStyle(palette.panelSecondaryText)
-                }
+                .font(.caption2)
+                .foregroundStyle(palette.panelSecondaryText)
             }
         }
     }

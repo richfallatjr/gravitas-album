@@ -1,0 +1,142 @@
+Gravitas Dream / Gravitas Fright — UI Styling Notes
+===================================================
+
+This app’s look is driven by a small theme palette (ReaderThemePalette) plus a consistent set
+of SwiftUI layout patterns (rounded “cards”, subtle borders, bright accent tints, simple type scale).
+
+
+1) Theme system
+--------------
+
+Source of truth:
+- `Gravitas Fright/Gravitas Fright/Sources/GravitasFright/Model/ReaderState.swift`
+  - `ReaderThemePalette` defines all semantic UI colors.
+  - `ReaderTheme` provides `.light` + `.dark` palettes.
+
+App usage:
+- `Gravitas Fright/Gravitas Fright/Sources/GravitasFright/App/GravitasFrightApp.swift`
+  - Views get `model.palette` via `AppModel` and apply `.preferredColorScheme(...)`.
+- `Gravitas Fright/Gravitas Fright/Sources/GravitasFright/Services/AppModel.swift`
+  - Theme selection is currently disabled; app defaults to `.dark`.
+
+
+2) Color palette (semantic + accents)
+------------------------------------
+
+Accent colors (defined in `ReaderTheme.palette`):
+- Read (primary CTA): RGB(169, 220, 118)  ≈ #A9DC76
+- History (secondary CTA): RGB(171, 157, 242)  ≈ #AB9DF2
+- Open (pink accent / share / delete-ish): RGB(255, 97, 136)  ≈ #FF6188
+- Toggle fill: RGB(255, 216, 102)  ≈ #FFD866
+- Copy / info accent: RGB(120, 220, 232)  ≈ #78DCE8
+
+Dark theme neutrals:
+- `cardBackground`: sRGB white 0.13
+- `panelBackground`: sRGB white 0.15
+- `cardBorder` / `navBorder`: white opacity 0.08 (then frequently re-opacified in strokes)
+- `primaryText`: white
+- `secondaryText`: sRGB white 0.70
+- `captionText`: sRGB white 0.72
+- `overlayText`: sRGB white 0.62
+- `buttonLabelOnColor`: black (because accents are bright in dark mode)
+
+Light theme neutrals:
+- Similar semantics, but `buttonLabelOnColor` becomes white.
+
+
+3) Core layout + surface patterns
+---------------------------------
+
+The app repeatedly uses “card” surfaces built from RoundedRectangles:
+
+A) Large surfaces (main panels/cards)
+- Corner radius: 24
+- Fill: `palette.panelBackground` (Control Panel / Picker panels) or `palette.cardBackground` (Entry / Article cards)
+- Border: `RoundedRectangle(cornerRadius: 24).stroke(palette.cardBorder.opacity(0.5...0.8), lineWidth: 1)`
+- Padding:
+  - Outer padding commonly 12–18
+  - Inner padding commonly 16–24
+- Typical vertical spacing in stacks: 14–18
+
+Examples:
+- Control Panel container: `UI/ControlPanelView.swift`
+- Picker container: `UI/SubgenrePickerView.swift`
+- Entry container: `UI/GFEntryView.swift`
+- Article container: `UI/ArticleCardView.swift` (also adds a subtle shadow)
+
+B) Small sections inside a card
+- Corner radius: 12
+- Fill: `palette.panelBackground`
+- Border: `stroke(palette.cardBorder.opacity(0.6), lineWidth: 1)`
+- Padding: 12
+
+Examples:
+- Seed/context summary + character override in `UI/GFEntryView.swift`
+
+
+4) Buttons (style + tint usage)
+-------------------------------
+
+Primary actions
+- `.buttonStyle(.borderedProminent)`
+- `.tint(palette.readButtonColor)` for the main CTA (“Choose a main character”, “Launch Inspiration Board”, etc.)
+- Text generally uses `.font(.headline.weight(.semibold))`
+- Labels often use `.foregroundStyle(palette.buttonLabelOnColor)` so text stays readable across themes.
+
+Secondary actions
+- `.buttonStyle(.bordered)` or `.buttonStyle(.plain)` (for icon-only controls)
+- `.tint(palette.historyButtonColor)` for supportive actions (“Exit”, “Edit with AI” state changes)
+
+Explicit accent tints used directly in UI (instead of palette fields)
+- Cyan: RGB(120, 220, 232) ≈ #78DCE8 (e.g., “Retry” button)
+- Pink: RGB(255, 97, 136) ≈ #FF6188 (e.g., “Share PDF”, delete affordances)
+
+
+5) Typography (simple scale)
+----------------------------
+
+Titles:
+- `.title.bold()`, `.title2.bold()`, or `.largeTitle.bold()`
+
+Subtitles:
+- `.headline.weight(.semibold)` or `.title3.weight(.semibold)`
+
+Body:
+- `.body`
+
+Meta/status:
+- `.footnote` (often `.monospacedDigit()` for timers)
+
+Captions:
+- `.subheadline` + `palette.captionText`
+
+
+6) Feedback + state messaging
+-----------------------------
+
+Loading:
+- `ProgressView()` inline within primary CTA (keeps layout stable).
+
+Errors:
+- Red `.footnote` text (inline, near the CTA).
+
+Informational notices:
+- `palette.secondaryText` `.footnote` (inline).
+
+
+7) Immersive/3D card styling (CurvedCardSpace)
+----------------------------------------------
+
+`UI/CurvedCardSpace.swift` uses a slightly different “high contrast” card look for RealityKit:
+- Panel card: corner radius 18, very dark translucent fill (`white: 0.04, opacity: 0.95`), heavier shadows, brighter stroke.
+- Nav cards: corner radius 18 (continuous), `palette.navBackground` + `palette.navBorder`, large chevrons.
+
+
+Replication checklist (quick)
+-----------------------------
+
+- Define a semantic palette (like `ReaderThemePalette`) and use it everywhere (no raw colors except intentional accents).
+- Use RoundedRectangle corner radius 24 for main surfaces, 12 for nested sections.
+- Keep borders subtle (opacity 0.5–0.8 on a 1pt stroke).
+- Use bright accent tints on `.borderedProminent` buttons; use `buttonLabelOnColor` for readable button text.
+- Prefer simple typography: bold titles, semibold headlines, footnotes for status.

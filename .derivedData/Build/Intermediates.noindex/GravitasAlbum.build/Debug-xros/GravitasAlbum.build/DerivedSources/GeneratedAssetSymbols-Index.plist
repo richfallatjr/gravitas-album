@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>colors</key>
+	<array/>
+	<key>images</key>
+	<array>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/richardfallat/Projects/dev/gravitas-album/Album/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameContent</string>
+			<key>relativePath</key>
+			<string>./AppIcon.solidimagestack/Middle.solidimagestacklayer/Content.imageset</string>
+			<key>swiftSymbol</key>
+			<string>content</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/richardfallat/Projects/dev/gravitas-album/Album/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameContent</string>
+			<key>relativePath</key>
+			<string>./AppIcon.solidimagestack/Back.solidimagestacklayer/Content.imageset</string>
+			<key>swiftSymbol</key>
+			<string>content</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/richardfallat/Projects/dev/gravitas-album/Album/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameContent</string>
+			<key>relativePath</key>
+			<string>./AppIcon.solidimagestack/Front.solidimagestacklayer/Content.imageset</string>
+			<key>swiftSymbol</key>
+			<string>content</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/richardfallat/Projects/dev/gravitas-album/Album/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameGravitasLogoAlone</string>
+			<key>relativePath</key>
+			<string>./gravitas-logo-alone.imageset</string>
+			<key>swiftSymbol</key>
+			<string>gravitasLogoAlone</string>
+		</dict>
+	</array>
+	<key>symbols</key>
+	<array/>
+</dict>
+</plist>

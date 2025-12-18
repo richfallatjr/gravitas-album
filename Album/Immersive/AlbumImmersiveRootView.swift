@@ -276,6 +276,8 @@ private final class AlbumImmersiveSceneState {
         for asset in assets {
             let slot = AlbumSlot.slot(for: asset)
 
+            model.ensureVisionSummary(for: asset.id, reason: "sim_spawn", priority: .utility)
+
             let t: Double
             if let d = asset.creationDate, let minDate, let maxDate, minDate != maxDate {
                 t = (d.timeIntervalSinceReferenceDate - minDate.timeIntervalSinceReferenceDate) / denom

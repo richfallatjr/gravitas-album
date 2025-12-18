@@ -11,8 +11,7 @@ public final class AlbumModel: ObservableObject {
     public let assetProvider: AlbumAssetProvider
     private let sidecarStore: AlbumSidecarStore
     private let libraryIndexStore: AlbumLibraryIndexStore
-    private let visionQueue: AlbumVisionQueue
-    private let backfillCoordinator: AlbumBackfillCoordinator
+    private let backfillManager: AlbumBackfillManager
     public let oracle: AlbumOracle
 
     @Published public var theme: AlbumTheme = .dark
@@ -142,13 +141,23 @@ public final class AlbumModel: ObservableObject {
     @Published public var thumbFeedbackByAssetID: [String: AlbumThumbFeedback] = [:]
 
     @Published public var visionSummaryByAssetID: [String: String] = [:]
-    @Published public var visionSourceByAssetID: [String: AlbumVisionSource] = [:]
+    @Published public var visionStateByAssetID: [String: AlbumSidecarRecord.VisionFillState] = [:]
     @Published public var visionConfidenceByAssetID: [String: Float] = [:]
     @Published public var visionPendingAssetIDs: Set<String> = []
 
-    @Published public private(set) var backfillTargetCount: Int = 0
-    @Published public private(set) var backfillCompletedCount: Int = 0
-    @Published public private(set) var backfillIsRunning: Bool = false
+    @Published public var backfillStatus: BackfillStatus = BackfillStatus()
+
+    public struct Settings: Sendable, Hashable {
+        public var autofillOnThumbUp: Bool
+        public var thumbUpAutofillCount: Int
+
+        public init(autofillOnThumbUp: Bool = true, thumbUpAutofillCount: Int = 5) {
+            self.autofillOnThumbUp = autofillOnThumbUp
+            self.thumbUpAutofillCount = max(0, thumbUpAutofillCount)
+        }
+    }
+
+    @Published public var settings: Settings = Settings()
 
     @Published public var curvedCanvasEnabled: Bool = false
     @Published public private(set) var curvedWallDumpPages: [CurvedWallDumpPage] = []
@@ -162,6 +171,7 @@ public final class AlbumModel: ObservableObject {
     private var isSyncingSelection: Bool = false
     private var recommendsCacheByAnchorID: [String: AlbumRecResponse] = [:]
     private var recommendsFeedbackByAnchorID: [String: AlbumThumbFeedback] = [:]
+    private var thumbUpAutofillNeighborIDsByAnchorID: [String: [String]] = [:]
     private var memoryRebuildTask: Task<Void, Never>? = nil
     private var pinnedAssetLoadsInFlight: Set<String> = []
 
@@ -201,18 +211,12 @@ public final class AlbumModel: ObservableObject {
     ) {
         let provider = assetProvider ?? PhotosAlbumAssetProvider()
         let indexStore = AlbumLibraryIndexStore()
-        let visionQueue = AlbumVisionQueue(sidecarStore: sidecarStore, libraryIndexStore: indexStore, assetProvider: provider)
-        let backfillCoordinator = AlbumBackfillCoordinator(
-            sidecarStore: sidecarStore,
-            libraryIndexStore: indexStore,
-            visionQueue: visionQueue
-        )
+        let backfillManager = AlbumBackfillManager(sidecarStore: sidecarStore, libraryIndexStore: indexStore, assetProvider: provider)
 
         self.assetProvider = provider
         self.sidecarStore = sidecarStore
         self.libraryIndexStore = indexStore
-        self.visionQueue = visionQueue
-        self.backfillCoordinator = backfillCoordinator
+        self.backfillManager = backfillManager
         self.oracle = oracle
         self.scenes = AlbumSceneStore.load()
         self.libraryAuthorization = self.assetProvider.authorizationStatus()
@@ -225,26 +229,19 @@ public final class AlbumModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
 
-            await visionQueue.setUpdateSink { [weak self] update in
+            await backfillManager.setVisionUpdateSink { [weak self] update in
                 self?.applyVisionUpdate(update)
             }
 
-            await visionQueue.setCompletionSink { [weak self] assetID in
+            await backfillManager.setVisionCompletionSink { [weak self] assetID in
                 self?.visionPendingAssetIDs.remove(assetID)
             }
 
-            await backfillCoordinator.setProgressSink { [weak self] progress in
-                self?.backfillTargetCount = progress.targetCount
-                self?.backfillCompletedCount = progress.completedCount
-                self?.backfillIsRunning = progress.isRunning
+            await backfillManager.setStatusSink { [weak self] status in
+                self?.backfillStatus = status
             }
 
-            let progress = await backfillCoordinator.currentProgress()
-            await MainActor.run {
-                self.backfillTargetCount = progress.targetCount
-                self.backfillCompletedCount = progress.completedCount
-                self.backfillIsRunning = progress.isRunning
-            }
+            await backfillManager.bootstrapOnLaunch()
         }
     }
 
@@ -263,16 +260,40 @@ public final class AlbumModel: ObservableObject {
             return
         }
 
-        AlbumLog.model.info("Analyze Library pressed; starting backfill")
-        Task(priority: .background) { [backfillCoordinator] in
-            await backfillCoordinator.startIfNeeded(source: .photos)
+        AlbumLog.model.info("Analyze Library pressed; resuming backfill")
+        Task(priority: .background) { [backfillManager] in
+            await backfillManager.resume()
         }
     }
 
     public func pauseLibraryAnalysis() {
         AlbumLog.model.info("Pause Analysis pressed; pausing backfill")
-        Task(priority: .background) { [backfillCoordinator] in
-            await backfillCoordinator.pause()
+        Task(priority: .background) { [backfillManager] in
+            await backfillManager.pause()
+        }
+    }
+
+    public func pauseBackfill() {
+        Task(priority: .background) { [backfillManager] in
+            await backfillManager.pause()
+        }
+    }
+
+    public func resumeBackfill() {
+        Task(priority: .background) { [backfillManager] in
+            await backfillManager.resume()
+        }
+    }
+
+    public func restartIndexing() {
+        Task(priority: .background) { [backfillManager] in
+            await backfillManager.restart()
+        }
+    }
+
+    public func retryFailedBackfill() {
+        Task(priority: .background) { [backfillManager] in
+            await backfillManager.retryFailed()
         }
     }
 
@@ -290,11 +311,8 @@ public final class AlbumModel: ObservableObject {
         memoryRebuildTask?.cancel()
         memoryRebuildTask = nil
 
-        Task(priority: .userInitiated) { [backfillCoordinator] in
-            await backfillCoordinator.pause()
-        }
-        Task(priority: .userInitiated) { [visionQueue] in
-            await visionQueue.cancelAll()
+        Task(priority: .userInitiated) { [backfillManager] in
+            await backfillManager.pause()
         }
     }
 
@@ -412,8 +430,8 @@ public final class AlbumModel: ObservableObject {
             }
             history = historyAssetIDs.compactMap { item(for: $0) }
 
-            Task(priority: .background) { [backfillCoordinator] in
-                await backfillCoordinator.startIfNeeded(source: .photos)
+            Task(priority: .background) { [backfillManager] in
+                await backfillManager.bootstrapOnLaunch()
             }
         } catch {
             lastAssetLoadError = String(describing: error)
@@ -471,8 +489,8 @@ public final class AlbumModel: ObservableObject {
                 rebuildMemoryWindow(resetToAnchor: memoryWindowItems.isEmpty)
             }
 
-            Task(priority: .background) { [backfillCoordinator] in
-                await backfillCoordinator.startIfNeeded(source: .photos)
+            Task(priority: .background) { [backfillManager] in
+                await backfillManager.bootstrapOnLaunch()
             }
         } catch {
             lastAssetLoadError = String(describing: error)
@@ -510,7 +528,7 @@ public final class AlbumModel: ObservableObject {
             hiddenIDs = []
             thumbFeedbackByAssetID = [:]
             visionSummaryByAssetID = [:]
-            visionSourceByAssetID = [:]
+            visionStateByAssetID = [:]
             visionConfidenceByAssetID = [:]
             return []
         }
@@ -521,7 +539,7 @@ public final class AlbumModel: ObservableObject {
         var hidden: Set<String> = []
         var feedback: [String: AlbumThumbFeedback] = [:]
         var vision: [String: String] = [:]
-        var visionSource: [String: AlbumVisionSource] = [:]
+        var visionState: [String: AlbumSidecarRecord.VisionFillState] = [:]
         var visionConfidence: [String: Float] = [:]
 
         hidden.reserveCapacity(records.count / 4)
@@ -545,14 +563,14 @@ public final class AlbumModel: ObservableObject {
                 break
             }
 
-            if let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let summary = record.vision.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
                !summary.isEmpty {
                 vision[id] = summary
             }
-            if let src = record.visionSource {
-                visionSource[id] = src
+            if record.vision.state != .none {
+                visionState[id] = record.vision.state
             }
-            if let conf = record.visionConfidence {
+            if let conf = record.vision.confidence {
                 visionConfidence[id] = conf
             }
         }
@@ -560,7 +578,7 @@ public final class AlbumModel: ObservableObject {
         hiddenIDs = hidden
         thumbFeedbackByAssetID = feedback
         visionSummaryByAssetID = vision
-        visionSourceByAssetID = visionSource
+        visionStateByAssetID = visionState
         visionConfidenceByAssetID = visionConfidence
 
         return fetched.filter { !hidden.contains($0.id) }
@@ -570,7 +588,7 @@ public final class AlbumModel: ObservableObject {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }
 
-        ensureVisionSummary(for: id, reason: "thumbnail", priority: .utility)
+        ensureVisionSummary(for: id, reason: "thumbnail", priority: .userInitiated)
 
         if datasetSource == .demo || AlbumDemoLibrary.isDemoID(id) {
             let mediaType = asset(for: id)?.mediaType
@@ -897,10 +915,8 @@ public final class AlbumModel: ObservableObject {
             await sidecarStore.setRating(key, rating: rating)
         }
 
-        if feedback == .up {
-            Task(priority: .utility) { [weak self] in
-                await self?.propagateThumbUpVisionToAutotaggedNeighbors(anchorID: id)
-            }
+        if feedback == .up, settings.autofillOnThumbUp {
+            ensureVisionSummary(for: id, reason: "thumb_up", priority: .userInitiated)
         }
 
         guard !isPaused else {
@@ -923,45 +939,26 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
-    private func propagateThumbUpVisionToAutotaggedNeighbors(anchorID: String) async {
-        guard datasetSource == .photos else { return }
+    private func maybeAutofillThumbUpNeighbors(anchorID: String) {
         let id = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }
+        guard settings.autofillOnThumbUp else { return }
 
-        _ = await visionQueue.ensureVisionComputed(
-            for: id,
-            source: .photos,
-            reason: "thumb_up_neighbor_fill",
-            priority: .userInitiated
-        )
+        let desired = max(0, settings.thumbUpAutofillCount)
+        guard desired > 0 else { return }
 
-        let anchorKey = AlbumSidecarKey(source: .photos, id: id)
-        guard let anchorRecord = await sidecarStore.load(anchorKey),
-              anchorRecord.visionSource == .computed,
-              let summary = anchorRecord.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !summary.isEmpty
-        else { return }
+        guard let neighborIDs = thumbUpAutofillNeighborIDsByAnchorID[id], !neighborIDs.isEmpty else { return }
 
-        guard let index = await libraryIndexStore.loadIndex() else { return }
-        let neighborIDs = index.neighbors(of: id, radius: 10)
-        guard !neighborIDs.isEmpty else { return }
-
-        let tags = anchorRecord.visionTags
-        let inferredConfidence: Float = 0.30
-
-        for neighborID in neighborIDs {
-            let neighborKey = AlbumSidecarKey(source: .photos, id: neighborID)
-            await sidecarStore.overwriteVisionInferredIfAutotagged(
-                neighborKey,
-                summary: summary,
-                tags: tags,
-                confidence: inferredConfidence,
-                derivedFromID: id,
-                inferenceMethod: "autopopulated_thumb_up_neighbor_fill_v1"
-            )
+        if visionStateByAssetID[id] != .computed || AlbumVisionSummaryUtils.isPlaceholder(visionSummaryByAssetID[id]) {
+            ensureVisionSummary(for: id, reason: "thumb_up_anchor_compute", priority: .userInitiated)
+            return
         }
 
-        AlbumLog.model.info("ThumbUp neighbor fill applied to autotagged neighbors: anchor=\(id, privacy: .public) neighbors=\(neighborIDs.count)")
+        thumbUpAutofillNeighborIDsByAnchorID[id] = nil
+
+        Task(priority: .background) { [backfillManager] in
+            await backfillManager.autofillNeighbors(anchorID: id, neighborIDs: Array(neighborIDs.prefix(desired)), source: .thumbUpNeighbor)
+        }
     }
 
     @discardableResult
@@ -1094,7 +1091,7 @@ public final class AlbumModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         visionSummaryByAssetID[assetID] = trimmed
-        visionSourceByAssetID[assetID] = .computed
+        visionStateByAssetID[assetID] = .computed
         visionConfidenceByAssetID[assetID] = 0.75
         visionPendingAssetIDs.remove(assetID)
 
@@ -1111,20 +1108,24 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
-    private func applyVisionUpdate(_ update: AlbumVisionUpdate) {
+    private func applyVisionUpdate(_ update: AlbumBackfillVisionUpdate) {
         let assetID = update.assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !assetID.isEmpty else { return }
         let trimmed = update.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        if visionSourceByAssetID[assetID] == .computed, update.source != .computed {
+        if visionStateByAssetID[assetID] == .computed, update.state != .computed {
             return
         }
 
         visionSummaryByAssetID[assetID] = trimmed
-        visionSourceByAssetID[assetID] = update.source
+        visionStateByAssetID[assetID] = update.state
         visionConfidenceByAssetID[assetID] = update.confidence
         visionPendingAssetIDs.remove(assetID)
+
+        if update.state == .computed {
+            maybeAutofillThumbUpNeighbors(anchorID: assetID)
+        }
     }
 
     public func ensureVisionSummary(for assetID: String, reason: String, priority: TaskPriority = .utility) {
@@ -1134,24 +1135,32 @@ public final class AlbumModel: ObservableObject {
         if datasetSource == .demo || AlbumDemoLibrary.isDemoID(id) {
             if visionSummaryByAssetID[id] == nil {
                 visionSummaryByAssetID[id] = AlbumDemoLibrary.placeholderTitle(for: id, mediaType: asset(for: id)?.mediaType)
-                visionSourceByAssetID[id] = .computed
+                visionStateByAssetID[id] = .computed
                 visionConfidenceByAssetID[id] = 1.0
             }
             return
         }
 
-        if visionSourceByAssetID[id] == .computed,
+        if visionStateByAssetID[id] == .computed,
            !AlbumVisionSummaryUtils.isPlaceholder(visionSummaryByAssetID[id]) {
             return
         }
 
-        Task(priority: priority) { [visionQueue] in
-            let scheduled = await visionQueue.enqueueVision(for: id, source: .photos, reason: reason, priority: priority)
-            if scheduled {
-                await MainActor.run {
-                    self.visionPendingAssetIDs.insert(id)
-                }
+        visionPendingAssetIDs.insert(id)
+
+        let backfillPriority: AlbumBackfillManager.Priority = {
+            switch priority {
+            case .userInitiated:
+                return .interactive
+            case .utility:
+                return .visible
+            default:
+                return .background
             }
+        }()
+
+        Task(priority: priority) { [backfillManager] in
+            await backfillManager.ensureVision(for: id, priority: backfillPriority)
         }
     }
 
@@ -1172,9 +1181,9 @@ public final class AlbumModel: ObservableObject {
             AlbumLog.model.info("Vision enqueue burst capped reason=\(reason, privacy: .public) requested=\(ids.count, privacy: .public) using=\(burst.count, privacy: .public)")
         }
 
-        Task(priority: .background) { [visionQueue] in
+        Task(priority: .background) { [backfillManager] in
             for id in burst {
-                _ = await visionQueue.enqueueVision(for: id, source: .photos, reason: reason, priority: .background)
+                await backfillManager.ensureVision(for: id, priority: .background)
             }
         }
     }
@@ -1385,15 +1394,15 @@ public final class AlbumModel: ObservableObject {
             guard !id.isEmpty else { continue }
             recordByID[id] = record
 
-            if let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let summary = record.vision.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
                !summary.isEmpty,
                visionSummaryByAssetID[id] == nil {
                 visionSummaryByAssetID[id] = summary
             }
-            if let src = record.visionSource, visionSourceByAssetID[id] == nil {
-                visionSourceByAssetID[id] = src
+            if record.vision.state != .none, visionStateByAssetID[id] == nil {
+                visionStateByAssetID[id] = record.vision.state
             }
-            if let conf = record.visionConfidence, visionConfidenceByAssetID[id] == nil {
+            if let conf = record.vision.confidence, visionConfidenceByAssetID[id] == nil {
                 visionConfidenceByAssetID[id] = conf
             }
         }
@@ -1406,7 +1415,7 @@ public final class AlbumModel: ObservableObject {
             }
 
             if let record = recordByID[trimmedID],
-               let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               let summary = record.vision.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
                !summary.isEmpty {
                 return normalizeVisionSummary(summary)
             }
@@ -1431,7 +1440,7 @@ public final class AlbumModel: ObservableObject {
             let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !id.isEmpty else { return }
 
-            if visionSourceByAssetID[id] == .computed,
+            if visionStateByAssetID[id] == .computed,
                !AlbumVisionSummaryUtils.isPlaceholder(visionSummaryByAssetID[id]) { return }
             if let record = recordByID[id], AlbumVisionSummaryUtils.isMeaningfulComputed(record) { return }
             idsNeedingCompute.insert(id)
@@ -1485,7 +1494,7 @@ public final class AlbumModel: ObservableObject {
 
             if entry.summary.lowercased().hasPrefix("unlabeled") {
                 noteIfNeedsCompute(assetID: entry.asset.id)
-            } else if recordByID[entry.asset.id]?.visionSource == .inferred {
+            } else if recordByID[entry.asset.id]?.vision.state == .autofilled {
                 noteIfNeedsCompute(assetID: entry.asset.id)
             }
 
@@ -1546,6 +1555,19 @@ public final class AlbumModel: ObservableObject {
             }
         case .down:
             break
+        }
+
+        if feedback == .up, settings.autofillOnThumbUp {
+            let desired = max(0, settings.thumbUpAutofillCount)
+            if desired > 0 {
+                let neighborIDs = result.neighbors
+                    .map { $0.id.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty && $0 != anchorID && !hiddenIDs.contains($0) }
+                if !neighborIDs.isEmpty {
+                    thumbUpAutofillNeighborIDsByAnchorID[anchorID] = Array(neighborIDs.prefix(desired))
+                    maybeAutofillThumbUpNeighbors(anchorID: anchorID)
+                }
+            }
         }
 
         tuningDeltaRequest = AlbumTuningDeltaRequest(deltas: computeTuningDeltas(feedback: feedback, anchorID: anchorID, neighbors: result.neighbors))
@@ -1815,20 +1837,20 @@ public final class AlbumModel: ObservableObject {
                 break
             }
 
-            if let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let summary = record.vision.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
                !summary.isEmpty {
-                if visionSourceByAssetID[id] == .computed, record.visionSource != .computed {
+                if visionStateByAssetID[id] == .computed, record.vision.state != .computed {
                     continue
                 }
                 visionSummaryByAssetID[id] = summary
             }
-            if let src = record.visionSource {
-                if visionSourceByAssetID[id] == .computed, src != .computed {
+            if record.vision.state != .none {
+                if visionStateByAssetID[id] == .computed, record.vision.state != .computed {
                     continue
                 }
-                visionSourceByAssetID[id] = src
+                visionStateByAssetID[id] = record.vision.state
             }
-            if let conf = record.visionConfidence {
+            if let conf = record.vision.confidence {
                 visionConfidenceByAssetID[id] = conf
             }
         }

@@ -483,7 +483,7 @@ public actor AlbumBackfillCoordinator {
                 if AlbumVisionSummaryUtils.isMeaningfulComputed(record) {
                     continue
                 }
-                if let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+                if let summary = record.vision.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !summary.isEmpty,
                    !AlbumVisionSummaryUtils.isPlaceholder(summary) {
                     if inferredFallback.count < desiredAdd {

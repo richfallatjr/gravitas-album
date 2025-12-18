@@ -1,0 +1,149 @@
+Gravitas Reader — Panel/Board Spawning Behavior (Immersive Space)
+=================================================================
+
+What “spawning” means in this project
+-------------------------------------
+
+In Gravitas Reader there are two related but distinct concepts:
+
+1) **Placement spawn (world anchor creation)**  
+   When an article is activated/enqueued, we create an `ArticlePlacement` in `AppModel`. The immersive
+   renderer (`ImmersiveReadSpace`) then **lazily** creates a world-space anchor (`AnchorEntity(world:)`)
+   the first time it sees that placement while the immersive space is running. This is the moment the
+   “board” is spawned into the room.
+
+2) **Panel layout (pages positioned relative to that anchor)**  
+   Once the anchor exists, the individual page panels (paged mode) or the single scroll panel
+   (scroll mode) are positioned on a curved arc **relative to the placement anchor**, not the head.
+
+This file documents (1): how the placement anchor is chosen when a board is dropped.
+
+
+Is it based on the initial head position at app launch?
+-------------------------------------------------------
+
+Not exactly. It is based on the **current head pose at the moment the placement’s anchor is first created**.
+
+Why it can feel like “app launch head position”:
+- The first time you load an article, you typically open the immersive space and spawn the first placement
+  immediately afterwards, so “current head pose” ≈ “initial head pose”.
+
+But if you spawn additional boards later (or after moving), their initial anchors will be computed using
+your head’s pose at that later moment.
+
+
+Where the spawn happens (source of truth)
+-----------------------------------------
+
+Spawn logic is implemented in:
+- `Sources/GravitasReader/ImmersiveSpaceView.swift` → `ImmersiveReadSpace.makeAnchor(for:)`
+
+The renderer calls it here:
+- `ImmersiveReadSpace.syncScene(content:attachments:)`
+  - when it sees a placement without an existing `RuntimePlacement` in `runtimePlacements`
+
+This means: if the immersive space is not open/running yet, placements can exist in the model without
+having any world anchors, and no spawning will occur until the immersive render loop is active.
+
+
+The spawn algorithm (high level)
+--------------------------------
+
+When a placement has no stored transform:
+
+1) Read the latest head transform (tracked every frame in the immersive scene).
+2) Compute head-relative basis vectors:
+   - `forward`: where the user is looking
+   - `left`: perpendicular to forward on the horizontal plane
+3) Pick a deterministic “lane” (left/right offset) based on the placement index, so boards don’t overlap.
+4) Place the anchor slightly forward of the head plus the lane offset.
+5) Fix up height:
+   - if head Y is invalid/uninitialized → force a safe default height
+   - else → nudge down slightly
+6) Set the anchor’s orientation to match the head’s rotation at spawn time.
+7) Persist the seeded matrix back into the model (so it becomes stable and re-used).
+
+
+Exact constants (do not change if you want identical behavior)
+--------------------------------------------------------------
+
+From `ImmersiveReadSpace` in `Sources/GravitasReader/ImmersiveSpaceView.swift`:
+
+- `headForwardOffset = 0.09` meters  
+  (Spawn the placement anchor ~9cm forward from the head pose.)
+
+- Lateral “lanes” in meters:  
+  `[0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]`
+
+- Depth nudge in meters:  
+  `0.05 * ((spawnIndex / lanes.count) % 3)`
+
+- Height fallback in meters:  
+  `1.35` (used when head Y is missing or non-finite)
+
+
+Verbatim spawn code (reference)
+-------------------------------
+
+```swift
+// Sources/GravitasReader/ImmersiveSpaceView.swift
+
+// Always produce an anchor; add spawn "scatter" so new boards don't overlap
+private func makeAnchor(for placement: ArticlePlacement) -> AnchorEntity {
+    if let stored = placement.anchorTransform {
+        let a = AnchorEntity(world: stored)
+        a.orientation = Transform(matrix: stored).rotation
+        return a
+    }
+
+    // Start from head (or cached), else identity fallback
+    let head = latestHeadTransform ?? captureHeadTransform() ?? Transform()
+    let fcol = head.matrix.columns.2
+    let forward = normalize(-SIMD3<Float>(fcol.x, fcol.y, fcol.z))
+    let left = normalize(cross(SIMD3<Float>(0, 1, 0), forward))
+
+    // Deterministic scatter so new boards are visibly offset even if the head hasn't moved
+    let spawnIndex = model.placements.firstIndex(where: { $0.id == placement.id }) ?? (model.placements.count - 1)
+    let lanes: [Float] = [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]
+    let side = lanes[spawnIndex % lanes.count]
+    let depthNudge: Float = 0.05 * Float((spawnIndex / lanes.count) % 3)
+
+    var pos = head.translation + forward * (headForwardOffset + depthNudge) + left * side
+    if !pos.y.isFinite || abs(pos.y) <= 0.001 { pos.y = 1.35 } else { pos.y -= 0.05 }
+
+    var seeded = head
+    seeded.translation = pos
+
+    let anchor = AnchorEntity(world: seeded.matrix)
+    anchor.orientation = seeded.rotation
+
+    // Persist seeded transform back into the model once
+    let matrix = seeded.matrix
+    let pid = placement.id
+    Task { @MainActor in
+        model.assignTransform(matrix, to: pid)
+    }
+
+    return anchor
+}
+```
+
+
+Important notes / gotchas
+-------------------------
+
+1) A placement anchor is created only once per placement.  
+   After that, the board stays put in world space because `placement.anchorTransform` is set and reused.
+
+2) Head tracking must be active when the anchor is created.  
+   `ImmersiveReadSpace` calls `ensureHeadTracker(in:)` every frame to keep `latestHeadTransform` updated.
+   If the head transform is not yet valid, the spawn logic falls back to `captureHeadTransform()` or
+   a safe default height (1.35m).
+
+3) The “lanes” scatter is deterministic.  
+   It depends on the placement’s index in `model.placements`. If you enqueue placements in a different
+   order, the sideways offsets will differ.
+
+4) Spawn is independent of the curved layout.  
+   Spawn defines the **origin anchor** for the board. The curved pagination arc is computed afterward,
+   in the anchor’s local space.
