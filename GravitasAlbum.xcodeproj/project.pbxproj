@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		011F77F12C0BFCBEA918BFDE /* NextProject_Context_PanelSpawning.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6BF2122B71B8B4D1A039B0A2 /* NextProject_Context_PanelSpawning.txt */; };
 		0334E835BB82D9AC7F00BC0D /* AlbumMediaPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D25D4083156A208B42FFE97 /* AlbumMediaPane.swift */; };
 		10ADE7A29B17DC95138DBC93 /* AlbumAssetProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50ED7BAAE001591EC877111D /* AlbumAssetProvider.swift */; };
 		13D29D701495BC4FA2B93EC4 /* AlbumLibraryIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B49DE11AE32B953E4833DF /* AlbumLibraryIndex.swift */; };
@@ -32,10 +33,13 @@
 		75B7BA637068B4125CE285B3 /* PhotosAlbumAssetProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76ABF5D96E49C19E9D6A5F3D /* PhotosAlbumAssetProvider.swift */; };
 		77099B8881076CEB9712CB35 /* AlbumQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9AD807617B9A4E79390514 /* AlbumQuery.swift */; };
 		7871DA278BA1AF47D3F06DED /* UI_STYLE_GUIDE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A698BDF127E28CCD8F299BB6 /* UI_STYLE_GUIDE.txt */; };
+		7E7B916C39A61EA1E159E5A7 /* AlbumShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */; };
 		8072B94E05E7A29CA647D951 /* AlbumVisionQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9198ABFA084347F23636ADB /* AlbumVisionQueue.swift */; };
 		83FB3E619CC2A15588DF531E /* AlbumModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F09F8986CC8D7D9902B4D46 /* AlbumModel.swift */; };
 		85AD2239706475508703DC54 /* AlbumOracle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100E79AA29644F73D88D15F /* AlbumOracle.swift */; };
 		86B2E07E81F4DC1F0DFFDECC /* AlbumCurvedLayoutMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F54DE5766F56EB2BD8C85EC /* AlbumCurvedLayoutMath.swift */; };
+		891B394A06F12C7204DE8E8E /* AlbumVisionSummaryUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E672C1B87A4196061A9713 /* AlbumVisionSummaryUtils.swift */; };
+		8BEFBC9C537878FDB8236F16 /* NextProject_Context_UI_Styling_ImmersiveLayout.txt in Resources */ = {isa = PBXBuildFile; fileRef = 44EF10B20823DC910A53FA0A /* NextProject_Context_UI_Styling_ImmersiveLayout.txt */; };
 		8E29056EF33FBA1296FA2404 /* AlbumVisionSummarizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */; };
 		9155252344EA5E86EF11452B /* AlbumDemoLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33B7F74EF2E77045AF99FD1E /* AlbumDemoLibrary.swift */; };
 		930D8783BF4FD5DC52DBDA76 /* AlbumSceneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC238A13C94293D4E2E4E554 /* AlbumSceneStore.swift */; };
@@ -54,6 +58,8 @@
 		EA883C6D1C26DB811C47018A /* AlbumPanelMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6495F8523ABEF758BA51BB75 /* AlbumPanelMode.swift */; };
 		EBF06562A799EF67B001BD90 /* AlbumFoundationModelsOracle.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBE9C43CA4AA5A85ED2DBE28 /* AlbumFoundationModelsOracle.swift */; };
 		EEB79E54D576CA4D10A090B0 /* CurvedLayoutKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 96D766C74CC40800A69E24C5 /* CurvedLayoutKit.framework */; };
+		F095A5D875F61342053A8868 /* GravitasThreads_NextUp_Absorption_History_Ordering.txt in Resources */ = {isa = PBXBuildFile; fileRef = BDC799549DBFE01D888F603E /* GravitasThreads_NextUp_Absorption_History_Ordering.txt */; };
+		F5A2436468AC76BF9D5847A0 /* GravitasThreads_Thumbs_Physics_Integration.txt in Resources */ = {isa = PBXBuildFile; fileRef = 63E1A4F5E5AA34985A57AEEF /* GravitasThreads_Thumbs_Physics_Integration.txt */; };
 		FC5EA952DAB5557A9FB14626 /* AlbumHeuristicOracle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */; };
 /* End PBXBuildFile section */
 
@@ -90,14 +96,17 @@
 		33B7F74EF2E77045AF99FD1E /* AlbumDemoLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumDemoLibrary.swift; sourceTree = "<group>"; };
 		3EB40D022E06748D855CE15E /* AlbumCurvedLayoutTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCurvedLayoutTileView.swift; sourceTree = "<group>"; };
 		42D23FC392308A361F50EC57 /* middle.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = middle.png; sourceTree = "<group>"; };
+		44EF10B20823DC910A53FA0A /* NextProject_Context_UI_Styling_ImmersiveLayout.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = NextProject_Context_UI_Styling_ImmersiveLayout.txt; sourceTree = "<group>"; };
 		4DB97BE02EAF40920EF80D99 /* CurvedCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurvedCanvasView.swift; sourceTree = "<group>"; };
 		4F54DE5766F56EB2BD8C85EC /* AlbumCurvedLayoutMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCurvedLayoutMath.swift; sourceTree = "<group>"; };
 		4FF417CEA854CAD66173ABC7 /* AlbumQueryPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumQueryPickerSheet.swift; sourceTree = "<group>"; };
 		50ED7BAAE001591EC877111D /* AlbumAssetProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumAssetProvider.swift; sourceTree = "<group>"; };
 		5D25D4083156A208B42FFE97 /* AlbumMediaPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumMediaPane.swift; sourceTree = "<group>"; };
 		634E50DA5A91F7F52A2523CF /* AlbumImmersiveRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumImmersiveRootView.swift; sourceTree = "<group>"; };
+		63E1A4F5E5AA34985A57AEEF /* GravitasThreads_Thumbs_Physics_Integration.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = GravitasThreads_Thumbs_Physics_Integration.txt; sourceTree = "<group>"; };
 		6495F8523ABEF758BA51BB75 /* AlbumPanelMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumPanelMode.swift; sourceTree = "<group>"; };
 		64FC6A7451CA6F0F50453668 /* AlbumLayoutSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumLayoutSheet.swift; sourceTree = "<group>"; };
+		6BF2122B71B8B4D1A039B0A2 /* NextProject_Context_PanelSpawning.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = NextProject_Context_PanelSpawning.txt; sourceTree = "<group>"; };
 		76ABF5D96E49C19E9D6A5F3D /* PhotosAlbumAssetProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosAlbumAssetProvider.swift; sourceTree = "<group>"; };
 		7B0E2F31F72AC01E0EE46822 /* AlbumLLMDebugDump.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumLLMDebugDump.swift; sourceTree = "<group>"; };
 		7B5132E99D021A1112304934 /* AlbumCurvedLayoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCurvedLayoutModels.swift; sourceTree = "<group>"; };
@@ -116,12 +125,15 @@
 		A698BDF127E28CCD8F299BB6 /* UI_STYLE_GUIDE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = UI_STYLE_GUIDE.txt; sourceTree = "<group>"; };
 		A9198ABFA084347F23636ADB /* AlbumVisionQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionQueue.swift; sourceTree = "<group>"; };
 		B8C09B6B1C1E96DDD01700F5 /* AlbumTuningDelta.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumTuningDelta.swift; sourceTree = "<group>"; };
+		BDC799549DBFE01D888F603E /* GravitasThreads_NextUp_Absorption_History_Ordering.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = GravitasThreads_NextUp_Absorption_History_Ordering.txt; sourceTree = "<group>"; };
 		D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumHeuristicOracle.swift; sourceTree = "<group>"; };
 		D4E3AD7B137BCC9EF20517DA /* GravitasAlbumApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GravitasAlbumApp.swift; sourceTree = "<group>"; };
 		D5964FEA3D836A0C1BC0863D /* GravitasAlbum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GravitasAlbum.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC238A13C94293D4E2E4E554 /* AlbumSceneStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSceneStore.swift; sourceTree = "<group>"; };
 		E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionSummarizer.swift; sourceTree = "<group>"; };
+		E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumShareSheet.swift; sourceTree = "<group>"; };
 		E60564DF1CDF3419D01AFA04 /* AlbumSceneManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSceneManagerView.swift; sourceTree = "<group>"; };
+		E9E672C1B87A4196061A9713 /* AlbumVisionSummaryUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionSummaryUtils.swift; sourceTree = "<group>"; };
 		EB91B0A8E5FA94F7381B1917 /* AlbumItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumItem.swift; sourceTree = "<group>"; };
 		EC183209D3F2099BDAB32FC2 /* AlbumPopOutPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumPopOutPayload.swift; sourceTree = "<group>"; };
 		EC505166E6E86AE193870785 /* AlbumPopOutAssetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumPopOutAssetView.swift; sourceTree = "<group>"; };
@@ -164,6 +176,7 @@
 				EC505166E6E86AE193870785 /* AlbumPopOutAssetView.swift */,
 				4FF417CEA854CAD66173ABC7 /* AlbumQueryPickerSheet.swift */,
 				E60564DF1CDF3419D01AFA04 /* AlbumSceneManagerView.swift */,
+				E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */,
 				066D0ED6CF1FE7551C12B648 /* GlassBackground.swift */,
 			);
 			path = UI;
@@ -176,7 +189,11 @@
 				147E1A88DEDA24A924D39C0C /* back.png */,
 				90B90A3CEEDE40373369DD17 /* front.png */,
 				D4E3AD7B137BCC9EF20517DA /* GravitasAlbumApp.swift */,
+				BDC799549DBFE01D888F603E /* GravitasThreads_NextUp_Absorption_History_Ordering.txt */,
+				63E1A4F5E5AA34985A57AEEF /* GravitasThreads_Thumbs_Physics_Integration.txt */,
 				42D23FC392308A361F50EC57 /* middle.png */,
+				6BF2122B71B8B4D1A039B0A2 /* NextProject_Context_PanelSpawning.txt */,
+				44EF10B20823DC910A53FA0A /* NextProject_Context_UI_Styling_ImmersiveLayout.txt */,
 				A698BDF127E28CCD8F299BB6 /* UI_STYLE_GUIDE.txt */,
 				66F573E1DECAD2DC212C4204 /* CurvedLayout */,
 				001278AA395A83D989F22EEB /* Immersive */,
@@ -211,6 +228,7 @@
 				B8C09B6B1C1E96DDD01700F5 /* AlbumTuningDelta.swift */,
 				A9198ABFA084347F23636ADB /* AlbumVisionQueue.swift */,
 				E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */,
+				E9E672C1B87A4196061A9713 /* AlbumVisionSummaryUtils.swift */,
 				76ABF5D96E49C19E9D6A5F3D /* PhotosAlbumAssetProvider.swift */,
 			);
 			path = Shared;
@@ -338,6 +356,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				D68D4109B214BCD8DD55D32E /* Assets.xcassets in Resources */,
+				F095A5D875F61342053A8868 /* GravitasThreads_NextUp_Absorption_History_Ordering.txt in Resources */,
+				F5A2436468AC76BF9D5847A0 /* GravitasThreads_Thumbs_Physics_Integration.txt in Resources */,
+				011F77F12C0BFCBEA918BFDE /* NextProject_Context_PanelSpawning.txt in Resources */,
+				8BEFBC9C537878FDB8236F16 /* NextProject_Context_UI_Styling_ImmersiveLayout.txt in Resources */,
 				7871DA278BA1AF47D3F06DED /* UI_STYLE_GUIDE.txt in Resources */,
 				BD46F16577A899FFE021EA46 /* back.png in Resources */,
 				623E075AA5ADF02C6D4C1CD7 /* front.png in Resources */,
@@ -392,11 +414,13 @@
 				39F642AFBCF643913D10803E /* AlbumRealityKitComponents.swift in Sources */,
 				DA2193D12129AE1B23C4578B /* AlbumSceneManagerView.swift in Sources */,
 				930D8783BF4FD5DC52DBDA76 /* AlbumSceneStore.swift in Sources */,
+				7E7B916C39A61EA1E159E5A7 /* AlbumShareSheet.swift in Sources */,
 				414BAA37EDCD29468713A1A0 /* AlbumSidecarStore.swift in Sources */,
 				6A5E589C2CFFB3A07961544A /* AlbumTheme.swift in Sources */,
 				E5F80C231E703DDAA6B5F6B5 /* AlbumTuningDelta.swift in Sources */,
 				8072B94E05E7A29CA647D951 /* AlbumVisionQueue.swift in Sources */,
 				8E29056EF33FBA1296FA2404 /* AlbumVisionSummarizer.swift in Sources */,
+				891B394A06F12C7204DE8E8E /* AlbumVisionSummaryUtils.swift in Sources */,
 				27EBE5A26C16893B67DBEBA6 /* GlassBackground.swift in Sources */,
 				755491FFB50163CAFA8ED0ED /* GravitasAlbumApp.swift in Sources */,
 				75B7BA637068B4125CE285B3 /* PhotosAlbumAssetProvider.swift in Sources */,

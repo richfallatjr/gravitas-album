@@ -119,9 +119,12 @@ public actor AlbumLibraryIndexStore {
             decoder.dateDecodingStrategy = .iso8601
             let snapshot = try decoder.decode(AlbumLibraryIndexSnapshot.self, from: data)
             cachedSnapshot = snapshot
+            AlbumLog.photos.info(
+                "LibraryIndex: loaded snapshot assets=\(snapshot.assetCount, privacy: .public) builtAt=\(String(describing: snapshot.builtAt), privacy: .public)"
+            )
             return snapshot
         } catch {
-            print("[AlbumLibraryIndexStore] load error:", error)
+            AlbumLog.photos.error("LibraryIndex: load error \(String(describing: error), privacy: .public)")
             return nil
         }
     }
@@ -148,15 +151,31 @@ public actor AlbumLibraryIndexStore {
             try data.write(to: storeURL, options: [.atomic])
             cachedSnapshot = normalized
             cachedIndex = AlbumLibraryIndex(idsByCreationDateAscending: normalized.idsByCreationDateAscending)
+            AlbumLog.photos.info(
+                "LibraryIndex: saved snapshot assets=\(normalized.assetCount, privacy: .public) file=\(self.storeURL.lastPathComponent, privacy: .public)"
+            )
         } catch {
-            print("[AlbumLibraryIndexStore] save error:", error)
+            AlbumLog.photos.error("LibraryIndex: save error \(String(describing: error), privacy: .public)")
         }
     }
 
     public func buildIfNeeded() async -> AlbumLibraryIndex? {
-        if let existing = await loadIndex() { return existing }
+        if let existing = await loadIndex() {
+            return existing
+        }
+
+        AlbumLog.photos.info("LibraryIndex: building from Photos…")
+        let startedAt = Date()
         let snapshot = await Self.buildSnapshotFromPhotos()
-        guard let snapshot else { return nil }
+        guard let snapshot else {
+            AlbumLog.photos.info("LibraryIndex: build returned nil snapshot")
+            return nil
+        }
+
+        let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+        AlbumLog.photos.info(
+            "LibraryIndex: built snapshot assets=\(snapshot.assetCount, privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+        )
         await saveSnapshot(snapshot)
         return await loadIndex()
     }
@@ -164,7 +183,12 @@ public actor AlbumLibraryIndexStore {
 #if canImport(Photos)
     private static func buildSnapshotFromPhotos() async -> AlbumLibraryIndexSnapshot? {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard status == .authorized || status == .limited else { return nil }
+        guard status == .authorized || status == .limited else {
+            AlbumLog.photos.info(
+                "LibraryIndex: Photos auth not sufficient (\(String(describing: status), privacy: .public)); cannot build"
+            )
+            return nil
+        }
 
         let options = PHFetchOptions()
         options.sortDescriptors = [
@@ -172,6 +196,7 @@ public actor AlbumLibraryIndexStore {
         ]
 
         let result = PHAsset.fetchAssets(with: options)
+        AlbumLog.photos.info("LibraryIndex: fetched assets count=\(result.count, privacy: .public)")
         var rows: [(date: Date?, id: String)] = []
         rows.reserveCapacity(result.count)
 

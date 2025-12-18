@@ -296,6 +296,42 @@ public actor AlbumSidecarStore {
         }
     }
 
+    public func overwriteVisionInferredIfAutotagged(
+        _ key: AlbumSidecarKey,
+        summary: String,
+        tags: [String]?,
+        confidence: Float,
+        derivedFromID: String?,
+        inferenceMethod: String
+    ) async {
+        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSummary.isEmpty else { return }
+
+        let method = inferenceMethod.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !method.isEmpty else { return }
+
+        let derived = derivedFromID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let derivedNormalized = (derived?.isEmpty == false) ? derived : nil
+
+        await mutate(key) { record in
+            guard record.visionSource == .inferred else { return }
+            guard record.visionInferenceMethod != nil else { return }
+
+            record.visionSummary = trimmedSummary
+            record.visionTags = tags?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            record.visionSource = .inferred
+            record.visionConfidence = max(0, min(1, confidence))
+            record.visionDerivedFromID = derivedNormalized
+            record.visionInferenceMethod = method
+            if record.visionComputedAt != nil {
+                record.visionComputedAt = nil
+            }
+            if record.visionModelVersion != nil {
+                record.visionModelVersion = nil
+            }
+        }
+    }
+
     // MARK: Internals
 
     private func urlForKey(_ key: AlbumSidecarKey) -> URL {

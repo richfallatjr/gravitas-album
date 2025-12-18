@@ -23,6 +23,7 @@ actor AlbumFoundationModelsOracleEngine {
     static let shared = AlbumFoundationModelsOracleEngine()
     private static let maxUserPromptChars = 8_192
     private static let maximumResponseTokens = 512
+    private static let maxAttemptsPerRequest = 2
 
     private var isResponding: Bool = false
     private var responseWaiters: [CheckedContinuation<Void, Never>] = []
@@ -82,48 +83,74 @@ actor AlbumFoundationModelsOracleEngine {
         )
 
         do {
-            AlbumLog.model.info("FoundationModels request: promptChars=\(prompt.count)")
             var options = GenerationOptions()
             options.maximumResponseTokens = Self.maximumResponseTokens
 
-            let session = LanguageModelSession(model: model, instructions: system)
-            let response = try await session.respond(to: prompt, options: options)
-            let candidates = Self.stringFields(from: response)
-            AlbumLLMDebugDump.dumpResponse(
-                requestID: requestID,
-                feedback: feedback,
-                maxCandidates: snapshot.candidates.count,
-                responseDescription: String(describing: response),
-                stringCandidates: candidates
-            )
+            let baseSession = LanguageModelSession(model: model, instructions: system)
+            let repairSession = LanguageModelSession(model: model, instructions: "\(system)\n\n\(Self.repairNudge(feedback: feedback))")
 
-            if candidates.contains(where: Self.containsError) {
-                let error = "LLM refused or returned an error"
-                AlbumLog.model.info("FoundationModels error: \(error, privacy: .public)")
-                return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: error)
+            for attempt in 1...Self.maxAttemptsPerRequest {
+                if Task.isCancelled {
+                    AlbumLog.model.info("FoundationModels cancelled requestID: \(requestID.uuidString, privacy: .public)")
+                    return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: "Cancelled")
+                }
+
+                let session = (attempt == 1) ? baseSession : repairSession
+                AlbumLog.model.info("FoundationModels request: attempt=\(attempt, privacy: .public) promptChars=\(prompt.count, privacy: .public)")
+
+                let response = try await session.respond(to: prompt, options: options)
+                let candidates = Self.stringFields(from: response)
+                AlbumLLMDebugDump.dumpResponse(
+                    requestID: requestID,
+                    feedback: feedback,
+                    maxCandidates: snapshot.candidates.count,
+                    responseDescription: "attempt=\(attempt)\n\(String(describing: response))",
+                    stringCandidates: candidates
+                )
+
+                if candidates.contains(where: Self.containsError) {
+                    let error = "LLM refused or returned an error"
+                    AlbumLog.model.info("FoundationModels error: \(error, privacy: .public)")
+                    return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: error)
+                }
+
+                guard let decoded = Self.decodeResponse(from: response, allowNextPick: feedback == .up) else {
+                    let error = "LLM JSON decode failed"
+                    AlbumLog.model.info("FoundationModels error: \(error, privacy: .public)")
+                    return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: error)
+                }
+
+                if let validationError = Self.validateResponse(decoded, snapshot: snapshot, feedback: feedback) {
+                    AlbumLog.model.info("FoundationModels validation failed attempt=\(attempt, privacy: .public): \(validationError, privacy: .public)")
+                    if attempt < Self.maxAttemptsPerRequest {
+                        continue
+                    }
+                    return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: "LLM returned invalid output: \(validationError)")
+                }
+
+                let mapped = Self.mapResponse(decoded, snapshot: snapshot, allowNextPick: feedback == .up)
+                if mapped.neighbors.isEmpty {
+                    if attempt < Self.maxAttemptsPerRequest {
+                        continue
+                    }
+                    let error = "LLM returned no usable neighbors"
+                    AlbumLog.model.info("FoundationModels error: \(error, privacy: .public)")
+                    return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: error)
+                }
+
+                AlbumLLMDebugDump.dumpParsedResponse(
+                    requestID: requestID,
+                    feedback: feedback,
+                    maxCandidates: snapshot.candidates.count,
+                    parsed: mapped
+                )
+                AlbumLog.model.info(
+                    "FoundationModels success neighbors=\(mapped.neighbors.count, privacy: .public) nextID=\(String(describing: mapped.nextID), privacy: .public) attempt=\(attempt, privacy: .public)"
+                )
+                return AlbumRecOutcome(backend: .foundationModels, response: mapped, errorDescription: nil)
             }
 
-            guard let decoded = Self.decodeResponse(from: response, allowNextPick: feedback == .up) else {
-                let error = "LLM JSON decode failed"
-                AlbumLog.model.info("FoundationModels error: \(error, privacy: .public)")
-                return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: error)
-            }
-
-            let mapped = Self.mapResponse(decoded, snapshot: snapshot, allowNextPick: feedback == .up)
-            guard !mapped.neighbors.isEmpty else {
-                let error = "LLM returned no usable neighbors"
-                AlbumLog.model.info("FoundationModels error: \(error, privacy: .public)")
-                return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: error)
-            }
-
-            AlbumLLMDebugDump.dumpParsedResponse(
-                requestID: requestID,
-                feedback: feedback,
-                maxCandidates: snapshot.candidates.count,
-                parsed: mapped
-            )
-            AlbumLog.model.info("FoundationModels success neighbors=\(mapped.neighbors.count) nextID=\(String(describing: mapped.nextID), privacy: .public)")
-            return AlbumRecOutcome(backend: .foundationModels, response: mapped, errorDescription: nil)
+            return AlbumRecOutcome(backend: .foundationModels, response: nil, errorDescription: "LLM failed after retries")
         } catch {
             if error is CancellationError {
                 AlbumLog.model.info("FoundationModels cancelled requestID: \(requestID.uuidString, privacy: .public)")
@@ -190,34 +217,86 @@ actor AlbumFoundationModelsOracleEngine {
             case .up:
                 return "- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS."
             case .down:
-                return "- nextID MUST be null."
+                return "- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS (it will NOT be surfaced in UI)."
             }
         }()
 
         return """
 You are a recommendation engine for Gravitas Album.
+Use English.
 Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
-
-The user prompt provides:
-- THUMBED_FILE: the focused item's filename
-- THUMBED_VISION: the focused item's vision description
-- ALREADY_SEEN_IDS: optional comma-separated list of candidate IDs (small integers)
-- CANDIDATES (ID<TAB>FILE<TAB>VISION): tab-separated candidate lines
 
 Response shape:
 - nextID: String candidate ID (or null)
 - neighbors: Array<{id: String candidate ID, similarity: Int rank (1..20)}>
 
 Rules:
-- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (small integers like 0,1,2...). Never output filenames as IDs.
+- The ONLY valid IDs are the LEFTMOST column in CANDIDATES (IDs look like c0,c1,c2...). Never output filenames as IDs.
 - Never output "..." or placeholder text.
 \(nextIDRule)
-- neighbors MUST contain the most conceptually related candidates to the thumbed item.
+- neighbors MUST contain the most conceptually related candidates to THUMBED_FILE and THUMBED_VISION.
 - neighbors MUST be ranked best→worst.
 - Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
 - neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
 - Return at most 20 neighbors.
+
+Example output:
+{"nextID":"c0","neighbors":[{"id":"c1","similarity":1},{"id":"c2","similarity":2}]}
 """
+    }
+
+    private static func repairNudge(feedback: AlbumThumbFeedback) -> String {
+        let nextRule = (feedback == .up)
+            ? "nextID must be a candidate ID from the leftmost column (like c12)."
+            : "nextID must be a candidate ID from the leftmost column (like c12) (it will NOT be surfaced in UI)."
+        return """
+IMPORTANT:
+- IDs in JSON MUST be from the LEFTMOST column only (like c12).
+- Do NOT output filenames as IDs.
+- \(nextRule)
+"""
+    }
+
+    private static func validateResponse(_ response: AlbumRecResponse, snapshot: AlbumOracleSnapshot, feedback: AlbumThumbFeedback) -> String? {
+        let validIDs = Set(snapshot.candidates.map { $0.promptID.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        let alreadySeenIDs = Set(snapshot.candidates.compactMap { c in
+            snapshot.alreadySeenAssetIDs.contains(c.assetID) ? c.promptID : nil
+        })
+
+        func normalizeID(_ raw: String?) -> String? {
+            guard let raw else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        func isValidID(_ raw: String) -> Bool {
+            validIDs.contains(raw)
+        }
+
+        switch feedback {
+        case .up:
+            guard let nextID = normalizeID(response.nextID) else { return "nextID missing" }
+            guard isValidID(nextID) else { return "nextID is not a candidate ID (got \(nextID))" }
+            if alreadySeenIDs.contains(nextID) { return "nextID is already seen" }
+        case .down:
+            guard let nextID = normalizeID(response.nextID) else { return "nextID missing" }
+            guard isValidID(nextID) else { return "nextID is not a candidate ID (got \(nextID))" }
+            if alreadySeenIDs.contains(nextID) { return "nextID is already seen" }
+        }
+
+        var seen: Set<String> = []
+        seen.reserveCapacity(min(32, response.neighbors.count))
+
+        let nextID = normalizeID(response.nextID)
+
+        for n in response.neighbors {
+            let id = n.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard isValidID(id) else { return "neighbor id is not a candidate ID (got \(id))" }
+            if let nextID, id == nextID { return "neighbors contains nextID" }
+            guard seen.insert(id).inserted else { return "duplicate neighbor id" }
+        }
+
+        return nil
     }
 
     private static func buildPrompt(snapshot: AlbumOracleSnapshot) -> String {
@@ -233,15 +312,14 @@ Rules:
             snapshot.alreadySeenAssetIDs.contains(c.assetID) ? c.promptID : nil
         }
 
-        let withoutIDs = "ALREADY_SEEN_IDS:"
-        let withIDs = alreadySeenIDs.isEmpty ? withoutIDs : "ALREADY_SEEN_IDS: \(alreadySeenIDs.joined(separator: ","))"
+        let alreadySeenLine = alreadySeenIDs.isEmpty ? "ALREADY_SEEN_IDS:" : "ALREADY_SEEN_IDS: \(alreadySeenIDs.joined(separator: ","))"
 
         var lines: [String] = []
         lines.reserveCapacity(8 + snapshot.candidates.count)
 
         lines.append("THUMBED_FILE: \(field(snapshot.thumbedFileName))")
         lines.append("THUMBED_VISION: \(field(snapshot.thumbedVisionSummary))")
-        lines.append(withoutIDs)
+        lines.append(alreadySeenLine)
         lines.append("CANDIDATES (ID\\tFILE\\tVISION):")
 
         for c in snapshot.candidates {
@@ -252,17 +330,7 @@ Rules:
             ].joined(separator: "\t"))
         }
 
-        var prompt = lines.joined(separator: "\n")
-        if withIDs != withoutIDs {
-            var linesWith = lines
-            linesWith[2] = withIDs
-            let candidate = linesWith.joined(separator: "\n")
-            if candidate.count <= Self.maxUserPromptChars {
-                prompt = candidate
-            }
-        }
-
-        return prompt
+        return lines.joined(separator: "\n")
     }
 
     private static func decodeResponse(from reply: Any, allowNextPick: Bool) -> AlbumRecResponse? {

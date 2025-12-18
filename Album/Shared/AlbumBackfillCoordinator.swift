@@ -50,7 +50,7 @@ public actor AlbumBackfillCoordinator {
         public var targetSeedCount: Int
         public var chunkSize: Int
 
-        public init(targetSeedCount: Int = 1000, chunkSize: Int = 200) {
+        public init(targetSeedCount: Int = 1000, chunkSize: Int = 40) {
             self.targetSeedCount = max(0, targetSeedCount)
             self.chunkSize = max(1, chunkSize)
         }
@@ -88,23 +88,74 @@ public actor AlbumBackfillCoordinator {
     }
 
     public func startIfNeeded(source: AlbumSidecarSource) async {
-        guard config.targetSeedCount > 0 else { return }
-        guard runTask == nil else { return }
+        AlbumLog.model.info(
+            "Backfill: startIfNeeded requested source=\(String(describing: source), privacy: .public) target=\(self.config.targetSeedCount, privacy: .public) chunk=\(self.config.chunkSize, privacy: .public)"
+        )
 
-        let hasIndex = await libraryIndexStore.buildIfNeeded() != nil
-        guard hasIndex else {
+        guard config.targetSeedCount > 0 else {
+            AlbumLog.model.info("Backfill: startIfNeeded ignored (targetSeedCount=0)")
+            return
+        }
+        guard runTask == nil else {
+            AlbumLog.model.info("Backfill: startIfNeeded ignored (already running)")
+            await publishProgress(isRunning: true)
+            return
+        }
+
+        AlbumLog.model.info("Backfill: ensuring library index…")
+        let index = await libraryIndexStore.buildIfNeeded()
+        guard index != nil else {
             AlbumLog.model.info("Backfill: index unavailable; skipping")
             return
+        }
+        if let snapshot = await libraryIndexStore.loadSnapshot() {
+            AlbumLog.model.info(
+                "Backfill: library index ready assets=\(snapshot.assetCount, privacy: .public) builtAt=\(String(describing: snapshot.builtAt), privacy: .public)"
+            )
+        } else {
+            AlbumLog.model.info("Backfill: library index ready (snapshot unavailable)")
         }
 
         await loadOrCreateStateIfNeeded(source: source)
 
-        guard var state else { return }
+        guard var state else {
+            AlbumLog.model.info("Backfill: no state available after load/create; aborting")
+            return
+        }
+        AlbumLog.model.info(
+            "Backfill: state loaded seeds=\(state.seedAssetIDs.count, privacy: .public) completed=\(state.completedAssetIDs.count, privacy: .public)/\(state.targetCount, privacy: .public) attempted=\(state.attemptedAssetIDs?.count ?? 0, privacy: .public) file=\(self.stateURL.lastPathComponent, privacy: .public)"
+        )
+        var didResetSeeds = false
         if state.seedAssetIDs.isEmpty || state.targetCount != config.targetSeedCount {
+            AlbumLog.model.info(
+                "Backfill: seed reset needed seeds=\(state.seedAssetIDs.count, privacy: .public) target=\(state.targetCount, privacy: .public) desired=\(self.config.targetSeedCount, privacy: .public)"
+            )
             await resetSeeds(source: source)
+            didResetSeeds = true
+        } else {
+            AlbumLog.model.info("Backfill: using existing seeds (\(state.seedAssetIDs.count, privacy: .public))")
         }
 
+        let beforeReconcile = (await loadState() ?? state).completedAssetIDs.count
         await reconcileCompletionFromDisk(source: source)
+        let afterReconcile = (await loadState() ?? state).completedAssetIDs.count
+        if afterReconcile != beforeReconcile {
+            AlbumLog.model.info(
+                "Backfill: reconciled completion from disk \(beforeReconcile, privacy: .public) → \(afterReconcile, privacy: .public)"
+            )
+        }
+
+        state = await loadState() ?? state
+        if state.targetCount > 0, state.completedAssetIDs.count >= state.targetCount {
+            AlbumLog.model.info("Backfill: previous run complete; selecting new seeds")
+            await resetSeeds(source: source)
+            state = await loadState() ?? state
+            didResetSeeds = true
+        }
+
+        if didResetSeeds {
+            await resetAttemptedForNewRunIfNeeded()
+        }
 
         state = await loadState() ?? state
         await publishProgress(isRunning: true)
@@ -113,6 +164,7 @@ public actor AlbumBackfillCoordinator {
             guard let self else { return }
             await self.runBackfill(source: source)
         }
+        AlbumLog.model.info("Backfill: run task started")
     }
 
     public func pause() async {
@@ -140,16 +192,32 @@ public actor AlbumBackfillCoordinator {
             }
         }
 
-        guard var state = await loadState() else { return }
-        guard state.targetCount > 0 else { return }
-        guard let index = await libraryIndexStore.loadIndex() else { return }
+        guard var state = await loadState() else {
+            AlbumLog.model.info("Backfill: run aborted (state missing)")
+            return
+        }
+        guard state.targetCount > 0 else {
+            AlbumLog.model.info("Backfill: run aborted (targetCount=0)")
+            return
+        }
+        guard let index = await libraryIndexStore.loadIndex() else {
+            AlbumLog.model.info("Backfill: run aborted (library index missing)")
+            return
+        }
 
         let initialAttempted = state.attemptedAssetIDs?.count ?? 0
-        AlbumLog.model.info("Backfill: run start seeds=\(state.seedAssetIDs.count) completed=\(state.completedAssetIDs.count)/\(state.targetCount) attempted=\(initialAttempted)")
+        AlbumLog.model.info(
+            "Backfill: run start seeds=\(state.seedAssetIDs.count, privacy: .public) completed=\(state.completedAssetIDs.count, privacy: .public)/\(state.targetCount, privacy: .public) attempted=\(initialAttempted, privacy: .public) indexCount=\(index.idsByCreationDateAscending.count, privacy: .public)"
+        )
 
         while !Task.isCancelled {
             state = await loadState() ?? state
-            if state.completedAssetIDs.count >= state.targetCount { return }
+            if state.completedAssetIDs.count >= state.targetCount {
+                AlbumLog.model.info(
+                    "Backfill: complete \(state.completedAssetIDs.count, privacy: .public)/\(state.targetCount, privacy: .public); stopping"
+                )
+                return
+            }
 
             let attempted = state.attemptedAssetIDs ?? []
             let pending = state.seedAssetIDs.filter { id in
@@ -157,10 +225,14 @@ public actor AlbumBackfillCoordinator {
             }
 
             if pending.isEmpty {
-                AlbumLog.model.info("Backfill: pending empty; scanning for more seeds (seeds=\(state.seedAssetIDs.count) completed=\(state.completedAssetIDs.count) attempted=\(attempted.count))")
+                AlbumLog.model.info(
+                    "Backfill: pending empty; scanning for more seeds (seeds=\(state.seedAssetIDs.count, privacy: .public) completed=\(state.completedAssetIDs.count, privacy: .public) attempted=\(attempted.count, privacy: .public))"
+                )
                 let added = await appendMoreSeedsIfNeeded(source: source, index: index, state: &state)
                 if added == 0 {
-                    AlbumLog.model.info("Backfill: no additional seeds available; stopping at \(state.completedAssetIDs.count)/\(state.targetCount)")
+                    AlbumLog.model.info(
+                        "Backfill: no additional seeds available; stopping at \(state.completedAssetIDs.count, privacy: .public)/\(state.targetCount, privacy: .public)"
+                    )
                     await publishProgress(isRunning: runTask != nil)
                     return
                 }
@@ -169,12 +241,15 @@ public actor AlbumBackfillCoordinator {
 
             let chunkSize = config.chunkSize
             let chunk = Array(pending.prefix(chunkSize))
-            AlbumLog.model.info("Backfill: processing chunk size=\(chunk.count) completed=\(state.completedAssetIDs.count)/\(state.targetCount)")
+            AlbumLog.model.info(
+                "Backfill: processing chunk size=\(chunk.count, privacy: .public) pending=\(pending.count, privacy: .public) completed=\(state.completedAssetIDs.count, privacy: .public)/\(state.targetCount, privacy: .public)"
+            )
 
             var attemptedBatch: [String] = []
             attemptedBatch.reserveCapacity(chunk.count)
             var completedBatch: [String] = []
             completedBatch.reserveCapacity(min(64, chunk.count))
+            var computedInChunk = 0
 
             await withTaskGroup(of: (String, Bool).self) { group in
                 for assetID in chunk {
@@ -184,9 +259,7 @@ public actor AlbumBackfillCoordinator {
 
                         let key = AlbumSidecarKey(source: source, id: id)
                         if let record = await sidecarStore.load(key),
-                           let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-                           !summary.isEmpty,
-                           record.visionSource == .computed {
+                           AlbumVisionSummaryUtils.isMeaningfulComputed(record) {
                             return (id, true)
                         }
 
@@ -200,22 +273,53 @@ public actor AlbumBackfillCoordinator {
                     }
                 }
 
+                let flushEvery = 10
+                var processed = 0
+
                 for await (assetID, ok) in group {
                     let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !id.isEmpty else { continue }
                     attemptedBatch.append(id)
-                    if ok { completedBatch.append(id) }
+                    if ok {
+                        completedBatch.append(id)
+                        computedInChunk += 1
+                    }
+
+                    processed += 1
+                    if attemptedBatch.count >= flushEvery {
+                        await markAttempted(attemptedBatch, completed: completedBatch, state: &state)
+                        attemptedBatch.removeAll(keepingCapacity: true)
+                        completedBatch.removeAll(keepingCapacity: true)
+                        AlbumLog.model.info(
+                            "Backfill: chunk progress \(processed, privacy: .public)/\(chunk.count, privacy: .public) completed=\(state.completedAssetIDs.count, privacy: .public)/\(state.targetCount, privacy: .public)"
+                        )
+                    }
                 }
             }
 
-            await markAttempted(attemptedBatch, completed: completedBatch, state: &state)
-            AlbumLog.model.info("Backfill: chunk finished attempted=\(attemptedBatch.count) computed=\(completedBatch.count) completed=\(state.completedAssetIDs.count)/\(state.targetCount)")
+            if !attemptedBatch.isEmpty || !completedBatch.isEmpty {
+                await markAttempted(attemptedBatch, completed: completedBatch, state: &state)
+            }
+            AlbumLog.model.info(
+                "Backfill: chunk finished attempted=\(chunk.count, privacy: .public) computed=\(computedInChunk, privacy: .public) completed=\(state.completedAssetIDs.count, privacy: .public)/\(state.targetCount, privacy: .public)"
+            )
         }
     }
 
     private func finishRun() async {
         runTask = nil
         await publishProgress(isRunning: false)
+    }
+
+    private func resetAttemptedForNewRunIfNeeded() async {
+        guard var state = await loadState() else { return }
+        let attemptedCount = state.attemptedAssetIDs?.count ?? 0
+        guard attemptedCount > 0 else { return }
+
+        state.attemptedAssetIDs = []
+        await saveState(state)
+        self.state = state
+        AlbumLog.model.info("Backfill: cleared attempted set (\(attemptedCount, privacy: .public)) for new run")
     }
 
     private func markCompleted(assetID: String) async {
@@ -269,6 +373,9 @@ public actor AlbumBackfillCoordinator {
 
     private func resetSeeds(source: AlbumSidecarSource) async {
         guard let index = await libraryIndexStore.loadIndex() else { return }
+        AlbumLog.model.info(
+            "Backfill: selecting seeds target=\(self.config.targetSeedCount, privacy: .public) indexCount=\(index.idsByCreationDateAscending.count, privacy: .public)"
+        )
         let seeds = await selectUnlabeledSeeds(index: index, source: source, targetCount: config.targetSeedCount)
 
         var newState = AlbumBackfillState(
@@ -285,7 +392,7 @@ public actor AlbumBackfillCoordinator {
         await saveState(newState)
         state = newState
 
-        AlbumLog.model.info("Backfill: seeded \(seeds.count) items")
+        AlbumLog.model.info("Backfill: seeded \(seeds.count, privacy: .public) items")
         await publishProgress(isRunning: runTask != nil)
     }
 
@@ -306,9 +413,7 @@ public actor AlbumBackfillCoordinator {
 
             let key = AlbumSidecarKey(source: source, id: id)
             if let record = await sidecarStore.load(key),
-               record.visionSource == .computed,
-               let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !summary.isEmpty {
+               AlbumVisionSummaryUtils.isMeaningfulComputed(record) {
                 continue
             }
             selected.append(id)
@@ -332,9 +437,7 @@ public actor AlbumBackfillCoordinator {
 
             let key = AlbumSidecarKey(source: source, id: id)
             if let record = await sidecarStore.load(key),
-               record.visionSource == .computed,
-               let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !summary.isEmpty {
+               AlbumVisionSummaryUtils.isMeaningfulComputed(record) {
                 continue
             }
 
@@ -356,6 +459,9 @@ public actor AlbumBackfillCoordinator {
         let remainingNeeded = max(0, state.targetCount - state.completedAssetIDs.count)
         let desiredAdd = min(total, max(config.chunkSize, min(remainingNeeded, config.chunkSize * 2)))
         guard desiredAdd > 0 else { return 0 }
+        AlbumLog.model.info(
+            "Backfill: appendMoreSeeds desiredAdd=\(desiredAdd, privacy: .public) remainingNeeded=\(remainingNeeded, privacy: .public) totalIndex=\(total, privacy: .public)"
+        )
 
         var cursor = state.seedScanCursor ?? Int.random(in: 0..<total)
         var scanned = 0
@@ -373,16 +479,18 @@ public actor AlbumBackfillCoordinator {
             guard !exclude.contains(id) else { continue }
 
             let key = AlbumSidecarKey(source: source, id: id)
-            if let record = await sidecarStore.load(key),
-               let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !summary.isEmpty {
-                if record.visionSource == .computed {
+            if let record = await sidecarStore.load(key) {
+                if AlbumVisionSummaryUtils.isMeaningfulComputed(record) {
                     continue
                 }
-                if inferredFallback.count < desiredAdd {
-                    inferredFallback.append(id)
+                if let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !summary.isEmpty,
+                   !AlbumVisionSummaryUtils.isPlaceholder(summary) {
+                    if inferredFallback.count < desiredAdd {
+                        inferredFallback.append(id)
+                    }
+                    continue
                 }
-                continue
             }
 
             state.seedAssetIDs.append(id)
@@ -407,7 +515,9 @@ public actor AlbumBackfillCoordinator {
             let seedCount = state.seedAssetIDs.count
             let completedCount = state.completedAssetIDs.count
             let attemptedCount = state.attemptedAssetIDs?.count ?? 0
-            AlbumLog.model.info("Backfill: appended \(added) new seeds; seeds=\(seedCount) completed=\(completedCount) attempted=\(attemptedCount)")
+            AlbumLog.model.info(
+                "Backfill: appended \(added, privacy: .public) new seeds; seeds=\(seedCount, privacy: .public) completed=\(completedCount, privacy: .public) attempted=\(attemptedCount, privacy: .public)"
+            )
             await publishProgress(isRunning: runTask != nil)
         }
 
@@ -423,9 +533,7 @@ public actor AlbumBackfillCoordinator {
             if state.completedAssetIDs.contains(id) { continue }
             let key = AlbumSidecarKey(source: source, id: id)
             if let record = await sidecarStore.load(key),
-               record.visionSource == .computed,
-               let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !summary.isEmpty {
+               AlbumVisionSummaryUtils.isMeaningfulComputed(record) {
                 state.completedAssetIDs.insert(id)
                 updated = true
             }

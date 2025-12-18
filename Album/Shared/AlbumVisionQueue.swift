@@ -98,14 +98,19 @@ public actor AlbumVisionQueue {
     @discardableResult
     public func enqueueVision(for assetID: String, source: AlbumSidecarSource, reason: String, priority: TaskPriority = .utility) async -> Bool {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !id.isEmpty else { return false }
-        if inflight[id] != nil { return false }
+        guard !id.isEmpty else {
+            AlbumLog.model.info("VisionQueue: enqueue ignored (empty id) reason=\(reason, privacy: .public)")
+            return false
+        }
+        if inflight[id] != nil {
+            AlbumLog.model.info("VisionQueue: enqueue skipped (inflight) id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
+            return false
+        }
 
         let key = AlbumSidecarKey(source: source, id: id)
         if let record = await sidecarStore.load(key),
-           record.visionSource == .computed,
-           let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !summary.isEmpty {
+           AlbumVisionSummaryUtils.isMeaningfulComputed(record) {
+            AlbumLog.model.info("VisionQueue: enqueue skipped (already computed) id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
             return false
         }
 
@@ -115,35 +120,43 @@ public actor AlbumVisionQueue {
         let semaphore = self.semaphore
         let config = self.config
 
-        let task = Task.detached(priority: priority) {
+        AlbumLog.model.info("VisionQueue: enqueue id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
+
+        let task = Task.detached(priority: priority) { [reason] in
             await semaphore.wait()
             defer { Task.detached { await semaphore.signal() } }
 
             if Task.isCancelled {
+                AlbumLog.model.info("VisionQueue: cancelled before start id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
                 await queue.publishCompletion(assetID: id)
                 await queue.finish(assetID: id)
                 return
             }
 
+            AlbumLog.model.info("VisionQueue: start id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
             guard let data = await queue.requestVisionThumbnailData(assetID: id, maxDimension: config.visionThumbnailMaxDimension) else {
+                AlbumLog.model.info("VisionQueue: thumbnail data nil id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
                 await queue.publishCompletion(assetID: id)
                 await queue.finish(assetID: id)
                 return
             }
 
             if Task.isCancelled {
+                AlbumLog.model.info("VisionQueue: cancelled after thumbnail id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
                 await queue.publishCompletion(assetID: id)
                 await queue.finish(assetID: id)
                 return
             }
 
             guard let result = AlbumVisionSummarizer.summarize(imageData: data, maxDimension: config.visionThumbnailMaxDimension) else {
+                AlbumLog.model.info("VisionQueue: summarizer returned nil id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
                 await queue.publishCompletion(assetID: id)
                 await queue.finish(assetID: id)
                 return
             }
 
             if Task.isCancelled {
+                AlbumLog.model.info("VisionQueue: cancelled after summarize id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
                 await queue.publishCompletion(assetID: id)
                 await queue.finish(assetID: id)
                 return
@@ -158,8 +171,12 @@ public actor AlbumVisionQueue {
                 computedAt: now,
                 modelVersion: result.modelVersion
             )
+            AlbumLog.model.info(
+                "VisionQueue: computed id=\(id, privacy: .public) summaryChars=\(result.summary.count, privacy: .public) tags=\(result.tags.count, privacy: .public) conf=\(result.confidence, privacy: .public) reason=\(reason, privacy: .public)"
+            )
 
             if Task.isCancelled {
+                AlbumLog.model.info("VisionQueue: cancelled after save id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
                 await queue.publishCompletion(assetID: id)
                 await queue.finish(assetID: id)
                 return
@@ -176,9 +193,13 @@ public actor AlbumVisionQueue {
                     radius: config.neighborInferenceRadius,
                     inferredConfidence: config.inferredConfidence
                 )
+                AlbumLog.model.info(
+                    "VisionQueue: propagated inferred radius=\(config.neighborInferenceRadius, privacy: .public) from=\(id, privacy: .public)"
+                )
             }
 
             if Task.isCancelled {
+                AlbumLog.model.info("VisionQueue: cancelled after propagate id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
                 await queue.publishCompletion(assetID: id)
                 await queue.finish(assetID: id)
                 return
@@ -196,6 +217,7 @@ public actor AlbumVisionQueue {
 
             await queue.publishCompletion(assetID: id)
             await queue.finish(assetID: id)
+            AlbumLog.model.info("VisionQueue: finished id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
         }
 
         inflight[id] = task
@@ -204,28 +226,30 @@ public actor AlbumVisionQueue {
 
     public func ensureVisionComputed(for assetID: String, source: AlbumSidecarSource, reason: String, priority: TaskPriority = .background) async -> Bool {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !id.isEmpty else { return false }
+        guard !id.isEmpty else {
+            AlbumLog.model.info("VisionQueue: ensureVisionComputed ignored (empty id) reason=\(reason, privacy: .public)")
+            return false
+        }
 
         let key = AlbumSidecarKey(source: source, id: id)
         if let record = await sidecarStore.load(key),
-           record.visionSource == .computed,
-           let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !summary.isEmpty {
+           AlbumVisionSummaryUtils.isMeaningfulComputed(record) {
             return true
         }
 
+        AlbumLog.model.info("VisionQueue: ensureVisionComputed start id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
         _ = await enqueueVision(for: id, source: source, reason: reason, priority: priority)
         if let task = inflight[id] {
             await task.value
         }
 
         if let record = await sidecarStore.load(key),
-           record.visionSource == .computed,
-           let summary = record.visionSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !summary.isEmpty {
+           AlbumVisionSummaryUtils.isMeaningfulComputed(record) {
+            AlbumLog.model.info("VisionQueue: ensureVisionComputed success id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
             return true
         }
 
+        AlbumLog.model.info("VisionQueue: ensureVisionComputed failed id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
         return false
     }
 

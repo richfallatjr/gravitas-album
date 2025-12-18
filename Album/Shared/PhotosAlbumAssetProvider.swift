@@ -192,10 +192,16 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
 
     public func requestVisionThumbnailData(localIdentifier: String, maxDimension: Int) async -> Data? {
         let id = localIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !id.isEmpty else { return nil }
+        guard !id.isEmpty else {
+            AlbumLog.photos.info("VisionThumb: ignored (empty id)")
+            return nil
+        }
 
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
-        guard let asset = assets.firstObject else { return nil }
+        guard let asset = assets.firstObject else {
+            AlbumLog.photos.info("VisionThumb: asset not found id=\(id, privacy: .public)")
+            return nil
+        }
 
         let dimension = max(64, maxDimension)
         let targetSize = CGSize(width: dimension, height: dimension)
@@ -208,6 +214,9 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
         options.isSynchronous = false
 
         let timeoutNanos: UInt64 = 18_000_000_000
+        AlbumLog.photos.info(
+            "VisionThumb: request start id=\(id, privacy: .public) target=\(dimension, privacy: .public)x\(dimension, privacy: .public) mediaType=\(asset.mediaType.rawValue, privacy: .public)"
+        )
 
         return await withCheckedContinuation { continuation in
             var didResume = false
@@ -217,6 +226,11 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
             func finish(_ data: Data?) {
                 guard !didResume else { return }
                 didResume = true
+                if let data {
+                    AlbumLog.photos.info("VisionThumb: finish id=\(id, privacy: .public) bytes=\(data.count, privacy: .public)")
+                } else {
+                    AlbumLog.photos.info("VisionThumb: finish id=\(id, privacy: .public) data=nil")
+                }
                 continuation.resume(returning: data)
             }
 
@@ -227,6 +241,9 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
                     if requestID != PHInvalidImageRequestID {
                         PHImageManager.default().cancelImageRequest(requestID)
                     }
+                    AlbumLog.photos.info(
+                        "VisionThumb: timeout id=\(id, privacy: .public) returningBytes=\(bestData?.count ?? 0, privacy: .public)"
+                    )
                     finish(bestData)
                 }
             }
@@ -243,6 +260,11 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
                     let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
                     let error = info?[PHImageErrorKey] as? NSError
                     if cancelled || error != nil {
+                        if let error {
+                            AlbumLog.photos.info("VisionThumb: request error id=\(id, privacy: .public) \(String(describing: error), privacy: .public)")
+                        } else {
+                            AlbumLog.photos.info("VisionThumb: request cancelled id=\(id, privacy: .public)")
+                        }
                         timeoutTask.cancel()
                         finish(bestData)
                         return

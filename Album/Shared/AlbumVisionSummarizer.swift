@@ -65,6 +65,11 @@ public enum AlbumVisionSummarizer {
         let results = classify.results ?? []
         guard !results.isEmpty else { return nil }
 
+        // In practice, many images produce useful tags but with lower confidence.
+        // We prefer to return *something* rather than "unlabeled" for most assets so
+        // the sidecar system can make progress and improve over time.
+        let minConfidence: Float = 0.03
+
         var tags: [String] = []
         tags.reserveCapacity(8)
 
@@ -74,14 +79,29 @@ public enum AlbumVisionSummarizer {
         var seen = Set<String>()
         seen.reserveCapacity(8)
 
-        for observation in results.sorted(by: { $0.confidence > $1.confidence }) {
-            guard observation.confidence >= 0.10 else { continue }
+        let sorted = results.sorted(by: { $0.confidence > $1.confidence })
+
+        for observation in sorted {
+            guard observation.confidence >= minConfidence else { continue }
             let cleaned = cleanLabel(observation.identifier)
             guard !cleaned.isEmpty else { continue }
             guard seen.insert(cleaned).inserted else { continue }
             tags.append(cleaned)
             confidences.append(observation.confidence)
             if tags.count >= 6 { break }
+        }
+
+        if tags.isEmpty {
+            // Fallback: take a few best-effort labels even if confidence is low.
+            // This avoids the system getting stuck with large swaths of "unlabeled".
+            for observation in sorted {
+                let cleaned = cleanLabel(observation.identifier)
+                guard !cleaned.isEmpty else { continue }
+                guard seen.insert(cleaned).inserted else { continue }
+                tags.append(cleaned)
+                confidences.append(observation.confidence)
+                if tags.count >= 3 { break }
+            }
         }
 
         guard !tags.isEmpty else { return nil }
