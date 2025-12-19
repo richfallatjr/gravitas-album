@@ -281,8 +281,18 @@ public struct AlbumControlView: View {
             let computedPercent = total > 0 ? Int((Double(computed) / Double(total) * 100).rounded()) : 0
 
             if analysisComplete {
+                let coverage = model.visionCoverage
+                let showCoverage = (coverage.totalAssets > 0 && coverage.updatedAt != nil)
+
                 HStack {
                     Spacer(minLength: 0)
+
+                    if showCoverage {
+                        Text("Vision \(coverage.computedPercent)%")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(palette.panelSecondaryText)
+                    }
+
                     Button {
                         presentedSheet = .settings
                     } label: {

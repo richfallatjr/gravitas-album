@@ -525,6 +525,128 @@ public actor AlbumSidecarStore {
         return changed
     }
 
+    public func computeVisionCoverage(
+        source: AlbumSidecarSource,
+        allowedIDs: Set<String>?
+    ) async -> AlbumVisionCoverage {
+        let directoryURL = storeDirectoryURL
+
+        return await Task.detached(priority: .utility) {
+            let totalAssets = max(0, allowedIDs?.count ?? 0)
+            guard totalAssets > 0 else {
+                return AlbumVisionCoverage(
+                    totalAssets: 0,
+                    computed: 0,
+                    autofilled: 0,
+                    failed: 0,
+                    missing: 0,
+                    computedPercent: 0,
+                    updatedAt: Date(),
+                    lastError: "Vision coverage is unavailable until the Photos library index is loaded."
+                )
+            }
+
+            let urls: [URL]
+            do {
+                urls = try FileManager.default.contentsOfDirectory(
+                    at: directoryURL,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+            } catch {
+                return AlbumVisionCoverage(
+                    totalAssets: totalAssets,
+                    computed: 0,
+                    autofilled: 0,
+                    failed: 0,
+                    missing: totalAssets,
+                    computedPercent: 0,
+                    updatedAt: Date(),
+                    lastError: "Vision coverage scan failed to list sidecars: \(error.localizedDescription)"
+                )
+            }
+
+            guard !urls.isEmpty else {
+                return AlbumVisionCoverage(
+                    totalAssets: totalAssets,
+                    computed: 0,
+                    autofilled: 0,
+                    failed: 0,
+                    missing: totalAssets,
+                    computedPercent: 0,
+                    updatedAt: Date(),
+                    lastError: nil
+                )
+            }
+
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+
+            var computed = 0
+            var autofilled = 0
+            var failed = 0
+            var decodeFailures = 0
+
+            var seenIDs = Set<String>()
+            seenIDs.reserveCapacity(min(totalAssets, urls.count))
+
+            for url in urls {
+                guard url.pathExtension.lowercased() == "json" else { continue }
+
+                do {
+                    let data = try Data(contentsOf: url)
+                    let record = try decoder.decode(AlbumSidecarRecord.self, from: data)
+                    guard record.key.source == source else { continue }
+
+                    let id = record.key.id.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !id.isEmpty else { continue }
+                    guard let allowedIDs, allowedIDs.contains(id) else { continue }
+                    guard !seenIDs.contains(id) else { continue }
+                    seenIDs.insert(id)
+
+                    switch record.vision.state {
+                    case .computed:
+                        if AlbumVisionSummaryUtils.isPlaceholder(record.vision.summary) {
+                            break
+                        }
+                        computed += 1
+                    case .autofilled:
+                        if AlbumVisionSummaryUtils.isPlaceholder(record.vision.summary) {
+                            break
+                        }
+                        autofilled += 1
+                    case .failed:
+                        failed += 1
+                    case .none:
+                        break
+                    }
+                } catch {
+                    decodeFailures += 1
+                }
+            }
+
+            let missing = max(0, totalAssets - computed - autofilled - failed)
+            let computedPercent = totalAssets > 0
+                ? Int((Double(computed) / Double(totalAssets) * 100).rounded())
+                : 0
+
+            let lastError: String? = decodeFailures > 0
+                ? "Vision coverage scan skipped \(decodeFailures) unreadable sidecars."
+                : nil
+
+            return AlbumVisionCoverage(
+                totalAssets: totalAssets,
+                computed: computed,
+                autofilled: autofilled,
+                failed: failed,
+                missing: missing,
+                computedPercent: computedPercent,
+                updatedAt: Date(),
+                lastError: lastError
+            )
+        }.value
+    }
+
     // MARK: Internals
 
     private func urlForKey(_ key: AlbumSidecarKey) -> URL {

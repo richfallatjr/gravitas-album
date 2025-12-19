@@ -10,6 +10,7 @@
 		011F77F12C0BFCBEA918BFDE /* NextProject_Context_PanelSpawning.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6BF2122B71B8B4D1A039B0A2 /* NextProject_Context_PanelSpawning.txt */; };
 		0334E835BB82D9AC7F00BC0D /* AlbumMediaPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D25D4083156A208B42FFE97 /* AlbumMediaPane.swift */; };
 		10ADE7A29B17DC95138DBC93 /* AlbumAssetProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50ED7BAAE001591EC877111D /* AlbumAssetProvider.swift */; };
+		129B22FDD96F1C9F0295E974 /* AlbumVisionCoverage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E871A77B8AB5D14AE98A1A6F /* AlbumVisionCoverage.swift */; };
 		13D29D701495BC4FA2B93EC4 /* AlbumLibraryIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B49DE11AE32B953E4833DF /* AlbumLibraryIndex.swift */; };
 		1821C5025CCEBE2F7375224F /* AlbumAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92F099F62B2B58785026FFF /* AlbumAsset.swift */; };
 		1F65F2837986B1A4ECCEE0C7 /* AlbumHistoryList.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2DCB81984C845C556147591 /* AlbumHistoryList.swift */; };
@@ -136,6 +137,7 @@
 		E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionSummarizer.swift; sourceTree = "<group>"; };
 		E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumShareSheet.swift; sourceTree = "<group>"; };
 		E60564DF1CDF3419D01AFA04 /* AlbumSceneManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSceneManagerView.swift; sourceTree = "<group>"; };
+		E871A77B8AB5D14AE98A1A6F /* AlbumVisionCoverage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionCoverage.swift; sourceTree = "<group>"; };
 		E9E672C1B87A4196061A9713 /* AlbumVisionSummaryUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionSummaryUtils.swift; sourceTree = "<group>"; };
 		EB91B0A8E5FA94F7381B1917 /* AlbumItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumItem.swift; sourceTree = "<group>"; };
 		EC183209D3F2099BDAB32FC2 /* AlbumPopOutPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumPopOutPayload.swift; sourceTree = "<group>"; };
@@ -232,6 +234,7 @@
 				97762980BB986006D03FE3C8 /* AlbumSidecarStore.swift */,
 				9B15FBA4C9074577DEADB361 /* AlbumTheme.swift */,
 				B8C09B6B1C1E96DDD01700F5 /* AlbumTuningDelta.swift */,
+				E871A77B8AB5D14AE98A1A6F /* AlbumVisionCoverage.swift */,
 				A9198ABFA084347F23636ADB /* AlbumVisionQueue.swift */,
 				E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */,
 				E9E672C1B87A4196061A9713 /* AlbumVisionSummaryUtils.swift */,
@@ -426,6 +429,7 @@
 				414BAA37EDCD29468713A1A0 /* AlbumSidecarStore.swift in Sources */,
 				6A5E589C2CFFB3A07961544A /* AlbumTheme.swift in Sources */,
 				E5F80C231E703DDAA6B5F6B5 /* AlbumTuningDelta.swift in Sources */,
+				129B22FDD96F1C9F0295E974 /* AlbumVisionCoverage.swift in Sources */,
 				8072B94E05E7A29CA647D951 /* AlbumVisionQueue.swift in Sources */,
 				8E29056EF33FBA1296FA2404 /* AlbumVisionSummarizer.swift in Sources */,
 				891B394A06F12C7204DE8E8E /* AlbumVisionSummaryUtils.swift in Sources */,
@@ -595,7 +599,6 @@
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -616,7 +619,6 @@
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

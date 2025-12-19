@@ -30,6 +30,70 @@ public struct AlbumSettingsSheet: View {
             }
 
             GroupBox {
+                let coverage = model.visionCoverage
+                let totalAssets = max(0, coverage.totalAssets)
+
+                let labeled = max(0, coverage.computed + coverage.autofilled)
+                let labeledPercent = totalAssets > 0
+                    ? Int((Double(labeled) / Double(totalAssets) * 100).rounded())
+                    : 0
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Text("Vision Coverage")
+                            .font(.headline)
+
+                        Spacer(minLength: 0)
+
+                        Button(model.visionCoverageIsRefreshing ? "Calculating…" : "Recalculate") {
+                            model.refreshVisionCoverage()
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(palette.copyButtonFill)
+                        .foregroundStyle(palette.buttonLabelOnColor)
+                        .disabled(model.visionCoverageIsRefreshing)
+
+                        if model.visionCoverageIsRefreshing {
+                            ProgressView()
+                        }
+                    }
+
+                    if totalAssets > 0, coverage.updatedAt != nil {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text("Computed \(coverage.computedPercent)%")
+                                    .font(.title3.weight(.semibold))
+
+                                Text("Labeled \(labeledPercent)%")
+                                    .font(.caption)
+                                    .foregroundStyle(palette.panelSecondaryText)
+                            }
+
+                            ProgressView(value: Double(coverage.computed), total: Double(totalAssets))
+                                .progressViewStyle(.linear)
+                                .tint(palette.copyButtonFill)
+
+                            Text("Computed \(coverage.computed)/\(totalAssets) • Autofilled \(coverage.autofilled) • Missing \(coverage.missing) • Failed \(coverage.failed)")
+                                .font(.caption2)
+                                .foregroundStyle(palette.panelSecondaryText)
+                        }
+                    } else {
+                        Text("Tap Recalculate to scan sidecars and compute Vision coverage for your full library.")
+                            .font(.caption2)
+                            .foregroundStyle(palette.panelSecondaryText)
+                    }
+
+                    if let err = coverage.lastError, !err.isEmpty {
+                        Text(err)
+                            .font(.caption2)
+                            .foregroundStyle(palette.panelSecondaryText)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(8)
+            }
+
+            GroupBox {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Indexing")
                         .font(.headline)
@@ -156,6 +220,11 @@ public struct AlbumSettingsSheet: View {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .stroke(palette.cardBorder.opacity(0.75), lineWidth: 1)
         )
+        .onAppear {
+            if model.visionCoverage.updatedAt == nil, !model.visionCoverageIsRefreshing {
+                model.refreshVisionCoverage()
+            }
+        }
         .preferredColorScheme(model.theme == .dark ? .dark : .light)
         .foregroundStyle(palette.panelPrimaryText)
     }

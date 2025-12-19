@@ -138,6 +138,9 @@ public final class AlbumModel: ObservableObject {
 
     @Published public var backfillStatus: BackfillStatus = BackfillStatus()
 
+    @Published public private(set) var visionCoverage: AlbumVisionCoverage = AlbumVisionCoverage()
+    @Published public private(set) var visionCoverageIsRefreshing: Bool = false
+
 	    public struct Settings: Sendable, Hashable {
 	        public var autofillOnThumbUp: Bool
 	        public var thumbUpAutofillCount: Int
@@ -164,6 +167,7 @@ public final class AlbumModel: ObservableObject {
     private var recommendsFeedbackByAnchorID: [String: AlbumThumbFeedback] = [:]
     private var thumbUpAutofillNeighborIDsByAnchorID: [String: [String]] = [:]
     private var memoryRebuildTask: Task<Void, Never>? = nil
+    private var visionCoverageRefreshTask: Task<Void, Never>? = nil
     private var pinnedAssetLoadsInFlight: Set<String> = []
 
     public struct CurvedWallDumpPage: Identifiable, Sendable, Equatable {
@@ -279,6 +283,44 @@ public final class AlbumModel: ObservableObject {
     public func restartIndexing() {
         Task(priority: .background) { [backfillManager] in
             await backfillManager.restart()
+        }
+    }
+
+    public func refreshVisionCoverage() {
+        guard datasetSource == .photos else {
+            visionCoverage = AlbumVisionCoverage(
+                totalAssets: 0,
+                computed: 0,
+                autofilled: 0,
+                failed: 0,
+                missing: 0,
+                computedPercent: 0,
+                updatedAt: Date(),
+                lastError: "Vision coverage is only available for the Photos library."
+            )
+            return
+        }
+
+        if visionCoverageIsRefreshing { return }
+        visionCoverageIsRefreshing = true
+
+        visionCoverageRefreshTask?.cancel()
+
+        let sidecarStore = self.sidecarStore
+        let libraryIndexStore = self.libraryIndexStore
+
+        visionCoverageRefreshTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer {
+                visionCoverageIsRefreshing = false
+                visionCoverageRefreshTask = nil
+            }
+
+            let index = await libraryIndexStore.buildIfNeeded()
+            let allowedIDs = index.map { Set($0.idsByCreationDateAscending) }
+            let coverage = await sidecarStore.computeVisionCoverage(source: .photos, allowedIDs: allowedIDs)
+            if Task.isCancelled { return }
+            visionCoverage = coverage
         }
     }
 
