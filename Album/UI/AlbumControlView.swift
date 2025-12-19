@@ -9,9 +9,21 @@ public struct AlbumControlView: View {
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
 
+    private enum PresentedSheet: Identifiable {
+        case queryPicker
+        case settings
+
+        var id: Int {
+            switch self {
+            case .queryPicker: return 0
+            case .settings: return 1
+            }
+        }
+    }
+
     @State private var launched = false
     @State private var assetLimit: Int = 300
-    @State private var isQueryPickerPresented: Bool = false
+    @State private var presentedSheet: PresentedSheet? = nil
     @State private var immersiveOpenStatus: String? = nil
 
     public init() {}
@@ -62,9 +74,15 @@ public struct AlbumControlView: View {
             AlbumLog.ui.info("AlbumControlView task: loadItemsIfNeeded(limit: \(self.assetLimit))")
             await model.loadItemsIfNeeded(limit: assetLimit)
         }
-        .sheet(isPresented: $isQueryPickerPresented) {
-            AlbumQueryPickerSheet(limit: $assetLimit)
-                .environmentObject(model)
+        .sheet(item: $presentedSheet) { sheet in
+            switch sheet {
+            case .queryPicker:
+                AlbumQueryPickerSheet(limit: $assetLimit)
+                    .environmentObject(model)
+            case .settings:
+                AlbumSettingsSheet()
+                    .environmentObject(model)
+            }
         }
     }
 
@@ -109,7 +127,7 @@ public struct AlbumControlView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    isQueryPickerPresented = true
+                    presentedSheet = .queryPicker
                 } label: {
                     Label(model.selectedQuery.title, systemImage: "photo.on.rectangle")
                         .labelStyle(.titleAndIcon)
@@ -251,76 +269,76 @@ public struct AlbumControlView: View {
             let status = model.backfillStatus
             let total = max(0, status.totalAssets)
             let computed = max(0, status.computed)
+            let analysisComplete = total > 0 && computed >= total
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Button(status.paused ? "Resume" : "Pause") {
-                        if status.paused {
-                            model.resumeBackfill()
-                        } else {
-                            model.pauseBackfill()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(palette.historyButtonColor)
-
-                    Button("Restart Indexing") {
-                        model.restartIndexing()
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(palette.copyButtonFill)
-
-                    Button("Retry Failed") {
-                        model.retryFailedBackfill()
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(palette.historyButtonColor)
-                    .disabled(status.failed <= 0)
-
+            if analysisComplete {
+                HStack {
                     Spacer(minLength: 0)
-
-                    Text(status.paused ? "Paused" : (status.running ? "Running" : "Idle"))
-                        .font(.caption2)
-                        .foregroundStyle(palette.panelSecondaryText)
+                    Button {
+                        presentedSheet = .settings
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.title3.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(palette.historyButtonColor)
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Button(status.paused ? "Resume" : "Pause") {
+                            if status.paused {
+                                model.resumeBackfill()
+                            } else {
+                                model.pauseBackfill()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(palette.historyButtonColor)
 
-                if total > 0 {
-                    ProgressView(value: Double(computed), total: Double(total))
-                        .progressViewStyle(.linear)
+                        Button("Restart Indexing") {
+                            model.restartIndexing()
+                        }
+                        .buttonStyle(.bordered)
                         .tint(palette.copyButtonFill)
 
-                    Text("Computed \(computed)/\(total) • Autofilled \(status.autofilled) • Missing \(status.missing) • Failed \(status.failed) • Queued \(status.queued) • Inflight \(status.inflight)")
-                        .font(.caption2)
-                        .foregroundStyle(palette.panelSecondaryText)
-                } else {
-                    Text("Queue: \(status.queued) queued • \(status.inflight) inflight • Failed \(status.failed)")
-                        .font(.caption2)
-                        .foregroundStyle(palette.panelSecondaryText)
-                }
+                        Button("Retry Failed") {
+                            model.retryFailedBackfill()
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(palette.historyButtonColor)
+                        .disabled(status.failed <= 0)
 
-                if let err = status.lastError, !err.isEmpty {
-                    Text("Last error: \(err)")
-                        .font(.caption2)
-                        .foregroundStyle(palette.panelSecondaryText)
-                        .lineLimit(2)
-                }
+                        Spacer(minLength: 0)
 
-                HStack(spacing: 12) {
-                    Toggle("Thumb Up Autofill", isOn: $model.settings.autofillOnThumbUp)
-                        .toggleStyle(.switch)
-
-                    if model.settings.autofillOnThumbUp {
-                        Stepper(
-                            "Neighbors \(model.settings.thumbUpAutofillCount)",
-                            value: $model.settings.thumbUpAutofillCount,
-                            in: 0...20
-                        )
+                        Text(status.paused ? "Paused" : (status.running ? "Running" : "Idle"))
+                            .font(.caption2)
+                            .foregroundStyle(palette.panelSecondaryText)
                     }
 
-                    Spacer(minLength: 0)
+                    if total > 0 {
+                        ProgressView(value: Double(computed), total: Double(total))
+                            .progressViewStyle(.linear)
+                            .tint(palette.copyButtonFill)
+
+                        Text("Computed \(computed)/\(total) • Autofilled \(status.autofilled) • Missing \(status.missing) • Failed \(status.failed) • Queued \(status.queued) • Inflight \(status.inflight)")
+                            .font(.caption2)
+                            .foregroundStyle(palette.panelSecondaryText)
+                    } else {
+                        Text("Queue: \(status.queued) queued • \(status.inflight) inflight • Failed \(status.failed)")
+                            .font(.caption2)
+                            .foregroundStyle(palette.panelSecondaryText)
+                    }
+
+                    if let err = status.lastError, !err.isEmpty {
+                        Text("Last error: \(err)")
+                            .font(.caption2)
+                            .foregroundStyle(palette.panelSecondaryText)
+                            .lineLimit(2)
+                    }
                 }
-                .font(.caption2)
-                .foregroundStyle(palette.panelSecondaryText)
             }
         }
     }

@@ -199,32 +199,57 @@ public actor AlbumBackfillManager {
         await publishStatus()
     }
 
-    public func scanForNewAssetsOnLaunch() async {
-#if canImport(Photos)
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard status == .authorized || status == .limited else { return }
+	    public func scanForNewAssetsOnLaunch() async {
+	#if canImport(Photos)
+	        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+	        guard status == .authorized || status == .limited else { return }
 
-        let previous = loadLibraryScanState() ?? LibraryScanState()
-        let cutoff: Date = {
-            guard let seen = previous.newestSeenCreationDate else { return .distantPast }
-            return seen.addingTimeInterval(-scanBufferSeconds)
-        }()
+	        let previous = loadLibraryScanState() ?? LibraryScanState()
 
-        let options = PHFetchOptions()
-        options.sortDescriptors = [
-            NSSortDescriptor(key: "creationDate", ascending: false)
-        ]
+	        let options = PHFetchOptions()
+	        options.sortDescriptors = [
+	            NSSortDescriptor(key: "creationDate", ascending: false)
+	        ]
 
-        let results = PHAsset.fetchAssets(with: options)
-        guard results.count > 0 else {
-            saveLibraryScanState(LibraryScanState(lastScanAt: Date(), newestSeenCreationDate: previous.newestSeenCreationDate, newestSeenAssetID: previous.newestSeenAssetID))
-            return
-        }
+	        let results = PHAsset.fetchAssets(with: options)
+	        guard results.count > 0 else {
+	            saveLibraryScanState(LibraryScanState(lastScanAt: Date(), newestSeenCreationDate: previous.newestSeenCreationDate, newestSeenAssetID: previous.newestSeenAssetID))
+	            return
+	        }
 
-        var newestDate: Date? = previous.newestSeenCreationDate
-        var newestID: String? = previous.newestSeenAssetID
-        var newIDs: [String] = []
-        newIDs.reserveCapacity(min(256, results.count))
+	        if previous.newestSeenCreationDate == nil {
+	            // First run: establish a baseline so we don't enqueue the entire library as "new".
+	            let probeCount = min(results.count, 25)
+	            var newestDate: Date = Date()
+	            var newestID: String? = nil
+
+	            for idx in 0..<probeCount {
+	                let asset = results.object(at: idx)
+	                if let date = asset.creationDate {
+	                    newestDate = date
+	                    let id = asset.localIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+	                    newestID = id.isEmpty ? nil : id
+	                    break
+	                }
+	            }
+
+	            if newestID == nil {
+	                let asset = results.object(at: 0)
+	                newestDate = asset.creationDate ?? Date()
+	                let id = asset.localIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+	                newestID = id.isEmpty ? nil : id
+	            }
+
+	            saveLibraryScanState(LibraryScanState(lastScanAt: Date(), newestSeenCreationDate: newestDate, newestSeenAssetID: newestID))
+	            return
+	        }
+
+	        let cutoff = (previous.newestSeenCreationDate ?? .distantPast).addingTimeInterval(-scanBufferSeconds)
+
+	        var newestDate: Date? = previous.newestSeenCreationDate
+	        var newestID: String? = previous.newestSeenAssetID
+	        var newIDs: [String] = []
+	        newIDs.reserveCapacity(min(256, results.count))
 
         results.enumerateObjects { asset, _, stop in
             let date = asset.creationDate ?? .distantPast
@@ -268,39 +293,40 @@ public actor AlbumBackfillManager {
         _ = await ensureVisionScheduled(for: id, priority: priority, reason: "ensure", isSeed: false, notBefore: Date(), shouldPublishStatus: true)
     }
 
-    public func autofillNeighbors(anchorID: String, neighborIDs: [String], source: AlbumSidecarRecord.AutofillSource) async {
-        let anchor = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !anchor.isEmpty else { return }
-        guard !neighborIDs.isEmpty else { return }
+	    public func autofillNeighbors(anchorID: String, neighborIDs: [String], source: AlbumSidecarRecord.AutofillSource) async {
+	        let anchor = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
+	        guard !anchor.isEmpty else { return }
+	        guard !neighborIDs.isEmpty else { return }
 
-        let anchorKey = AlbumSidecarKey(source: .photos, id: anchor)
-        guard let anchorRecord = await sidecarStore.load(anchorKey),
-              anchorRecord.vision.state == .computed,
-              let summary = anchorRecord.vision.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !summary.isEmpty
-        else { return }
+	        let anchorKey = AlbumSidecarKey(source: .photos, id: anchor)
+	        guard let anchorRecord = await sidecarStore.load(anchorKey),
+	              anchorRecord.vision.state == .computed,
+	              let summary = anchorRecord.vision.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+	              !summary.isEmpty,
+	              !AlbumVisionSummaryUtils.isPlaceholder(summary)
+	        else { return }
 
-        let tags = anchorRecord.vision.tags
-        let confidence: Float = 0.30
-        let now = Date()
+	        let tags = anchorRecord.vision.tags
+	        let confidence: Float = 0.30
+	        let now = Date()
 
         for neighborIDRaw in neighborIDs {
             let neighborID = neighborIDRaw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !neighborID.isEmpty else { continue }
             guard neighborID != anchor else { continue }
 
-            let key = AlbumSidecarKey(source: .photos, id: neighborID)
-            let existingState = (await sidecarStore.load(key))?.vision.state ?? .none
-            guard existingState == .none else { continue }
+	            let key = AlbumSidecarKey(source: .photos, id: neighborID)
+	            let existingState = (await sidecarStore.load(key))?.vision.state ?? .none
+	            guard existingState == .none || existingState == .autofilled else { continue }
 
-            await sidecarStore.setVisionAutofilledIfMissing(
-                key,
-                summary: summary,
-                tags: tags,
-                confidence: confidence,
-                source: source,
-                derivedFromID: anchor
-            )
+	            await sidecarStore.setVisionAutofilledIfMissingOrAutofilled(
+	                key,
+	                summary: summary,
+	                tags: tags,
+	                confidence: confidence,
+	                source: source,
+	                derivedFromID: anchor
+	            )
 
             await publishVisionUpdateIfAvailable(assetID: neighborID, summary: summary, state: .autofilled, confidence: confidence)
             applySeedVisionCountDelta(assetID: neighborID, from: existingState, to: .autofilled)
@@ -350,8 +376,8 @@ public actor AlbumBackfillManager {
         await publishStatus()
     }
 
-    public func retryFailed() async {
-        guard let plan = seedPlan, !plan.seedIDs.isEmpty else { return }
+	    public func retryFailed() async {
+	        guard let plan = seedPlan, !plan.seedIDs.isEmpty else { return }
 
         let now = Date()
 
@@ -367,10 +393,31 @@ public actor AlbumBackfillManager {
             }
         }
 
-        await publishStatus()
-    }
+	        await publishStatus()
+	    }
 
-    // MARK: Internals
+	    public func applySeedTimelineAutofillPass() async {
+	        guard await ensureLibraryIndexAvailable() != nil else { return }
+	        await ensureSeedPlanExistsIfPossible()
+	        guard let plan = seedPlan, !plan.seedIDs.isEmpty else { return }
+
+	        for idRaw in plan.seedIDs {
+	            let id = idRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+	            guard !id.isEmpty else { continue }
+
+	            let key = AlbumSidecarKey(source: .photos, id: id)
+	            guard let record = await sidecarStore.load(key),
+	                  AlbumVisionSummaryUtils.isMeaningfulComputed(record),
+	                  let summary = record.vision.summary
+	            else { continue }
+
+	            await autofillSeedTimelineNeighborsIfEnabled(anchorID: id, summary: summary, tags: record.vision.tags ?? [])
+	        }
+
+	        await publishStatus()
+	    }
+
+	    // MARK: Internals
 
     @discardableResult
     private func ensureVisionScheduled(
@@ -593,14 +640,14 @@ public actor AlbumBackfillManager {
         )
     }
 
-    private func autofillSeedTimelineNeighborsIfEnabled(anchorID: String, summary: String, tags: [String]) async {
-        // Optional behavior: keep disabled by default by setting radius to 0.
-        let radius: Int = 0
-        guard radius > 0 else { return }
-        guard let index = await libraryIndexStore.loadIndex() else { return }
+	    private func autofillSeedTimelineNeighborsIfEnabled(anchorID: String, summary: String, tags: [String]) async {
+	        let radius: Int = 10
+	        guard radius > 0 else { return }
+	        guard !AlbumVisionSummaryUtils.isPlaceholder(summary) else { return }
+	        guard let index = await libraryIndexStore.loadIndex() else { return }
 
-        let neighbors = index.neighbors(of: anchorID, radius: radius)
-        guard !neighbors.isEmpty else { return }
+	        let neighbors = index.neighbors(of: anchorID, radius: radius)
+	        guard !neighbors.isEmpty else { return }
 
         let confidence: Float = 0.30
 
@@ -609,14 +656,14 @@ public actor AlbumBackfillManager {
             let existingState = (await sidecarStore.load(key))?.vision.state ?? .none
             guard existingState == .none else { continue }
 
-            await sidecarStore.setVisionAutofilledIfMissing(
-                key,
-                summary: summary,
-                tags: tags,
-                confidence: confidence,
-                source: .timelineNeighbor,
-                derivedFromID: anchorID
-            )
+	            await sidecarStore.setVisionAutofilledIfMissing(
+	                key,
+	                summary: summary,
+	                tags: tags,
+	                confidence: confidence,
+	                source: .seedNeighbor,
+	                derivedFromID: anchorID
+	            )
 
             await publishVisionUpdateIfAvailable(assetID: neighborID, summary: summary, state: .autofilled, confidence: confidence)
             applySeedVisionCountDelta(assetID: neighborID, from: existingState, to: .autofilled)
@@ -748,19 +795,19 @@ public actor AlbumBackfillManager {
         let failed = max(0, seedFailedCount)
         let missing = max(0, total - computed - autofilled - failed)
 
-        let status = BackfillStatus(
-            totalAssets: total,
-            computed: computed,
-            autofilled: autofilled,
-            missing: missing,
-            failed: failed,
-            queued: queueByID.count,
-            inflight: inflightID == nil ? 0 : 1,
-            running: workerTask != nil && !paused,
-            paused: paused,
-            lastProcessedID: lastProcessedID,
-            lastError: lastError
-        )
+	        let status = BackfillStatus(
+	            totalAssets: total,
+	            computed: computed,
+	            autofilled: autofilled,
+	            missing: missing,
+	            failed: failed,
+	            queued: queueByID.count,
+	            inflight: inflightID == nil ? 0 : 1,
+	            running: !paused && (inflightID != nil || !queueByID.isEmpty),
+	            paused: paused,
+	            lastProcessedID: lastProcessedID,
+	            lastError: lastError
+	        )
 
         await MainActor.run {
             sink(status)

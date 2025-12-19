@@ -386,23 +386,23 @@ public actor AlbumSidecarStore {
         }
     }
 
-    public func setVisionAutofilledIfMissing(
-        _ key: AlbumSidecarKey,
-        summary: String,
-        tags: [String]?,
-        confidence: Float,
-        source: AlbumSidecarRecord.AutofillSource,
-        derivedFromID: String?
-    ) async {
+	    public func setVisionAutofilledIfMissing(
+	        _ key: AlbumSidecarKey,
+	        summary: String,
+	        tags: [String]?,
+	        confidence: Float,
+	        source: AlbumSidecarRecord.AutofillSource,
+	        derivedFromID: String?
+	    ) async {
         let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedSummary.isEmpty else { return }
 
         let derived = derivedFromID?.trimmingCharacters(in: .whitespacesAndNewlines)
         let derivedNormalized = (derived?.isEmpty == false) ? derived : nil
 
-        await mutate(key) { record in
-            guard record.vision.state != .computed else { return }
-            guard record.vision.state == .none else { return }
+	        await mutate(key) { record in
+	            guard record.vision.state != .computed else { return }
+	            guard record.vision.state == .none else { return }
 
             record.vision.state = .autofilled
             record.vision.summary = trimmedSummary
@@ -413,14 +413,44 @@ public actor AlbumSidecarStore {
             record.vision.computedAt = nil
             record.vision.modelVersion = nil
             record.vision.lastError = nil
-        }
-    }
+	        }
+	    }
 
-    public func setVisionFailed(
-        _ key: AlbumSidecarKey,
-        error: String,
-        attemptedAt: Date
-    ) async {
+	    public func setVisionAutofilledIfMissingOrAutofilled(
+	        _ key: AlbumSidecarKey,
+	        summary: String,
+	        tags: [String]?,
+	        confidence: Float,
+	        source: AlbumSidecarRecord.AutofillSource,
+	        derivedFromID: String?
+	    ) async {
+	        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+	        guard !trimmedSummary.isEmpty else { return }
+
+	        let derived = derivedFromID?.trimmingCharacters(in: .whitespacesAndNewlines)
+	        let derivedNormalized = (derived?.isEmpty == false) ? derived : nil
+
+	        await mutate(key) { record in
+	            guard record.vision.state != .computed else { return }
+	            guard record.vision.state == .none || record.vision.state == .autofilled else { return }
+
+	            record.vision.state = .autofilled
+	            record.vision.summary = trimmedSummary
+	            record.vision.tags = tags?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+	            record.vision.confidence = max(0, min(1, confidence))
+	            record.vision.source = source
+	            record.vision.derivedFromID = derivedNormalized
+	            record.vision.computedAt = nil
+	            record.vision.modelVersion = nil
+	            record.vision.lastError = nil
+	        }
+	    }
+
+	    public func setVisionFailed(
+	        _ key: AlbumSidecarKey,
+	        error: String,
+	        attemptedAt: Date
+	    ) async {
         let trimmedError = error.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedError.isEmpty else { return }
 

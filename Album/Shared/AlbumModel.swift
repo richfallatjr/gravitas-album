@@ -147,15 +147,15 @@ public final class AlbumModel: ObservableObject {
 
     @Published public var backfillStatus: BackfillStatus = BackfillStatus()
 
-    public struct Settings: Sendable, Hashable {
-        public var autofillOnThumbUp: Bool
-        public var thumbUpAutofillCount: Int
+	    public struct Settings: Sendable, Hashable {
+	        public var autofillOnThumbUp: Bool
+	        public var thumbUpAutofillCount: Int
 
-        public init(autofillOnThumbUp: Bool = true, thumbUpAutofillCount: Int = 5) {
-            self.autofillOnThumbUp = autofillOnThumbUp
-            self.thumbUpAutofillCount = max(0, thumbUpAutofillCount)
-        }
-    }
+	        public init(autofillOnThumbUp: Bool = false, thumbUpAutofillCount: Int = 5) {
+	            self.autofillOnThumbUp = autofillOnThumbUp
+	            self.thumbUpAutofillCount = max(0, thumbUpAutofillCount)
+	        }
+	    }
 
     @Published public var settings: Settings = Settings()
 
@@ -291,11 +291,17 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
-    public func retryFailedBackfill() {
-        Task(priority: .background) { [backfillManager] in
-            await backfillManager.retryFailed()
-        }
-    }
+	    public func retryFailedBackfill() {
+	        Task(priority: .background) { [backfillManager] in
+	            await backfillManager.retryFailed()
+	        }
+	    }
+
+	    public func applySeedAutofillPass() {
+	        Task(priority: .background) { [backfillManager] in
+	            await backfillManager.applySeedTimelineAutofillPass()
+	        }
+	    }
 
     public func shutdownForQuit() {
         AlbumLog.model.info("Shutdown requested (quit button)")
@@ -904,7 +910,7 @@ public final class AlbumModel: ObservableObject {
         shiftMemoryPage(delta: 1)
     }
 
-    public func sendThumb(_ feedback: AlbumThumbFeedback, assetID: String) {
+	    public func sendThumb(_ feedback: AlbumThumbFeedback, assetID: String) {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }
 
@@ -915,9 +921,11 @@ public final class AlbumModel: ObservableObject {
             await sidecarStore.setRating(key, rating: rating)
         }
 
-        if feedback == .up, settings.autofillOnThumbUp {
-            ensureVisionSummary(for: id, reason: "thumb_up", priority: .userInitiated)
-        }
+	#if DEBUG
+	        if feedback == .up, settings.autofillOnThumbUp {
+	            ensureVisionSummary(for: id, reason: "thumb_up", priority: .userInitiated)
+	        }
+	#endif
 
         guard !isPaused else {
             thumbThinkingSince = nil
@@ -939,10 +947,13 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
-    private func maybeAutofillThumbUpNeighbors(anchorID: String) {
-        let id = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !id.isEmpty else { return }
-        guard settings.autofillOnThumbUp else { return }
+	    private func maybeAutofillThumbUpNeighbors(anchorID: String) {
+	#if !DEBUG
+	        return
+	#else
+	        let id = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
+	        guard !id.isEmpty else { return }
+	        guard settings.autofillOnThumbUp else { return }
 
         let desired = max(0, settings.thumbUpAutofillCount)
         guard desired > 0 else { return }
@@ -956,10 +967,11 @@ public final class AlbumModel: ObservableObject {
 
         thumbUpAutofillNeighborIDsByAnchorID[id] = nil
 
-        Task(priority: .background) { [backfillManager] in
-            await backfillManager.autofillNeighbors(anchorID: id, neighborIDs: Array(neighborIDs.prefix(desired)), source: .thumbUpNeighbor)
-        }
-    }
+	        Task(priority: .background) { [backfillManager] in
+	            await backfillManager.autofillNeighbors(anchorID: id, neighborIDs: Array(neighborIDs.prefix(desired)), source: .thumbUpNeighbor)
+	        }
+	#endif
+	    }
 
     @discardableResult
     public func appendToHistoryIfNew(assetID: String) -> Bool {
@@ -1557,18 +1569,20 @@ public final class AlbumModel: ObservableObject {
             break
         }
 
-        if feedback == .up, settings.autofillOnThumbUp {
-            let desired = max(0, settings.thumbUpAutofillCount)
-            if desired > 0 {
-                let neighborIDs = result.neighbors
-                    .map { $0.id.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty && $0 != anchorID && !hiddenIDs.contains($0) }
-                if !neighborIDs.isEmpty {
-                    thumbUpAutofillNeighborIDsByAnchorID[anchorID] = Array(neighborIDs.prefix(desired))
-                    maybeAutofillThumbUpNeighbors(anchorID: anchorID)
-                }
-            }
-        }
+	#if DEBUG
+	        if feedback == .up, settings.autofillOnThumbUp {
+	            let desired = max(0, settings.thumbUpAutofillCount)
+	            if desired > 0 {
+	                let neighborIDs = result.neighbors
+	                    .map { $0.id.trimmingCharacters(in: .whitespacesAndNewlines) }
+	                    .filter { !$0.isEmpty && $0 != anchorID && !hiddenIDs.contains($0) }
+	                if !neighborIDs.isEmpty {
+	                    thumbUpAutofillNeighborIDsByAnchorID[anchorID] = Array(neighborIDs.prefix(desired))
+	                    maybeAutofillThumbUpNeighbors(anchorID: anchorID)
+	                }
+	            }
+	        }
+	#endif
 
         tuningDeltaRequest = AlbumTuningDeltaRequest(deltas: computeTuningDeltas(feedback: feedback, anchorID: anchorID, neighbors: result.neighbors))
     }
