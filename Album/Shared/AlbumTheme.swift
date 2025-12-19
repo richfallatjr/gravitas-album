@@ -34,7 +34,7 @@ public enum AlbumTheme: String, Codable, CaseIterable, Sendable {
                 toggleIconColor: .white,
                 copyButtonFill: copyAccent,
                 copyIconColor: .black,
-                buttonLabelOnColor: .white
+                buttonLabelOnColor: .black
             )
         case .dark:
             return AlbumThemePalette(
@@ -133,4 +133,3 @@ public struct AlbumThemePalette: Sendable {
         self.buttonLabelOnColor = buttonLabelOnColor
     }
 }
-

@@ -100,9 +100,9 @@ public struct AlbumControlView: View {
                 Spacer(minLength: 0)
 
                 if !launched {
-                    Button("Run Simulation") {
+                    Button("Recommendation Engine") {
                         Task { @MainActor in
-                            AlbumLog.immersive.info("Run Simulation pressed; requesting immersive space open")
+                            AlbumLog.immersive.info("Recommendation Engine pressed; requesting immersive space open")
                             immersiveOpenStatus = nil
                             immersiveOpenStatus = "Opening immersive space…"
                             let result = await openImmersiveSpace(id: "album-space")
@@ -137,6 +137,7 @@ public struct AlbumControlView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(palette.historyButtonColor)
+                .foregroundStyle(palette.buttonLabelOnColor)
 
                 Stepper("Limit \(assetLimit)", value: $assetLimit, in: 50...300, step: 50)
                     .labelsHidden()
@@ -147,12 +148,13 @@ public struct AlbumControlView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(palette.copyButtonFill)
+                .foregroundStyle(palette.buttonLabelOnColor)
 
                 Spacer(minLength: 0)
 
                 Picker("Mode", selection: $model.panelMode) {
-                    Text("RECOMMENDS").tag(AlbumPanelMode.recommends)
                     Text("MEMORIES").tag(AlbumPanelMode.memories)
+                    Text("RECOMMENDS").tag(AlbumPanelMode.recommends)
                 }
                 .pickerStyle(.segmented)
                 .tint(palette.toggleFillColor)
@@ -222,6 +224,7 @@ public struct AlbumControlView: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(palette.historyButtonColor)
+                        .foregroundStyle(palette.buttonLabelOnColor)
                     }
                 }
 
@@ -236,6 +239,7 @@ public struct AlbumControlView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(palette.historyButtonColor)
+                    .foregroundStyle(palette.buttonLabelOnColor)
                 }
 
             case .denied, .restricted:
@@ -252,6 +256,7 @@ public struct AlbumControlView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(palette.historyButtonColor)
+                    .foregroundStyle(palette.buttonLabelOnColor)
                 }
             }
 
@@ -273,6 +278,7 @@ public struct AlbumControlView: View {
             let total = max(0, status.totalAssets)
             let computed = max(0, status.computed)
             let analysisComplete = total > 0 && computed >= total
+            let computedPercent = total > 0 ? Int((Double(computed) / Double(total) * 100).rounded()) : 0
 
             if analysisComplete {
                 HStack {
@@ -287,6 +293,7 @@ public struct AlbumControlView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(palette.historyButtonColor)
+                    .foregroundStyle(palette.buttonLabelOnColor)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -300,18 +307,21 @@ public struct AlbumControlView: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(palette.historyButtonColor)
+                        .foregroundStyle(palette.buttonLabelOnColor)
 
                         Button("Restart Indexing") {
                             model.restartIndexing()
                         }
                         .buttonStyle(.bordered)
                         .tint(palette.copyButtonFill)
+                        .foregroundStyle(palette.buttonLabelOnColor)
 
                         Button("Retry Failed") {
                             model.retryFailedBackfill()
                         }
                         .buttonStyle(.bordered)
                         .tint(palette.historyButtonColor)
+                        .foregroundStyle(palette.buttonLabelOnColor)
                         .disabled(status.failed <= 0)
 
                         Spacer(minLength: 0)
@@ -326,7 +336,7 @@ public struct AlbumControlView: View {
                             .progressViewStyle(.linear)
                             .tint(palette.copyButtonFill)
 
-                        Text("Computed \(computed)/\(total) • Autofilled \(status.autofilled) • Missing \(status.missing) • Failed \(status.failed) • Queued \(status.queued) • Inflight \(status.inflight)")
+                        Text("Computed \(computed)/\(total) (\(computedPercent)%) • Autofilled \(status.autofilled) • Missing \(status.missing) • Failed \(status.failed) • Queued \(status.queued) • Inflight \(status.inflight)")
                             .font(.caption2)
                             .foregroundStyle(palette.panelSecondaryText)
                     } else {
@@ -363,6 +373,7 @@ public struct AlbumControlView: View {
                 Button("Absorb Now") { model.requestAbsorbNow() }
                     .buttonStyle(.bordered)
                     .tint(palette.copyButtonFill)
+                    .foregroundStyle(palette.buttonLabelOnColor)
             }
             .font(.footnote)
 
@@ -376,6 +387,7 @@ public struct AlbumControlView: View {
             }
             .buttonStyle(.bordered)
             .tint(palette.historyButtonColor)
+            .foregroundStyle(palette.buttonLabelOnColor)
         }
     }
 
@@ -401,6 +413,7 @@ public struct AlbumControlView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(palette.historyButtonColor)
+                .foregroundStyle(palette.buttonLabelOnColor)
                 .disabled(model.currentAssetID == nil)
             }
             .font(.footnote)
@@ -411,6 +424,7 @@ public struct AlbumControlView: View {
                     .buttonStyle(.bordered)
                     .disabled(!model.memoryPrevEnabled)
                     .tint(palette.copyButtonFill)
+                    .foregroundStyle(palette.buttonLabelOnColor)
 
                 Text(model.memoryLabel.isEmpty ? " " : model.memoryLabel)
                     .font(.caption)
@@ -421,6 +435,7 @@ public struct AlbumControlView: View {
                     .buttonStyle(.bordered)
                     .disabled(!model.memoryNextEnabled)
                     .tint(palette.copyButtonFill)
+                    .foregroundStyle(palette.buttonLabelOnColor)
 
                 Spacer(minLength: 0)
             }
@@ -498,7 +513,7 @@ public struct AlbumControlView: View {
                     .padding(.horizontal, 14)
             }
             .buttonStyle(.borderedProminent)
-            .tint(palette.openButtonColor)
+            .tint(palette.historyButtonColor)
             .foregroundStyle(palette.buttonLabelOnColor)
             .disabled(model.currentAssetID == nil)
 

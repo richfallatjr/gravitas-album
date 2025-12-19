@@ -19,7 +19,7 @@ public final class AlbumModel: ObservableObject {
 
     // MARK: Hub state (required)
 
-    @Published public var panelMode: AlbumPanelMode = .recommends {
+    @Published public var panelMode: AlbumPanelMode = .memories {
         didSet {
             guard panelMode != oldValue else { return }
             if panelMode == .memories {

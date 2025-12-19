@@ -14,6 +14,7 @@ public struct AlbumSettingsSheet: View {
         let status = model.backfillStatus
         let total = max(0, status.totalAssets)
         let computed = max(0, status.computed)
+        let computedPercent = total > 0 ? Int((Double(computed) / Double(total) * 100).rounded()) : 0
 
         return VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
@@ -25,6 +26,7 @@ public struct AlbumSettingsSheet: View {
                 Button("Done") { dismiss() }
                     .buttonStyle(.bordered)
                     .tint(palette.historyButtonColor)
+                    .foregroundStyle(palette.buttonLabelOnColor)
             }
 
             GroupBox {
@@ -37,7 +39,7 @@ public struct AlbumSettingsSheet: View {
                             .progressViewStyle(.linear)
                             .tint(palette.copyButtonFill)
 
-                        Text("Computed \(computed)/\(total) • Autofilled \(status.autofilled) • Missing \(status.missing) • Failed \(status.failed)")
+                        Text("Computed \(computed)/\(total) (\(computedPercent)%) • Autofilled \(status.autofilled) • Missing \(status.missing) • Failed \(status.failed)")
                             .font(.caption2)
                             .foregroundStyle(palette.panelSecondaryText)
                     } else {
@@ -63,18 +65,21 @@ public struct AlbumSettingsSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(palette.historyButtonColor)
+                        .foregroundStyle(palette.buttonLabelOnColor)
 
                         Button("Restart Indexing") {
                             model.restartIndexing()
                         }
                         .buttonStyle(.bordered)
                         .tint(palette.copyButtonFill)
+                        .foregroundStyle(palette.buttonLabelOnColor)
 
                         Button("Retry Failed") {
                             model.retryFailedBackfill()
                         }
                         .buttonStyle(.bordered)
                         .tint(palette.historyButtonColor)
+                        .foregroundStyle(palette.buttonLabelOnColor)
                         .disabled(status.failed <= 0)
 
                         Button("Apply Autofill") {
@@ -82,6 +87,7 @@ public struct AlbumSettingsSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(palette.copyButtonFill)
+                        .foregroundStyle(palette.buttonLabelOnColor)
 
                         Spacer(minLength: 0)
 
@@ -101,6 +107,7 @@ public struct AlbumSettingsSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(palette.historyButtonColor)
+                        .foregroundStyle(palette.buttonLabelOnColor)
                         .disabled(isUnhidingAll)
 
                         if isUnhidingAll {
