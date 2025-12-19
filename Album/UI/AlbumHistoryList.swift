@@ -8,6 +8,8 @@ public struct AlbumHistoryList: View {
     public let currentAssetID: String?
     public let onSelect: (String) -> Void
     @EnvironmentObject private var model: AlbumModel
+    @State private var lastAutoFocusedAssetID: String? = nil
+    @State private var lastHistoryCount: Int = 0
 
     public init(
         historyAssetIDs: [String],
@@ -47,39 +49,69 @@ public struct AlbumHistoryList: View {
             Text("History")
                 .font(.headline)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    if !recommendationsToShow.isEmpty {
-                        SectionHeader(title: "Recommended")
-                        ForEach(recommendationsToShow, id: \.self) { id in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        if !recommendationsToShow.isEmpty {
+                            SectionHeader(title: "Recommended")
+                            ForEach(recommendationsToShow, id: \.self) { id in
+                                HistoryRow(
+                                    assetID: id,
+                                    isActive: id == currentAssetID,
+                                    isAINext: aiNextAssetIDs.contains(id),
+                                    kind: .recommendation,
+                                    feedback: feedbackByAssetID[id],
+                                    onSelect: { onSelect(id) }
+                                )
+                                .id(id)
+                            }
+                        }
+
+                        SectionHeader(title: "Absorbed")
+                        ForEach(historyAssetIDs.reversed(), id: \.self) { id in
                             HistoryRow(
                                 assetID: id,
                                 isActive: id == currentAssetID,
                                 isAINext: aiNextAssetIDs.contains(id),
-                                kind: .recommendation,
+                                kind: .history,
                                 feedback: feedbackByAssetID[id],
                                 onSelect: { onSelect(id) }
                             )
+                            .id(id)
                         }
                     }
-
-                    SectionHeader(title: "Absorbed")
-                    ForEach(historyAssetIDs.reversed(), id: \.self) { id in
-                        HistoryRow(
-                            assetID: id,
-                            isActive: id == currentAssetID,
-                            isAINext: aiNextAssetIDs.contains(id),
-                            kind: .history,
-                            feedback: feedbackByAssetID[id],
-                            onSelect: { onSelect(id) }
-                        )
-                    }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
+                .onAppear {
+                    lastHistoryCount = historyAssetIDs.count
+                    guard let id = historyAssetIDs.last else { return }
+                    focusHistory(assetID: id, proxy: proxy, animated: false)
+                }
+                .onChange(of: historyAssetIDs) { newIDs in
+                    defer { lastHistoryCount = newIDs.count }
+                    guard newIDs.count > lastHistoryCount else { return }
+                    guard let id = newIDs.last else { return }
+                    focusHistory(assetID: id, proxy: proxy, animated: true)
+                }
             }
         }
         .foregroundStyle(palette.panelPrimaryText)
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func focusHistory(assetID: String, proxy: ScrollViewProxy, animated: Bool) {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        guard lastAutoFocusedAssetID != id else { return }
+        lastAutoFocusedAssetID = id
+
+        if animated {
+            withAnimation(.easeInOut(duration: 0.28)) {
+                proxy.scrollTo(id, anchor: .top)
+            }
+        } else {
+            proxy.scrollTo(id, anchor: .top)
+        }
     }
 
     private struct SectionHeader: View {

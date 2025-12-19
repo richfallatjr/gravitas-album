@@ -44,7 +44,7 @@ public final class AlbumModel: ObservableObject {
             guard let item = currentItem else { return }
 
             ensureVisionSummary(for: item.id, reason: "current_item", priority: .userInitiated)
-            appendToHistory(assetID: item.id)
+            appendToHistoryIfNew(assetID: item.id)
 
             if panelMode == .memories {
                 memoryAnchorID = item.id
@@ -1080,16 +1080,15 @@ public final class AlbumModel: ObservableObject {
 
     @discardableResult
     public func appendToHistoryIfNew(assetID: String) -> Bool {
-        guard !historyAssetIDs.contains(assetID) else { return false }
-        historyAssetIDs.append(assetID)
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return false }
+        guard !historyAssetIDs.contains(id) else { return false }
+        historyAssetIDs.append(id)
         return true
     }
 
     public func appendToHistory(assetID: String) {
-        if let idx = historyAssetIDs.firstIndex(of: assetID) {
-            historyAssetIDs.remove(at: idx)
-        }
-        historyAssetIDs.append(assetID)
+        _ = appendToHistoryIfNew(assetID: assetID)
     }
 
     public func clearHistory() {
