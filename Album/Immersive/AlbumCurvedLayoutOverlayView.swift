@@ -23,6 +23,8 @@ struct AlbumCurvedWallPanelAttachmentView: View {
     @State private var isLoadingVideo: Bool = false
     @State private var showHideConfirmation: Bool = false
 
+    private let showActionStrip: Bool = false
+
     private let panelWidthPoints: CGFloat = 620
     private let horizontalPaddingPoints: CGFloat = 4
     private let verticalPaddingPoints: CGFloat = 4
@@ -35,17 +37,19 @@ struct AlbumCurvedWallPanelAttachmentView: View {
         let asset = model.asset(for: assetID)
         let innerWidth = max(panelWidthPoints - (horizontalPaddingPoints * 2), 240)
         let contentHeight = max(1, CGFloat(viewHeightPoints) - (verticalPaddingPoints * 2))
-        let mediaHeight = max(1, contentHeight - actionRowHeightPoints - actionRowSpacingPoints)
+        let actionRowHeight = showActionStrip ? actionRowHeightPoints : 0
+        let actionRowSpacing = showActionStrip ? actionRowSpacingPoints : 0
+        let mediaHeight = max(1, contentHeight - actionRowHeight - actionRowSpacing)
 
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(Color(.sRGB, white: 0.04, opacity: 0.95))
                 .overlay(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(isSelected ? Color.accentColor.opacity(0.9) : Color.white.opacity(0.14), lineWidth: isSelected ? 2 : 1)
+                        .strokeBorder(isSelected ? model.palette.historyButtonColor : Color.white.opacity(0.14), lineWidth: isSelected ? 2 : 1)
                 )
 
-            VStack(alignment: .center, spacing: actionRowSpacingPoints) {
+            VStack(alignment: .center, spacing: actionRowSpacing) {
                 ZStack {
                     if asset?.mediaType == .video, let player {
                         VideoPlayer(player: player)
@@ -81,12 +85,18 @@ struct AlbumCurvedWallPanelAttachmentView: View {
                 .frame(width: innerWidth, height: mediaHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                actionStrip(width: innerWidth)
+                if showActionStrip {
+                    actionStrip(width: innerWidth)
+                }
             }
             .padding(.horizontal, horizontalPaddingPoints)
             .padding(.vertical, verticalPaddingPoints)
         }
         .frame(width: panelWidthPoints, height: CGFloat(viewHeightPoints))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.currentAssetID = assetID
+        }
         .onDisappear {
             player?.pause()
             player = nil
@@ -217,7 +227,7 @@ struct AlbumCurvedWallTileAttachmentView: View {
         .background(.black.opacity(0.06), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(isSelected ? Color.accentColor : Color.white.opacity(0.12), lineWidth: isSelected ? 2 : 1)
+                .strokeBorder(isSelected ? model.palette.historyButtonColor : Color.white.opacity(0.12), lineWidth: isSelected ? 2 : 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .confirmationDialog(

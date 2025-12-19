@@ -82,7 +82,8 @@ public struct AlbumImmersiveRootView: View {
         .simultaneousGesture(
             TapGesture()
                 .targetedToAnyEntity()
-                .onEnded { value in scene.handleTap(on: value.entity, model: sim) }
+                .onEnded { value in scene.handleTap(on: value.entity, model: sim) },
+            including: .gesture
         )
         .onChange(of: sim.absorbNowRequestID) {
             Task { @MainActor in

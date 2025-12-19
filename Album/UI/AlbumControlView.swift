@@ -25,6 +25,9 @@ public struct AlbumControlView: View {
     @State private var assetLimit: Int = 300
     @State private var presentedSheet: PresentedSheet? = nil
     @State private var immersiveOpenStatus: String? = nil
+    @State private var showQuitConfirmation: Bool = false
+    @State private var showHideConfirmation: Bool = false
+    @State private var pendingHideAssetID: String? = nil
 
     public init() {}
 
@@ -500,29 +503,37 @@ public struct AlbumControlView: View {
             .disabled(model.currentAssetID == nil)
 
             Button {
-                AlbumLog.ui.info("Quit pressed; tearing down immersive + windows then exiting")
-                let popoutIDs = model.poppedAssetIDs
-                model.shutdownForQuit()
-
-                Task.detached(priority: .userInitiated) {
-                    try? await Task.sleep(nanoseconds: 350_000_000)
-                    exit(0)
-                }
-
-                UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
-                Task { @MainActor in
-                    let result = await dismissImmersiveSpace()
-                    AlbumLog.immersive.info("dismissImmersiveSpace result: \(String(describing: result), privacy: .public)")
-
-                    dismissWindow(id: "album-scene-manager")
-                    for assetID in popoutIDs {
-                        dismissWindow(value: AlbumPopOutPayload(assetID: assetID))
+                pendingHideAssetID = model.currentAssetID
+                showHideConfirmation = true
+            } label: {
+                Image(systemName: "trash.fill")
+                    .font(.title3.weight(.semibold))
+                    .padding(.horizontal, 14)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(palette.openButtonColor)
+            .foregroundStyle(palette.buttonLabelOnColor)
+            .disabled(model.currentAssetID == nil)
+            .confirmationDialog(
+                "Hide this image?",
+                isPresented: $showHideConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Hide", role: .destructive) {
+                    if let id = pendingHideAssetID {
+                        model.hideAsset(id)
                     }
-                    dismissWindow(id: "album-control")
-
-                    try? await Task.sleep(nanoseconds: 250_000_000)
-                    exit(0)
+                    pendingHideAssetID = nil
                 }
+                Button("Cancel", role: .cancel) {
+                    pendingHideAssetID = nil
+                }
+            } message: {
+                Text("Are you sure you want to hide this from view? You will no longer see this image.")
+            }
+
+            Button {
+                showQuitConfirmation = true
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.title3.weight(.semibold))
@@ -531,6 +542,40 @@ public struct AlbumControlView: View {
             .buttonStyle(.borderedProminent)
             .tint(palette.openButtonColor)
             .foregroundStyle(palette.buttonLabelOnColor)
+            .confirmationDialog(
+                "Quit Gravitas Album?",
+                isPresented: $showQuitConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Quit", role: .destructive) {
+                    AlbumLog.ui.info("Quit pressed; tearing down immersive + windows then exiting")
+                    let popoutIDs = model.poppedAssetIDs
+                    model.shutdownForQuit()
+
+                    Task.detached(priority: .userInitiated) {
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        exit(0)
+                    }
+
+                    UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
+                    Task { @MainActor in
+                        let result = await dismissImmersiveSpace()
+                        AlbumLog.immersive.info("dismissImmersiveSpace result: \(String(describing: result), privacy: .public)")
+
+                        dismissWindow(id: "album-scene-manager")
+                        for assetID in popoutIDs {
+                            dismissWindow(value: AlbumPopOutPayload(assetID: assetID))
+                        }
+                        dismissWindow(id: "album-control")
+
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        exit(0)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Any ongoing processing or playback will stop.")
+            }
         }
         .padding(.bottom, 26)
         .padding(.trailing, 26)
