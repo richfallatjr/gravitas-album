@@ -656,7 +656,9 @@ public final class AlbumModel: ObservableObject {
         sendThumb(feedback, assetID: id)
     }
 
-    private var curvedWallWindowSize: Int { 10 }
+    private var curvedWallMaxColumns: Int { 8 }
+    private var curvedWallColumnMaxHeightMeters: Float { 1.8 }
+    private var curvedWallColumnSpacingMeters: Float { 0.001 }
     private var curvedWallPointsPerMeter: Double { 780 }
 
     private static let curvedWallRecommendsPlacementID = UUID(uuidString: "D2DCA22B-0D3E-4D48-9A6B-3B0D2D7E7A1A")!
@@ -709,27 +711,126 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
-    private func curvedWallCurrentPageIndex(for placementID: UUID, total: Int) -> Int {
+    private struct CurvedWallPredictedPanelMetrics: Sendable {
+        var viewHeightPoints: Double
+        var heightMeters: Float
+    }
+
+    private func curvedWallPredictedPanelMetrics(assetID: String) -> CurvedWallPredictedPanelMetrics {
+        let panelWidthPoints: Double = 620
+        let horizontalPaddingPoints: Double = 4
+        let innerWidth = max(panelWidthPoints - (horizontalPaddingPoints * 2), 240)
+        let minHeight: Double = 220
+        let panelVerticalPaddingPoints: Double = 8
+
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return CurvedWallPredictedPanelMetrics(viewHeightPoints: 0, heightMeters: 0) }
+
+        let defaultMediaHeight = max(minHeight, innerWidth * 0.6)
+        guard let asset = asset(for: id) else {
+            let viewHeightPoints = defaultMediaHeight + panelVerticalPaddingPoints
+            let heightMeters = Float(viewHeightPoints / curvedWallPointsPerMeter)
+            return CurvedWallPredictedPanelMetrics(viewHeightPoints: viewHeightPoints, heightMeters: heightMeters)
+        }
+
+        let w = Double(asset.pixelWidth ?? 0)
+        let h = Double(asset.pixelHeight ?? 0)
+        let mediaHeight: Double = {
+            guard w > 0, h > 0 else { return defaultMediaHeight }
+
+            let aspect = h / w
+            var computed = innerWidth * aspect
+            if aspect <= 1 {
+                if computed < minHeight { computed = minHeight }
+            } else {
+                computed = min(computed, innerWidth * 1.8)
+            }
+            return computed
+        }()
+
+        let viewHeightPoints = mediaHeight + panelVerticalPaddingPoints
+        let heightMeters = Float(viewHeightPoints / curvedWallPointsPerMeter)
+        return CurvedWallPredictedPanelMetrics(viewHeightPoints: viewHeightPoints, heightMeters: heightMeters)
+    }
+
+    private func curvedWallPageStartIndices(for assetIDs: [String]) -> [Int] {
+        let maxColumns = max(1, curvedWallMaxColumns)
+        let maxHeight = max(0, curvedWallColumnMaxHeightMeters)
+        let spacing = max(0, curvedWallColumnSpacingMeters)
+
+        guard !assetIDs.isEmpty else { return [] }
+
+        var starts: [Int] = [0]
+        starts.reserveCapacity(max(1, assetIDs.count / 12))
+
+        var idx = 0
+        while idx < assetIDs.count {
+            var columnsUsed = 1
+            var currentHeight: Float = 0
+            var isFirstInColumn = true
+
+            while idx < assetIDs.count {
+                let height = max(0, curvedWallPredictedPanelMetrics(assetID: assetIDs[idx]).heightMeters)
+
+                if isFirstInColumn {
+                    currentHeight = height
+                    isFirstInColumn = false
+                    idx += 1
+                    continue
+                }
+
+                let proposed = currentHeight + spacing + height
+                if proposed > maxHeight {
+                    columnsUsed += 1
+                    if columnsUsed > maxColumns {
+                        starts.append(idx)
+                        break
+                    }
+                    currentHeight = height
+                    isFirstInColumn = false
+                    idx += 1
+                } else {
+                    currentHeight = proposed
+                    idx += 1
+                }
+            }
+        }
+
+        return starts
+    }
+
+    private func curvedWallPageIndex(for itemIndex: Int, pageStarts: [Int]) -> Int {
+        guard !pageStarts.isEmpty else { return 0 }
+        let target = max(0, itemIndex)
+
+        var result = 0
+        for (idx, start) in pageStarts.enumerated() {
+            if start <= target {
+                result = idx
+            } else {
+                break
+            }
+        }
+        return result
+    }
+
+    private func curvedWallMaxPageIndex(for assetIDs: [String]) -> Int {
+        let starts = curvedWallPageStartIndices(for: assetIDs)
+        return max(0, starts.count - 1)
+    }
+
+    private func curvedWallCurrentPageIndex(for placementID: UUID, maxIndex: Int) -> Int {
         let rawIndex = curvedWallPageWindows[placementID] ?? 0
-        let maxIndex = curvedWallMaxPageIndex(total: total)
-        return max(0, min(rawIndex, maxIndex))
-    }
-
-    private func curvedWallCurrentPageStart(for placementID: UUID, total: Int) -> Int {
-        let index = curvedWallCurrentPageIndex(for: placementID, total: total)
-        return index * curvedWallWindowSize
-    }
-
-    private func curvedWallMaxPageIndex(total: Int) -> Int {
-        return max(0, (total - 1) / curvedWallWindowSize)
+        let clampedMax = max(0, maxIndex)
+        return max(0, min(rawIndex, clampedMax))
     }
 
     public var curvedWallCanPageBack: Bool {
         guard let placementID = curvedWallPlacementID else { return false }
         let ids = curvedWallAllAssetIDsForPaging
-        let total = ids.count
-        guard total > 0 else { return false }
-        let index = curvedWallCurrentPageIndex(for: placementID, total: total)
+        guard !ids.isEmpty else { return false }
+        let maxIndex = curvedWallMaxPageIndex(for: ids)
+        let index = curvedWallCurrentPageIndex(for: placementID, maxIndex: maxIndex)
         if panelMode == .memories {
             return index > 0 || memoryPrevEnabled
         }
@@ -739,10 +840,9 @@ public final class AlbumModel: ObservableObject {
     public var curvedWallCanPageForward: Bool {
         guard let placementID = curvedWallPlacementID else { return false }
         let ids = curvedWallAllAssetIDsForPaging
-        let total = ids.count
-        guard total > 0 else { return false }
-        let index = curvedWallCurrentPageIndex(for: placementID, total: total)
-        let maxIndex = curvedWallMaxPageIndex(total: total)
+        guard !ids.isEmpty else { return false }
+        let maxIndex = curvedWallMaxPageIndex(for: ids)
+        let index = curvedWallCurrentPageIndex(for: placementID, maxIndex: maxIndex)
         if panelMode == .memories {
             return index < maxIndex || memoryNextEnabled
         }
@@ -753,8 +853,13 @@ public final class AlbumModel: ObservableObject {
         guard let placementID = curvedWallPlacementID else { return [] }
         let ids = curvedWallAllAssetIDsForPaging
         guard !ids.isEmpty else { return [] }
-        let start = curvedWallCurrentPageStart(for: placementID, total: ids.count)
-        let end = min(start + curvedWallWindowSize, ids.count)
+
+        let pageStarts = curvedWallPageStartIndices(for: ids)
+        let maxIndex = max(0, pageStarts.count - 1)
+        let pageIndex = curvedWallCurrentPageIndex(for: placementID, maxIndex: maxIndex)
+        let start = pageStarts.indices.contains(pageIndex) ? pageStarts[pageIndex] : 0
+        let end = pageStarts.indices.contains(pageIndex + 1) ? pageStarts[pageIndex + 1] : ids.count
+        guard start >= 0, end >= start, end <= ids.count else { return [] }
         return Array(ids[start..<end])
     }
 
@@ -762,37 +867,10 @@ public final class AlbumModel: ObservableObject {
         let ids = curvedWallVisibleAssetIDs
         guard !ids.isEmpty else { return [] }
 
-        let panelWidthPoints: Double = 620
-        let horizontalPaddingPoints: Double = 4
-        let innerWidth = max(panelWidthPoints - (horizontalPaddingPoints * 2), 240)
-        let minHeight: Double = 220
-        let panelVerticalPaddingPoints: Double = 8
-
         return ids.compactMap { id in
             guard let asset = asset(for: id) else { return nil }
-
-            let w = Double(asset.pixelWidth ?? 0)
-            let h = Double(asset.pixelHeight ?? 0)
-
-            let mediaHeight: Double = {
-                guard w > 0, h > 0 else {
-                    return max(minHeight, innerWidth * 0.6)
-                }
-
-                let aspect = h / w
-                var computed = innerWidth * aspect
-                if aspect <= 1 {
-                    if computed < minHeight { computed = minHeight }
-                } else {
-                    computed = min(computed, innerWidth * 1.8)
-                }
-                return computed
-            }()
-
-            let viewHeightPointsUnclamped = mediaHeight + panelVerticalPaddingPoints
-            let viewHeightPoints = viewHeightPointsUnclamped
-            let heightMeters = Float(viewHeightPoints / curvedWallPointsPerMeter)
-            return CurvedWallPanel(assetID: id, heightMeters: heightMeters, viewHeightPoints: viewHeightPoints)
+            let predicted = curvedWallPredictedPanelMetrics(assetID: id)
+            return CurvedWallPanel(assetID: asset.id, heightMeters: predicted.heightMeters, viewHeightPoints: predicted.viewHeightPoints)
         }
     }
 
@@ -803,7 +881,8 @@ public final class AlbumModel: ObservableObject {
                 let ids = curvedWallMemoriesAllAssetIDs
                 if let anchorID = memoryAnchorID?.trimmingCharacters(in: .whitespacesAndNewlines),
                    let anchorIndex = ids.firstIndex(of: anchorID) {
-                    curvedWallPageWindows[placementID] = anchorIndex / curvedWallWindowSize
+                    let starts = curvedWallPageStartIndices(for: ids)
+                    curvedWallPageWindows[placementID] = curvedWallPageIndex(for: anchorIndex, pageStarts: starts)
                 } else {
                     curvedWallPageWindows[placementID] = 0
                 }
@@ -875,7 +954,8 @@ public final class AlbumModel: ObservableObject {
                 return max(0, total - 1)
             }()
 
-            let jumpPage = jumpIndex / curvedWallWindowSize
+            let starts = curvedWallPageStartIndices(for: all)
+            let jumpPage = curvedWallPageIndex(for: jumpIndex, pageStarts: starts)
             curvedWallPageWindows[placementID] = jumpPage
             AlbumLog.model.info("CurvedWall dump anchor=\(anchorID, privacy: .public) neighbors=\(capped.count) dumps=\(self.curvedWallDumpPages.count) totalItems=\(total) jumpPage=\(jumpPage)")
         } else {
@@ -888,14 +968,14 @@ public final class AlbumModel: ObservableObject {
     public func curvedWallPageBack() {
         guard let placementID = curvedWallPlacementID else { return }
         let ids = curvedWallAllAssetIDsForPaging
-        let total = ids.count
-        guard total > 0 else { return }
+        guard !ids.isEmpty else { return }
 
-        let oldIndex = curvedWallCurrentPageIndex(for: placementID, total: total)
+        let maxIndex = curvedWallMaxPageIndex(for: ids)
+        let oldIndex = curvedWallCurrentPageIndex(for: placementID, maxIndex: maxIndex)
         if oldIndex > 0 {
             let newIndex = oldIndex - 1
             curvedWallPageWindows[placementID] = newIndex
-            AlbumLog.model.info("CurvedWall pageBack placement=\(placementID.uuidString, privacy: .public) page=\(oldIndex) -> \(newIndex) totalPages=\(self.curvedWallMaxPageIndex(total: total) + 1)")
+            AlbumLog.model.info("CurvedWall pageBack placement=\(placementID.uuidString, privacy: .public) page=\(oldIndex) -> \(newIndex) totalPages=\(maxIndex + 1)")
             curvedCanvasEnabled = true
             return
         }
@@ -903,26 +983,25 @@ public final class AlbumModel: ObservableObject {
         guard panelMode == .memories, memoryPrevEnabled else { return }
         memoryPrevPage()
         let updatedIDs = curvedWallMemoriesAllAssetIDs
-        let updatedTotal = updatedIDs.count
-        guard updatedTotal > 0 else { return }
-        let newIndex = curvedWallMaxPageIndex(total: updatedTotal)
+        guard !updatedIDs.isEmpty else { return }
+        let updatedMaxIndex = curvedWallMaxPageIndex(for: updatedIDs)
+        let newIndex = updatedMaxIndex
         curvedWallPageWindows[placementID] = newIndex
-        AlbumLog.model.info("CurvedWall pageBack (windowShift) placement=\(placementID.uuidString, privacy: .public) page=\(oldIndex) -> \(newIndex) totalPages=\(self.curvedWallMaxPageIndex(total: updatedTotal) + 1) memoryStart=\(self.memoryPageStartIndex)")
+        AlbumLog.model.info("CurvedWall pageBack (windowShift) placement=\(placementID.uuidString, privacy: .public) page=\(oldIndex) -> \(newIndex) totalPages=\(updatedMaxIndex + 1) memoryStart=\(self.memoryPageStartIndex)")
         curvedCanvasEnabled = true
     }
 
     public func curvedWallPageForward() {
         guard let placementID = curvedWallPlacementID else { return }
         let ids = curvedWallAllAssetIDsForPaging
-        let total = ids.count
-        guard total > 0 else { return }
+        guard !ids.isEmpty else { return }
 
-        let oldIndex = curvedWallCurrentPageIndex(for: placementID, total: total)
-        let maxIndex = curvedWallMaxPageIndex(total: total)
+        let maxIndex = curvedWallMaxPageIndex(for: ids)
+        let oldIndex = curvedWallCurrentPageIndex(for: placementID, maxIndex: maxIndex)
         if oldIndex < maxIndex {
             let newIndex = oldIndex + 1
             curvedWallPageWindows[placementID] = newIndex
-            AlbumLog.model.info("CurvedWall pageForward placement=\(placementID.uuidString, privacy: .public) page=\(oldIndex) -> \(newIndex) totalPages=\(self.curvedWallMaxPageIndex(total: total) + 1)")
+            AlbumLog.model.info("CurvedWall pageForward placement=\(placementID.uuidString, privacy: .public) page=\(oldIndex) -> \(newIndex) totalPages=\(maxIndex + 1)")
             curvedCanvasEnabled = true
             return
         }
@@ -930,7 +1009,8 @@ public final class AlbumModel: ObservableObject {
         guard panelMode == .memories, memoryNextEnabled else { return }
         memoryNextPage()
         curvedWallPageWindows[placementID] = 0
-        AlbumLog.model.info("CurvedWall pageForward (windowShift) placement=\(placementID.uuidString, privacy: .public) page=\(oldIndex) -> 0 totalPages=\(self.curvedWallMaxPageIndex(total: max(1, self.curvedWallMemoriesAllAssetIDs.count)) + 1) memoryStart=\(self.memoryPageStartIndex)")
+        let updatedMaxIndex = curvedWallMaxPageIndex(for: curvedWallMemoriesAllAssetIDs)
+        AlbumLog.model.info("CurvedWall pageForward (windowShift) placement=\(placementID.uuidString, privacy: .public) page=\(oldIndex) -> 0 totalPages=\(updatedMaxIndex + 1) memoryStart=\(self.memoryPageStartIndex)")
         curvedCanvasEnabled = true
     }
 
@@ -1862,8 +1942,14 @@ public final class AlbumModel: ObservableObject {
 
         if resetToAnchor {
             let placementID = Self.curvedWallMemoriesPlacementID
-            let indexInWindow = max(0, min(groupSize - 1, anchorIndex - start))
-            curvedWallPageWindows[placementID] = max(0, indexInWindow / curvedWallWindowSize)
+            let ids = curvedWallMemoriesAllAssetIDs
+            if let anchorID = memoryAnchorID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               let idx = ids.firstIndex(of: anchorID) {
+                let starts = curvedWallPageStartIndices(for: ids)
+                curvedWallPageWindows[placementID] = curvedWallPageIndex(for: idx, pageStarts: starts)
+            } else {
+                curvedWallPageWindows[placementID] = 0
+            }
         }
     }
 

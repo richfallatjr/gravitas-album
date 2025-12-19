@@ -242,17 +242,24 @@ public struct AlbumCurvedLayoutView: View {
     private var pageControls: some View {
         let hasControls = (onPrevPage != nil) || (onNextPage != nil) || (pageLabel?.isEmpty == false)
         if hasControls {
+            let buttonSize: CGFloat = 62
+            let cornerRadius: CGFloat = 14
+            let backgroundShape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
             HStack(spacing: 12) {
                 Button {
                     onPrevPage?()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.headline.weight(.semibold))
-                        .frame(width: 44, height: 36)
+                        .font(.system(size: 26, weight: .black))
+                        .frame(width: buttonSize, height: buttonSize)
                 }
                 .buttonStyle(.plain)
                 .disabled(onPrevPage == nil)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(backgroundShape.fill(.black.opacity(0.06)))
+                .overlay {
+                    backgroundShape.strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                }
                 .opacity(onPrevPage == nil ? 0.35 : 1)
 
                 if let label = pageLabel, !label.isEmpty {
@@ -266,12 +273,15 @@ public struct AlbumCurvedLayoutView: View {
                     onNextPage?()
                 } label: {
                     Image(systemName: "chevron.right")
-                        .font(.headline.weight(.semibold))
-                        .frame(width: 44, height: 36)
+                        .font(.system(size: 26, weight: .black))
+                        .frame(width: buttonSize, height: buttonSize)
                 }
                 .buttonStyle(.plain)
                 .disabled(onNextPage == nil)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(backgroundShape.fill(.black.opacity(0.06)))
+                .overlay {
+                    backgroundShape.strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                }
                 .opacity(onNextPage == nil ? 0.35 : 1)
             }
             .padding(.bottom, 2)

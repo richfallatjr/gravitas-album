@@ -354,39 +354,31 @@ struct AlbumCurvedWallNavCardAttachmentView: View {
     let enabled: Bool
     let action: @MainActor () -> Void
 
-    private let sizePoints = CGSize(width: 240, height: 110)
+    private let sizePoints = CGSize(width: 118, height: 118)
     private let cornerRadius: CGFloat = 18
+    private let panelBackground = Color(.sRGB, white: 0.04, opacity: 0.95)
+    private let panelBorder = Color.white.opacity(0.14)
 
     var body: some View {
-        let label = direction == .prev ? "Prev" : "Next"
         let icon = direction == .prev ? "chevron.left" : "chevron.right"
 
         Button {
             guard enabled else { return }
             action()
         } label: {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.title2.weight(.semibold))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(label)
-                        .font(.headline)
-                    Text(enabled ? "Page" : "End")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .frame(width: sizePoints.width, height: sizePoints.height)
+            Image(systemName: icon)
+                .font(.system(size: 54, weight: .black))
+                .frame(width: sizePoints.width, height: sizePoints.height)
         }
         .buttonStyle(.plain)
-        .glassBackground(cornerRadius: cornerRadius)
+        .foregroundStyle(Color.white.opacity(0.95))
+        .background(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(panelBackground)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                .strokeBorder(panelBorder, lineWidth: 1)
         )
         .opacity(enabled ? 1.0 : 0.35)
     }
@@ -395,24 +387,27 @@ struct AlbumCurvedWallNavCardAttachmentView: View {
 struct AlbumCurvedWallCloseAttachmentView: View {
     let action: @MainActor () -> Void
 
-    private let sizePoints = CGSize(width: 240, height: 110)
+    private let sizePoints = CGSize(width: 118, height: 118)
     private let cornerRadius: CGFloat = 18
+    private let panelBackground = Color(.sRGB, white: 0.04, opacity: 0.95)
+    private let panelBorder = Color.white.opacity(0.14)
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 10) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title2)
-                Text("Close Layout")
-                    .font(.headline)
-            }
-            .frame(width: sizePoints.width, height: sizePoints.height)
+            Image(systemName: "xmark")
+                .font(.system(size: 46, weight: .black))
+                .frame(width: sizePoints.width, height: sizePoints.height)
         }
         .buttonStyle(.plain)
-        .glassBackground(cornerRadius: cornerRadius)
+        .foregroundStyle(Color.white.opacity(0.95))
+        .background(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(panelBackground)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                .strokeBorder(panelBorder, lineWidth: 1)
         )
+        .accessibilityLabel("Close layout")
     }
 }
