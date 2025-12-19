@@ -24,6 +24,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.gravitas.GravitasAlbum
+        DEVELOPMENT_TEAM: X7LJQ9VB44
         MARKETING_VERSION: 0.1
         CURRENT_PROJECT_VERSION: 1
 
@@ -38,3 +39,5 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         DEFINES_MODULE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.gravitas.CurvedLayoutKit
+        MARKETING_VERSION: 0.1
+        CURRENT_PROJECT_VERSION: 1

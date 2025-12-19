@@ -339,6 +339,11 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					28C048D4271BEF946E117CC7 = {
+						DevelopmentTeam = X7LJQ9VB44;
+					};
+				};
 			};
 			buildConfigurationList = 8C31BE0F3DF33735E3E061F6 /* Build configuration list for PBXProject "GravitasAlbum" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -465,6 +470,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.CurvedLayoutKit;
 				SDKROOT = xros;
 				SKIP_INSTALL = YES;
@@ -599,6 +605,7 @@
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -619,6 +626,7 @@
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -646,6 +654,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.CurvedLayoutKit;
 				SDKROOT = xros;
 				SKIP_INSTALL = YES;
