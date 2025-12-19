@@ -1,4 +1,0 @@
-framework module CurvedLayoutKit {
-  header "CurvedLayoutKit-Swift.h"
-  requires objc
-}

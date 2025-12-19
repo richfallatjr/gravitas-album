@@ -21,11 +21,12 @@ struct AlbumCurvedWallPanelAttachmentView: View {
     @State private var playerLooper: AVPlayerLooper? = nil
     @State private var currentVideoURL: URL? = nil
     @State private var isLoadingVideo: Bool = false
+    @State private var showHideConfirmation: Bool = false
 
     private let panelWidthPoints: CGFloat = 620
     private let horizontalPaddingPoints: CGFloat = 4
     private let verticalPaddingPoints: CGFloat = 4
-    private let actionRowHeightPoints: CGFloat = 44
+    private let actionRowHeightPoints: CGFloat = 66
     private let actionRowSpacingPoints: CGFloat = 4
     private let cornerRadius: CGFloat = 16
 
@@ -86,6 +87,18 @@ struct AlbumCurvedWallPanelAttachmentView: View {
             .padding(.vertical, verticalPaddingPoints)
         }
         .frame(width: panelWidthPoints, height: CGFloat(viewHeightPoints))
+        .confirmationDialog(
+            "Hide this image?",
+            isPresented: $showHideConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Hide", role: .destructive) {
+                model.hideAsset(assetID)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to hide this from view? You will no longer see this image.")
+        }
         .onDisappear {
             player?.pause()
             player = nil
@@ -147,7 +160,7 @@ struct AlbumCurvedWallPanelAttachmentView: View {
             }
 
             actionButton(icon: "trash.fill", fill: Color(red: 255.0/255.0, green: 97.0/255.0, blue: 136.0/255.0)) {
-                model.hideAsset(assetID)
+                showHideConfirmation = true
             }
 
             actionButton(icon: "rectangle.on.rectangle", fill: Color(red: 120.0/255.0, green: 220.0/255.0, blue: 232.0/255.0)) {
@@ -161,10 +174,10 @@ struct AlbumCurvedWallPanelAttachmentView: View {
     private func actionButton(icon: String, fill: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(Color.black.opacity(0.90))
-                .frame(width: 44, height: 44)
-                .background(fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .frame(width: 66, height: 66)
+                .background(fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -178,6 +191,7 @@ struct AlbumCurvedWallTileAttachmentView: View {
 
     @State private var image: AlbumImage? = nil
     @State private var isLoading: Bool = false
+    @State private var showHideConfirmation: Bool = false
 
     private let tileSizePoints = CGSize(width: 260, height: 340)
     private let cornerRadius: CGFloat = 18
@@ -206,6 +220,18 @@ struct AlbumCurvedWallTileAttachmentView: View {
                 .strokeBorder(isSelected ? Color.accentColor : Color.white.opacity(0.12), lineWidth: isSelected ? 2 : 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .confirmationDialog(
+            "Hide this image?",
+            isPresented: $showHideConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Hide", role: .destructive) {
+                model.hideAsset(assetID)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to hide this from view? You will no longer see this image.")
+        }
         .task(id: assetID) {
             await loadThumbnail()
         }
@@ -286,7 +312,7 @@ struct AlbumCurvedWallTileAttachmentView: View {
                 }
 
                 Button(role: .destructive) {
-                    model.hideAsset(assetID)
+                    showHideConfirmation = true
                 } label: {
                     Image(systemName: "eye.slash.fill")
                 }

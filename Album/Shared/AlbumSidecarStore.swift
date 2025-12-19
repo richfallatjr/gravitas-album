@@ -474,6 +474,57 @@ public actor AlbumSidecarStore {
         }
     }
 
+    public func unhideAll() async -> Int {
+        let urls: [URL]
+        do {
+            urls = try FileManager.default.contentsOfDirectory(
+                at: storeDirectoryURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            print("[AlbumSidecarStore] unhideAll list error:", error)
+            return 0
+        }
+
+        guard !urls.isEmpty else { return 0 }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+
+        let now = Date()
+        var changed = 0
+
+        for url in urls {
+            guard url.pathExtension.lowercased() == "json" else { continue }
+
+            do {
+                let data = try Data(contentsOf: url)
+                var record = try decoder.decode(AlbumSidecarRecord.self, from: data)
+                guard record.hidden else { continue }
+
+                record.hidden = false
+                record.updatedAt = now
+                record.schemaVersion = AlbumSidecarRecord.currentSchemaVersion
+                record.key = AlbumSidecarKey(source: record.key.source, id: record.key.id)
+
+                let normalizedKey = record.key
+                let output = try encoder.encode(record)
+                try output.write(to: url, options: [.atomic])
+                cache[normalizedKey] = record
+                changed += 1
+            } catch {
+                print("[AlbumSidecarStore] unhideAll error:", error)
+            }
+        }
+
+        return changed
+    }
+
     // MARK: Internals
 
     private func urlForKey(_ key: AlbumSidecarKey) -> URL {

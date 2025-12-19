@@ -4,6 +4,7 @@ public struct AlbumLayoutSheet: View {
     @EnvironmentObject private var model: AlbumModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
+    @State private var pendingHideID: String? = nil
 
     public init() {}
 
@@ -31,7 +32,7 @@ public struct AlbumLayoutSheet: View {
                             model.appendPoppedAsset(id)
                         },
                         onHide: { id in
-                            model.hideAsset(id)
+                            pendingHideID = id
                         },
                         onThumb: { feedback, id in
                             switch feedback {
@@ -49,6 +50,28 @@ public struct AlbumLayoutSheet: View {
             }
             .padding(18)
             .navigationTitle(model.panelMode == .recommends ? "Recommends" : "Memories")
+            .confirmationDialog(
+                "Hide this image?",
+                isPresented: Binding(
+                    get: { pendingHideID != nil },
+                    set: { isPresented in
+                        if !isPresented { pendingHideID = nil }
+                    }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Hide", role: .destructive) {
+                    guard let id = pendingHideID else { return }
+                    pendingHideID = nil
+                    model.hideAsset(id)
+                }
+
+                Button("Cancel", role: .cancel) {
+                    pendingHideID = nil
+                }
+            } message: {
+                Text("Are you sure you want to hide this from view? You will no longer see this image.")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }

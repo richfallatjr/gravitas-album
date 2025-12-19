@@ -4,6 +4,9 @@ public struct AlbumSettingsSheet: View {
     @EnvironmentObject private var model: AlbumModel
     @Environment(\.dismiss) private var dismiss
 
+    @State private var isUnhidingAll: Bool = false
+    @State private var unhideAllMessage: String? = nil
+
     public init() {}
 
     public var body: some View {
@@ -86,6 +89,33 @@ public struct AlbumSettingsSheet: View {
                             .font(.caption2)
                             .foregroundStyle(palette.panelSecondaryText)
                     }
+
+                    HStack(spacing: 10) {
+                        Button(isUnhidingAll ? "Unhiding…" : "Unhide All") {
+                            Task {
+                                isUnhidingAll = true
+                                let changed = await model.unhideAllAssets()
+                                isUnhidingAll = false
+                                unhideAllMessage = changed > 0 ? "Unhid \(changed) items." : "No hidden items found."
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(palette.historyButtonColor)
+                        .disabled(isUnhidingAll)
+
+                        if isUnhidingAll {
+                            ProgressView()
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+
+                    if let unhideAllMessage, !unhideAllMessage.isEmpty {
+                        Text(unhideAllMessage)
+                            .font(.caption2)
+                            .foregroundStyle(palette.panelSecondaryText)
+                            .lineLimit(2)
+                    }
                 }
                 .padding(8)
             }
@@ -123,4 +153,3 @@ public struct AlbumSettingsSheet: View {
         .foregroundStyle(palette.panelPrimaryText)
     }
 }
-

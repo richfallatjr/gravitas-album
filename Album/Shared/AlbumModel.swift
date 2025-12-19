@@ -725,9 +725,9 @@ public final class AlbumModel: ObservableObject {
         let innerWidth = max(panelWidthPoints - horizontalPaddingPoints, 240)
         let minHeight: Double = 220
         let panelVerticalPaddingPoints: Double = 8
-        let actionRowHeightPoints: Double = 44
+        let actionRowHeightPoints: Double = 66
         let actionRowSpacingPoints: Double = 4
-        let maxColumnHeightMeters: Double = 2.4
+        let maxColumnHeightMeters: Double = 1.8
         let pageSpacingMeters: Double = 0.001
 
         enum CurvedWallAspectBucket {
@@ -1108,6 +1108,21 @@ public final class AlbumModel: ObservableObject {
         if panelMode == .memories {
             rebuildMemoryWindow(resetToAnchor: false)
         }
+    }
+
+    @discardableResult
+    public func unhideAllAssets() async -> Int {
+        let changed = await sidecarStore.unhideAll()
+        hiddenIDs.removeAll()
+
+        if datasetSource == .demo {
+            loadDemoItems(count: max(1, lastAssetFetchCount))
+            return changed
+        }
+
+        let limit = max(1, lastAssetFetchCount > 0 ? lastAssetFetchCount : 300)
+        await loadItems(limit: limit, query: selectedQuery)
+        return changed
     }
 
     public func pushRecommendedAsset(_ assetID: String) {

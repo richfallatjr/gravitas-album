@@ -127,19 +127,19 @@ public struct AlbumImmersiveRootView: View {
     }
 }
 
-	@MainActor
-	private final class AlbumImmersiveSceneState {
-	    private var anchor: AnchorEntity?
-	    private var headAnchor: AnchorEntity?
-	    private var latestHeadTransform: Transform?
-	    private var initialHeadTransform: Transform?
-	    private var curvedWallAnchor: AnchorEntity?
-	    private var curvedWallSeedMatrix: simd_float4x4?
-	    private var pmns: [ModelEntity] = []
-	    private var balls: [ModelEntity] = []
-	    private var frameTask: Task<Void, Never>?
-	    private var lastCurvedWallLogSignature: String?
-	    private var lastCurvedWallAttachmentLogSignature: String?
+@MainActor
+private final class AlbumImmersiveSceneState {
+    private var anchor: AnchorEntity?
+    private var headAnchor: AnchorEntity?
+    private var latestHeadTransform: Transform?
+    private var initialHeadTransform: Transform?
+    private var curvedWallAnchor: AnchorEntity?
+    private var curvedWallSeedMatrix: simd_float4x4?
+    private var pmns: [ModelEntity] = []
+    private var balls: [ModelEntity] = []
+    private var frameTask: Task<Void, Never>?
+    private var lastCurvedWallLogSignature: String?
+    private var lastCurvedWallAttachmentLogSignature: String?
 
     private var lastTs: Date = Date()
     private var accum: Float = 0
@@ -179,45 +179,45 @@ public struct AlbumImmersiveRootView: View {
         frameTask?.cancel()
     }
 
-	    func stop() {
-	        frameTask?.cancel()
-	        frameTask = nil
-	        anchor = nil
-	        headAnchor = nil
-	        latestHeadTransform = nil
-	        initialHeadTransform = nil
-	        curvedWallAnchor = nil
-	        curvedWallSeedMatrix = nil
-	        pmns.removeAll(keepingCapacity: true)
-	        balls.removeAll(keepingCapacity: true)
-	        lastCurvedWallLogSignature = nil
-	        lastCurvedWallAttachmentLogSignature = nil
-	        lastTs = Date()
+    func stop() {
+        frameTask?.cancel()
+        frameTask = nil
+        anchor = nil
+        headAnchor = nil
+        latestHeadTransform = nil
+        initialHeadTransform = nil
+        curvedWallAnchor = nil
+        curvedWallSeedMatrix = nil
+        pmns.removeAll(keepingCapacity: true)
+        balls.removeAll(keepingCapacity: true)
+        lastCurvedWallLogSignature = nil
+        lastCurvedWallAttachmentLogSignature = nil
+        lastTs = Date()
         accum = 0
         nextPMN = 0
     }
 
-	    func ensureBuilt(in content: RealityViewContent, model: AlbumModel, anchorOffset: SIMD3<Float>) {
-	        if let head = headAnchor {
-	            if head.parent == nil {
-	                content.add(head)
-	            }
-	        } else {
-	            let head = AnchorEntity(.head)
-	            head.name = "album-head-anchor"
-	            headAnchor = head
-	            content.add(head)
-	        }
+    func ensureBuilt(in content: RealityViewContent, model: AlbumModel, anchorOffset: SIMD3<Float>) {
+        if let head = headAnchor {
+            if head.parent == nil {
+                content.add(head)
+            }
+        } else {
+            let head = AnchorEntity(.head)
+            head.name = "album-head-anchor"
+            headAnchor = head
+            content.add(head)
+        }
 
-	        updateHeadTransformCache()
-	        if initialHeadTransform == nil {
-	            initialHeadTransform = latestHeadTransform
-	        }
+        updateHeadTransformCache()
+        if initialHeadTransform == nil {
+            initialHeadTransform = latestHeadTransform
+        }
 
-	        if let existingAnchor = anchor {
-	            if existingAnchor.parent != nil {
-	                startFrameLoopIfNeeded(model: model)
-	                return
+        if let existingAnchor = anchor {
+            if existingAnchor.parent != nil {
+                startFrameLoopIfNeeded(model: model)
+                return
             }
             AlbumLog.immersive.info("World anchor stale; rebuilding from head pose")
             anchor = nil
@@ -239,13 +239,13 @@ public struct AlbumImmersiveRootView: View {
         startFrameLoopIfNeeded(model: model)
     }
 
-	    private func updateHeadTransformCache() {
-	        guard let headAnchor else { return }
-	        latestHeadTransform = Transform(matrix: headAnchor.transformMatrix(relativeTo: nil))
-	        if initialHeadTransform == nil {
-	            initialHeadTransform = latestHeadTransform
-	        }
-	    }
+    private func updateHeadTransformCache() {
+        guard let headAnchor else { return }
+        latestHeadTransform = Transform(matrix: headAnchor.transformMatrix(relativeTo: nil))
+        if initialHeadTransform == nil {
+            initialHeadTransform = latestHeadTransform
+        }
+    }
 
     private func seededWorldAnchorTransform(anchorOffset: SIMD3<Float>) -> Transform {
         let head = latestHeadTransform ?? Transform(matrix: headAnchor?.transformMatrix(relativeTo: nil) ?? matrix_identity_float4x4)
@@ -449,16 +449,72 @@ public struct AlbumImmersiveRootView: View {
         let neighborGapMeters: Float = 0.0005
         let panelDepthOffset: Float = 0.03
         let pageSpacing: Float = 0.001
-        let columnMaxHeight: Float = 2.4
+        let columnMaxHeight: Float = 1.8
 
         let pages = panels
-        let layoutColumns = curvedWallColumns(for: pages, maxColumnHeight: columnMaxHeight, pageSpacing: pageSpacing)
-        let columns = layoutColumns.columns
-        let heights = layoutColumns.heights
+        func measuredExtentsMeters(for entity: Entity) -> SIMD3<Float>? {
+            let bounds = entity.visualBounds(recursive: true, relativeTo: entity)
+            let extents = bounds.extents
+            guard extents.x.isFinite, extents.y.isFinite, extents.z.isFinite else { return nil }
+            guard extents.x > 0, extents.y > 0 else { return nil }
+            return extents
+        }
+
+        var measuredHeights: [Float] = Array(repeating: 0, count: pages.count)
+        var measuredMaxWidth: Float = 0
+
+        for (idx, page) in pages.enumerated() {
+            let attachmentID = AlbumCurvedWallAttachmentID.tile(page.assetID)
+            guard let entity = attachments.entity(for: attachmentID) else {
+                measuredHeights[idx] = max(0, page.heightMeters)
+                continue
+            }
+
+            if let extents = measuredExtentsMeters(for: entity) {
+                measuredHeights[idx] = extents.y
+                measuredMaxWidth = max(measuredMaxWidth, extents.x)
+            } else {
+                measuredHeights[idx] = max(0, page.heightMeters)
+            }
+        }
+
+        var columns: [[Int]] = []
+        var heights: [Float] = []
+        columns.reserveCapacity(6)
+        heights.reserveCapacity(6)
+
+        var currentColumn: [Int] = []
+        var currentHeight: Float = 0
+
+        for (index, pageHeightRaw) in measuredHeights.enumerated() {
+            let pageHeight = max(0, pageHeightRaw)
+            if currentColumn.isEmpty {
+                currentColumn = [index]
+                currentHeight = pageHeight
+                continue
+            }
+
+            let proposed = currentHeight + pageSpacing + pageHeight
+            if proposed > columnMaxHeight {
+                columns.append(currentColumn)
+                heights.append(currentHeight)
+                currentColumn = [index]
+                currentHeight = pageHeight
+            } else {
+                currentColumn.append(index)
+                currentHeight = proposed
+            }
+        }
+
+        if !currentColumn.isEmpty {
+            columns.append(currentColumn)
+            heights.append(currentHeight)
+        }
 
         let columnCount = columns.count
 
-        let panelWidthMeters = panelWidthPoints / pointsPerMeter
+        let fallbackPanelWidthMeters = panelWidthPoints / pointsPerMeter
+        let panelWidthMeters = measuredMaxWidth > 0 ? measuredMaxWidth : fallbackPanelWidthMeters
         let desiredChord = panelWidthMeters + neighborGapMeters
         let layout = curvedWallArcLayout(count: columnCount, desiredChord: desiredChord)
 
@@ -478,11 +534,12 @@ public struct AlbumImmersiveRootView: View {
             for (itemOffset, pageIndex) in column.enumerated() {
                 guard pageIndex >= 0, pageIndex < pages.count else { continue }
                 let page = pages[pageIndex]
+                let pageHeight = pageIndex < measuredHeights.count ? max(0, measuredHeights[pageIndex]) : max(0, page.heightMeters)
                 let attachmentID = AlbumCurvedWallAttachmentID.tile(page.assetID)
                 guard let panel = attachments.entity(for: attachmentID) else { continue }
                 tilesFound += 1
 
-                let yMid = yCursor + page.heightMeters / 2
+                let yMid = yCursor + pageHeight / 2
 
                 let forward = normalize(SIMD3<Float>(-horizontalOffset, 0, -depthOffset))
                 let right = normalize(cross(SIMD3<Float>(0, 1, 0), forward))
@@ -506,7 +563,7 @@ public struct AlbumImmersiveRootView: View {
                     root.addChild(panel)
                 }
 
-                yCursor = yMid + page.heightMeters / 2
+                yCursor = yMid + pageHeight / 2
                 if itemOffset != column.count - 1 {
                     yCursor += pageSpacing
                 }
@@ -619,47 +676,47 @@ public struct AlbumImmersiveRootView: View {
         return CurvedWallColumnLayout(columns: columns, heights: heights)
     }
 
-	    private func ensureCurvedWallAnchor(in content: RealityViewContent, model: AlbumModel) -> AnchorEntity {
-	        if let existing = curvedWallAnchor {
-	            if existing.parent != nil {
-	                return existing
-	            }
-	            AlbumLog.immersive.info("CurvedWall anchor stale; rebuilding from stored seed")
-	            curvedWallAnchor = nil
-	        }
+    private func ensureCurvedWallAnchor(in content: RealityViewContent, model: AlbumModel) -> AnchorEntity {
+        if let existing = curvedWallAnchor {
+            if existing.parent != nil {
+                return existing
+            }
+            AlbumLog.immersive.info("CurvedWall anchor stale; rebuilding from stored seed")
+            curvedWallAnchor = nil
+        }
 
-	        if let stored = curvedWallSeedMatrix {
-	            let anchor = AnchorEntity(world: stored)
-	            anchor.orientation = Transform(matrix: stored).rotation
-	            anchor.name = "album-curved-wall-anchor"
-	            curvedWallAnchor = anchor
-	            content.add(anchor)
-	            return anchor
-	        }
+        if let stored = curvedWallSeedMatrix {
+            let anchor = AnchorEntity(world: stored)
+            anchor.orientation = Transform(matrix: stored).rotation
+            anchor.name = "album-curved-wall-anchor"
+            curvedWallAnchor = anchor
+            content.add(anchor)
+            return anchor
+        }
 
-	        let head = initialHeadTransform ?? latestHeadTransform ?? Transform(matrix: headAnchor?.transformMatrix(relativeTo: nil) ?? matrix_identity_float4x4)
-	        let fcol = head.matrix.columns.2
-	        let forward = normalize(-SIMD3<Float>(fcol.x, fcol.y, fcol.z))
+        let head = initialHeadTransform ?? latestHeadTransform ?? Transform(matrix: headAnchor?.transformMatrix(relativeTo: nil) ?? matrix_identity_float4x4)
+        let fcol = head.matrix.columns.2
+        let forward = normalize(-SIMD3<Float>(fcol.x, fcol.y, fcol.z))
 
-	        let headForwardOffset: Float = 0.09
-	        var pos = head.translation + forward * headForwardOffset
-	        if !pos.y.isFinite || abs(pos.y) <= 0.001 { pos.y = 1.35 } else { pos.y -= 0.05 }
+        let headForwardOffset: Float = 0.09
+        var pos = head.translation + forward * headForwardOffset
+        if !pos.y.isFinite || abs(pos.y) <= 0.001 { pos.y = 1.35 } else { pos.y -= 0.05 }
 
-	        var seeded = head
-	        seeded.translation = pos
+        var seeded = head
+        seeded.translation = pos
 
-	        curvedWallSeedMatrix = seeded.matrix
+        curvedWallSeedMatrix = seeded.matrix
 
-	        let anchor = AnchorEntity(world: seeded.matrix)
-	        anchor.orientation = seeded.rotation
-	        anchor.name = "album-curved-wall-anchor"
+        let anchor = AnchorEntity(world: seeded.matrix)
+        anchor.orientation = seeded.rotation
+        anchor.name = "album-curved-wall-anchor"
 
-	        curvedWallAnchor = anchor
-	        content.add(anchor)
+        curvedWallAnchor = anchor
+        content.add(anchor)
 
-	        AlbumLog.immersive.info("CurvedWall anchor seeded (initialHead=\(self.initialHeadTransform != nil)) pos=(\(pos.x), \(pos.y), \(pos.z))")
-	        return anchor
-	    }
+        AlbumLog.immersive.info("CurvedWall anchor seeded (initialHead=\(self.initialHeadTransform != nil)) pos=(\(pos.x), \(pos.y), \(pos.z))")
+        return anchor
+    }
 
     private func positionCurvedWallNavCard(
         attachmentID: String,
