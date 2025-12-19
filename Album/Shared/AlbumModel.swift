@@ -82,15 +82,6 @@ public final class AlbumModel: ObservableObject {
         didSet {
             guard isPaused != oldValue else { return }
             AlbumLog.model.info("Pause toggled: \(self.isPaused ? "paused" : "playing", privacy: .public)")
-
-            if isPaused {
-                latestThumbRequestID = nil
-                thumbTask?.cancel()
-                thumbTask = nil
-                thumbThinkingSince = nil
-                thumbThinkingFeedback = nil
-                thumbStatusMessage = "Paused"
-            }
         }
     }
     @Published public var absorbInterval: Double = 10
@@ -736,12 +727,48 @@ public final class AlbumModel: ObservableObject {
         let panelVerticalPaddingPoints: Double = 8
         let actionRowHeightPoints: Double = 44
         let actionRowSpacingPoints: Double = 4
+        let maxColumnHeightMeters: Double = 2.4
+        let pageSpacingMeters: Double = 0.001
+
+        enum CurvedWallAspectBucket {
+            case landscape
+            case square
+            case portrait
+        }
 
         return ids.compactMap { id in
             guard let asset = asset(for: id) else { return nil }
 
             let w = Double(asset.pixelWidth ?? 0)
             let h = Double(asset.pixelHeight ?? 0)
+
+            let bucket: CurvedWallAspectBucket = {
+                guard w > 0, h > 0 else {
+                    return asset.mediaType == .video ? .landscape : .square
+                }
+
+                let aspect = h / w
+                if aspect >= 1.15 { return .portrait }
+                if aspect <= 0.85 { return .landscape }
+                return .square
+            }()
+
+            let maxPanelHeightPoints: Double = {
+                let targetCount: Int
+                switch bucket {
+                case .portrait:
+                    targetCount = 2
+                case .square:
+                    targetCount = 4
+                case .landscape:
+                    targetCount = 6
+                }
+
+                let gaps = max(0, targetCount - 1)
+                let usableMeters = max(0.1, maxColumnHeightMeters - (Double(gaps) * pageSpacingMeters))
+                let perPanelMeters = usableMeters / Double(max(1, targetCount))
+                return perPanelMeters * curvedWallPointsPerMeter
+            }()
 
             let mediaHeight: Double = {
                 guard w > 0, h > 0 else {
@@ -758,7 +785,8 @@ public final class AlbumModel: ObservableObject {
                 return computed
             }()
 
-            let viewHeightPoints = mediaHeight + actionRowSpacingPoints + actionRowHeightPoints + panelVerticalPaddingPoints
+            let viewHeightPointsUnclamped = mediaHeight + actionRowSpacingPoints + actionRowHeightPoints + panelVerticalPaddingPoints
+            let viewHeightPoints = min(viewHeightPointsUnclamped, maxPanelHeightPoints)
             let heightMeters = Float(viewHeightPoints / curvedWallPointsPerMeter)
             return CurvedWallPanel(assetID: id, heightMeters: heightMeters, viewHeightPoints: viewHeightPoints)
         }
@@ -910,7 +938,7 @@ public final class AlbumModel: ObservableObject {
         shiftMemoryPage(delta: 1)
     }
 
-	    public func sendThumb(_ feedback: AlbumThumbFeedback, assetID: String) {
+    public func sendThumb(_ feedback: AlbumThumbFeedback, assetID: String) {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }
 
@@ -921,18 +949,11 @@ public final class AlbumModel: ObservableObject {
             await sidecarStore.setRating(key, rating: rating)
         }
 
-	#if DEBUG
-	        if feedback == .up, settings.autofillOnThumbUp {
-	            ensureVisionSummary(for: id, reason: "thumb_up", priority: .userInitiated)
-	        }
-	#endif
-
-        guard !isPaused else {
-            thumbThinkingSince = nil
-            thumbThinkingFeedback = nil
-            thumbStatusMessage = "Paused (rating saved)"
-            return
+#if DEBUG
+        if feedback == .up, settings.autofillOnThumbUp {
+            ensureVisionSummary(for: id, reason: "thumb_up", priority: .userInitiated)
         }
+#endif
 
         thumbThinkingSince = Date()
         thumbThinkingFeedback = feedback
@@ -947,13 +968,13 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
-	    private func maybeAutofillThumbUpNeighbors(anchorID: String) {
-	#if !DEBUG
-	        return
-	#else
-	        let id = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
-	        guard !id.isEmpty else { return }
-	        guard settings.autofillOnThumbUp else { return }
+    private func maybeAutofillThumbUpNeighbors(anchorID: String) {
+#if !DEBUG
+        return
+#else
+        let id = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        guard settings.autofillOnThumbUp else { return }
 
         let desired = max(0, settings.thumbUpAutofillCount)
         guard desired > 0 else { return }
@@ -967,11 +988,11 @@ public final class AlbumModel: ObservableObject {
 
         thumbUpAutofillNeighborIDsByAnchorID[id] = nil
 
-	        Task(priority: .background) { [backfillManager] in
-	            await backfillManager.autofillNeighbors(anchorID: id, neighborIDs: Array(neighborIDs.prefix(desired)), source: .thumbUpNeighbor)
-	        }
-	#endif
-	    }
+        Task(priority: .background) { [backfillManager] in
+            await backfillManager.autofillNeighbors(anchorID: id, neighborIDs: Array(neighborIDs.prefix(desired)), source: .thumbUpNeighbor)
+        }
+#endif
+    }
 
     @discardableResult
     public func appendToHistoryIfNew(assetID: String) -> Bool {
