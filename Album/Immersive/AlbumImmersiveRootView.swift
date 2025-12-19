@@ -135,6 +135,7 @@ private final class AlbumImmersiveSceneState {
     private var initialHeadTransform: Transform?
     private var curvedWallAnchor: AnchorEntity?
     private var curvedWallSeedMatrix: simd_float4x4?
+    private var curvedWallCollisionSizeByAttachmentID: [String: SIMD3<Float>] = [:]
     private var pmns: [ModelEntity] = []
     private var balls: [ModelEntity] = []
     private var frameTask: Task<Void, Never>?
@@ -188,6 +189,7 @@ private final class AlbumImmersiveSceneState {
         initialHeadTransform = nil
         curvedWallAnchor = nil
         curvedWallSeedMatrix = nil
+        curvedWallCollisionSizeByAttachmentID.removeAll(keepingCapacity: true)
         pmns.removeAll(keepingCapacity: true)
         balls.removeAll(keepingCapacity: true)
         lastCurvedWallLogSignature = nil
@@ -519,6 +521,7 @@ private final class AlbumImmersiveSceneState {
         let layout = curvedWallArcLayout(count: columnCount, desiredChord: desiredChord)
 
         let validTileAttachmentIDs = Set(pages.map { AlbumCurvedWallAttachmentID.tile($0.assetID) })
+        curvedWallCollisionSizeByAttachmentID = curvedWallCollisionSizeByAttachmentID.filter { validTileAttachmentIDs.contains($0.key) }
         var tilesFound = 0
 
         for (columnIndex, column) in columns.enumerated() {
@@ -555,7 +558,22 @@ private final class AlbumImmersiveSceneState {
                 if panel.components[InputTargetComponent.self] == nil {
                     panel.components.set(InputTargetComponent())
                 }
-                if panel.components[CollisionComponent.self] == nil {
+                if let extents = measuredExtentsMeters(for: panel) {
+                    let sizeMeters = SIMD3<Float>(
+                        max(0.01, extents.x),
+                        max(0.01, extents.y),
+                        max(0.01, extents.z)
+                    )
+                    let quantized = SIMD3<Float>(
+                        (sizeMeters.x * 1000).rounded() / 1000,
+                        (sizeMeters.y * 1000).rounded() / 1000,
+                        (sizeMeters.z * 1000).rounded() / 1000
+                    )
+                    if curvedWallCollisionSizeByAttachmentID[attachmentID] != quantized || panel.components[CollisionComponent.self] == nil {
+                        curvedWallCollisionSizeByAttachmentID[attachmentID] = quantized
+                        panel.components.set(CollisionComponent(shapes: [ShapeResource.generateBox(size: quantized)]))
+                    }
+                } else if panel.components[CollisionComponent.self] == nil {
                     panel.generateCollisionShapes(recursive: true)
                 }
 

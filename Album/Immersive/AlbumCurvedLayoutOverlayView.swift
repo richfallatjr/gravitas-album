@@ -87,18 +87,6 @@ struct AlbumCurvedWallPanelAttachmentView: View {
             .padding(.vertical, verticalPaddingPoints)
         }
         .frame(width: panelWidthPoints, height: CGFloat(viewHeightPoints))
-        .confirmationDialog(
-            "Hide this image?",
-            isPresented: $showHideConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Hide", role: .destructive) {
-                model.hideAsset(assetID)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Are you sure you want to hide this from view? You will no longer see this image.")
-        }
         .onDisappear {
             player?.pause()
             player = nil
@@ -161,6 +149,18 @@ struct AlbumCurvedWallPanelAttachmentView: View {
 
             actionButton(icon: "trash.fill", fill: Color(red: 255.0/255.0, green: 97.0/255.0, blue: 136.0/255.0)) {
                 showHideConfirmation = true
+            }
+            .confirmationDialog(
+                "Hide this image?",
+                isPresented: $showHideConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Hide", role: .destructive) {
+                    model.hideAsset(assetID)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Are you sure you want to hide this from view? You will no longer see this image.")
             }
 
             actionButton(icon: "rectangle.on.rectangle", fill: Color(red: 120.0/255.0, green: 220.0/255.0, blue: 232.0/255.0)) {

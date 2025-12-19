@@ -721,54 +721,18 @@ public final class AlbumModel: ObservableObject {
         guard !ids.isEmpty else { return [] }
 
         let panelWidthPoints: Double = 620
-        let horizontalPaddingPoints: Double = 8
-        let innerWidth = max(panelWidthPoints - horizontalPaddingPoints, 240)
+        let horizontalPaddingPoints: Double = 4
+        let innerWidth = max(panelWidthPoints - (horizontalPaddingPoints * 2), 240)
         let minHeight: Double = 220
         let panelVerticalPaddingPoints: Double = 8
         let actionRowHeightPoints: Double = 66
         let actionRowSpacingPoints: Double = 4
-        let maxColumnHeightMeters: Double = 1.8
-        let pageSpacingMeters: Double = 0.001
-
-        enum CurvedWallAspectBucket {
-            case landscape
-            case square
-            case portrait
-        }
 
         return ids.compactMap { id in
             guard let asset = asset(for: id) else { return nil }
 
             let w = Double(asset.pixelWidth ?? 0)
             let h = Double(asset.pixelHeight ?? 0)
-
-            let bucket: CurvedWallAspectBucket = {
-                guard w > 0, h > 0 else {
-                    return asset.mediaType == .video ? .landscape : .square
-                }
-
-                let aspect = h / w
-                if aspect >= 1.15 { return .portrait }
-                if aspect <= 0.85 { return .landscape }
-                return .square
-            }()
-
-            let maxPanelHeightPoints: Double = {
-                let targetCount: Int
-                switch bucket {
-                case .portrait:
-                    targetCount = 2
-                case .square:
-                    targetCount = 4
-                case .landscape:
-                    targetCount = 6
-                }
-
-                let gaps = max(0, targetCount - 1)
-                let usableMeters = max(0.1, maxColumnHeightMeters - (Double(gaps) * pageSpacingMeters))
-                let perPanelMeters = usableMeters / Double(max(1, targetCount))
-                return perPanelMeters * curvedWallPointsPerMeter
-            }()
 
             let mediaHeight: Double = {
                 guard w > 0, h > 0 else {
@@ -786,7 +750,7 @@ public final class AlbumModel: ObservableObject {
             }()
 
             let viewHeightPointsUnclamped = mediaHeight + actionRowSpacingPoints + actionRowHeightPoints + panelVerticalPaddingPoints
-            let viewHeightPoints = min(viewHeightPointsUnclamped, maxPanelHeightPoints)
+            let viewHeightPoints = viewHeightPointsUnclamped
             let heightMeters = Float(viewHeightPoints / curvedWallPointsPerMeter)
             return CurvedWallPanel(assetID: id, heightMeters: heightMeters, viewHeightPoints: viewHeightPoints)
         }
