@@ -380,10 +380,13 @@ public struct AlbumControlView: View {
                 Slider(value: $model.absorbInterval, in: 1...20, step: 1)
                     .frame(width: 180)
                 Text("\(Int(model.absorbInterval))s")
-                Button("Absorb Now") { model.requestAbsorbNow() }
-                    .buttonStyle(.bordered)
-                    .tint(palette.copyButtonFill)
-                    .foregroundStyle(palette.buttonLabelOnColor)
+                Button { model.requestAbsorbNow() } label: {
+                    Label("Absorb Now", systemImage: "forward.fill")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(palette.readButtonColor)
+                .foregroundStyle(palette.buttonLabelOnColor)
             }
             .font(.footnote)
 
