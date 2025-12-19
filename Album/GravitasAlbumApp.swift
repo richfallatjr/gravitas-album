@@ -33,5 +33,6 @@ struct GravitasAlbumApp: App {
             AlbumImmersiveRootView()
                 .environmentObject(model)
         }
+        .immersiveEnvironmentBehavior(.coexist)
     }
 }

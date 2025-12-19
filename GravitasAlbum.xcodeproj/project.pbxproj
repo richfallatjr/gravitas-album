@@ -603,7 +603,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
-				XROS_DEPLOYMENT_TARGET = 1.0;
+				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Debug;
 		};
@@ -623,7 +623,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
-				XROS_DEPLOYMENT_TARGET = 1.0;
+				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Release;
 		};
