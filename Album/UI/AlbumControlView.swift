@@ -61,15 +61,15 @@ public struct AlbumControlView: View {
         .foregroundStyle(palette.panelPrimaryText)
         .onDisappear {
             AlbumLog.ui.info("AlbumControlView disappeared (main control panel closed); closing all scenes")
-            let popoutIDs = model.poppedAssetIDs
+            let popoutItemIDs = model.poppedItems.map(\.id)
             Task { @MainActor in
                 let result = await dismissImmersiveSpace()
                 AlbumLog.immersive.info("dismissImmersiveSpace result: \(String(describing: result), privacy: .public)")
 
                 dismissWindow(id: "album-scene-manager")
 
-                for assetID in popoutIDs {
-                    dismissWindow(value: AlbumPopOutPayload(assetID: assetID))
+                for itemID in popoutItemIDs {
+                    dismissWindow(value: AlbumPopOutPayload(itemID: itemID))
                 }
             }
         }
@@ -517,8 +517,9 @@ public struct AlbumControlView: View {
 
             Button {
                 if let id = model.currentAssetID {
-                    openWindow(value: AlbumPopOutPayload(assetID: id))
-                    model.appendPoppedAsset(id)
+                    if let item = model.createPoppedAssetItem(assetID: id) {
+                        openWindow(value: AlbumPopOutPayload(itemID: item.id))
+                    }
                 }
             } label: {
                 Label("Pop Out", systemImage: "rectangle.on.rectangle")
@@ -577,7 +578,7 @@ public struct AlbumControlView: View {
             ) {
                 Button("Quit", role: .destructive) {
                     AlbumLog.ui.info("Quit pressed; tearing down immersive + windows then exiting")
-                    let popoutIDs = model.poppedAssetIDs
+                    let popoutItemIDs = model.poppedItems.map(\.id)
                     model.shutdownForQuit()
 
                     Task.detached(priority: .userInitiated) {
@@ -591,8 +592,8 @@ public struct AlbumControlView: View {
                         AlbumLog.immersive.info("dismissImmersiveSpace result: \(String(describing: result), privacy: .public)")
 
                         dismissWindow(id: "album-scene-manager")
-                        for assetID in popoutIDs {
-                            dismissWindow(value: AlbumPopOutPayload(assetID: assetID))
+                        for itemID in popoutItemIDs {
+                            dismissWindow(value: AlbumPopOutPayload(itemID: itemID))
                         }
                         dismissWindow(id: "album-control")
 

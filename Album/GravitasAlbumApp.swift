@@ -21,12 +21,15 @@ struct GravitasAlbumApp: App {
         }
         .defaultSize(width: 1080, height: 780)
         .restorationBehavior(.disabled)
+        .defaultLaunchBehavior(.suppressed)
 
         WindowGroup(id: "album-scene-manager") {
             AlbumSceneManagerView()
                 .environmentObject(model)
         }
         .defaultSize(width: 630, height: 690)
+        .restorationBehavior(.disabled)
+        .defaultLaunchBehavior(.suppressed)
 
         ImmersiveSpace(id: "album-space") {
             AlbumImmersiveRootView()
@@ -40,63 +43,79 @@ private struct AlbumPopOutWindowRootView: View {
     @Binding var payload: AlbumPopOutPayload?
     @EnvironmentObject private var model: AlbumModel
 
-    @State private var activeAssetID: String? = nil
+    @State private var activeItemID: UUID? = nil
 
     init(payload: Binding<AlbumPopOutPayload?>) {
         self._payload = payload
     }
 
     var body: some View {
-        let assetID = payload?.assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let itemID = payload?.itemID
+        let item = itemID.flatMap { model.sceneItem(for: $0) }
 
         Group {
-            if let assetID, !assetID.isEmpty {
-                AlbumPopOutAssetView(assetID: assetID)
-                    .environmentObject(model)
+            if let itemID, let item {
+                switch item.kind {
+                case .asset:
+                    if let assetID = item.assetID, !assetID.isEmpty {
+                        AlbumPopOutAssetView(itemID: itemID, assetID: assetID)
+                            .environmentObject(model)
+                    } else {
+                        Text("Missing asset.")
+                            .environmentObject(model)
+                    }
+
+                case .movie:
+                    AlbumMovieDraftView(itemID: itemID)
+                        .environmentObject(model)
+                }
             } else {
                 Text("Loading…")
                     .environmentObject(model)
             }
         }
         .onAppear {
-            syncPoppedAsset(with: assetID)
+            syncPoppedItem(with: itemID)
         }
-        .onChange(of: assetID) { newID in
-            syncPoppedAsset(with: newID)
+        .onChange(of: itemID) { newID in
+            syncPoppedItem(with: newID)
         }
         .onDisappear {
-            syncPoppedAsset(with: nil)
+            syncPoppedItem(with: nil)
         }
         .background {
             AlbumWindowAttachmentObserver(
-                onAttach: { syncPoppedAsset(with: assetID) },
-                onDetach: { syncPoppedAsset(with: nil) }
+                onAttach: { syncPoppedItem(with: itemID) },
+                onDetach: { syncPoppedItem(with: nil) },
+                onMidXChange: { midX in
+                    guard let activeItemID else { return }
+                    model.updatePoppedItemWindowMidX(itemID: activeItemID, midX: midX)
+                }
             )
         }
     }
 
-    private func syncPoppedAsset(with newAssetID: String?) {
-        let id = newAssetID?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let existing = activeAssetID, existing != id {
-            model.removePoppedAsset(existing)
+    private func syncPoppedItem(with newItemID: UUID?) {
+        if let existing = activeItemID, existing != newItemID {
+            model.removePoppedItem(existing)
         }
 
-        if let id, !id.isEmpty, id != activeAssetID {
-            model.appendPoppedAsset(id)
+        if let newItemID, newItemID != activeItemID, let item = model.sceneItem(for: newItemID) {
+            model.ensurePoppedItemExists(item)
         }
 
-        activeAssetID = id
+        activeItemID = newItemID
     }
 }
 
 private struct AlbumWindowAttachmentObserver: View {
     let onAttach: () -> Void
     let onDetach: () -> Void
+    let onMidXChange: (Double?) -> Void
 
     var body: some View {
 #if canImport(UIKit)
-        AlbumWindowAttachmentObserverRepresentable(onAttach: onAttach, onDetach: onDetach)
+        AlbumWindowAttachmentObserverRepresentable(onAttach: onAttach, onDetach: onDetach, onMidXChange: onMidXChange)
             .frame(width: 0, height: 0)
 #else
         EmptyView()
@@ -108,26 +127,32 @@ private struct AlbumWindowAttachmentObserver: View {
 private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
     let onAttach: () -> Void
     let onDetach: () -> Void
+    let onMidXChange: (Double?) -> Void
 
     func makeUIView(context: Context) -> ObserverView {
-        ObserverView(onAttach: onAttach, onDetach: onDetach)
+        ObserverView(onAttach: onAttach, onDetach: onDetach, onMidXChange: onMidXChange)
     }
 
     func updateUIView(_ uiView: ObserverView, context: Context) {
         uiView.onAttach = onAttach
         uiView.onDetach = onDetach
+        uiView.onMidXChange = onMidXChange
     }
 
     final class ObserverView: UIView {
         var onAttach: () -> Void
         var onDetach: () -> Void
+        var onMidXChange: (Double?) -> Void
         private var hasAttachedOnce: Bool = false
         private weak var observedScene: UIScene?
         private var disconnectObserver: NSObjectProtocol? = nil
+        private var framePollTimer: Timer? = nil
+        private var lastMidX: Double? = nil
 
-        init(onAttach: @escaping () -> Void, onDetach: @escaping () -> Void) {
+        init(onAttach: @escaping () -> Void, onDetach: @escaping () -> Void, onMidXChange: @escaping (Double?) -> Void) {
             self.onAttach = onAttach
             self.onDetach = onDetach
+            self.onMidXChange = onMidXChange
             super.init(frame: .zero)
             isUserInteractionEnabled = false
             backgroundColor = .clear
@@ -143,16 +168,20 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
             if window != nil {
                 hasAttachedOnce = true
                 registerSceneDisconnectObserverIfNeeded()
+                startFramePoll()
                 onAttach()
                 return
             }
 
             guard hasAttachedOnce else { return }
+            stopFramePoll()
+            onMidXChange(nil)
             unregisterSceneDisconnectObserver()
             onDetach()
         }
 
         deinit {
+            stopFramePoll()
             unregisterSceneDisconnectObserver()
         }
 
@@ -169,6 +198,8 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 guard let self else { return }
+                self.stopFramePoll()
+                self.onMidXChange(nil)
                 self.unregisterSceneDisconnectObserver()
                 self.onDetach()
             }
@@ -180,6 +211,41 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
                 disconnectObserver = nil
             }
             observedScene = nil
+        }
+
+        private func startFramePoll() {
+            stopFramePoll()
+            guard window != nil else { return }
+            lastMidX = nil
+            emitMidXIfChanged(force: true)
+
+            framePollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                self?.emitMidXIfChanged(force: false)
+            }
+        }
+
+        private func stopFramePoll() {
+            framePollTimer?.invalidate()
+            framePollTimer = nil
+            lastMidX = nil
+        }
+
+        private func emitMidXIfChanged(force: Bool) {
+            guard let window else { return }
+            let midX = Double(window.frame.midX)
+            guard midX.isFinite else { return }
+
+            if force {
+                lastMidX = midX
+                onMidXChange(midX)
+                return
+            }
+
+            let previous = lastMidX
+            if previous == nil || abs(midX - (previous ?? 0)) > 0.5 {
+                lastMidX = midX
+                onMidXChange(midX)
+            }
         }
     }
 }

@@ -28,8 +28,9 @@ public struct AlbumLayoutSheet: View {
                             model.currentAssetID = id
                         },
                         onPopOut: { id in
-                            openWindow(value: AlbumPopOutPayload(assetID: id))
-                            model.appendPoppedAsset(id)
+                            if let item = model.createPoppedAssetItem(assetID: id) {
+                                openWindow(value: AlbumPopOutPayload(itemID: item.id))
+                            }
                         },
                         onHide: { id in
                             pendingHideID = id

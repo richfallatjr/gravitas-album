@@ -174,8 +174,9 @@ struct AlbumCurvedWallPanelAttachmentView: View {
             }
 
             actionButton(icon: "rectangle.on.rectangle", fill: Color(red: 120.0/255.0, green: 220.0/255.0, blue: 232.0/255.0)) {
-                openWindow(value: AlbumPopOutPayload(assetID: assetID))
-                model.appendPoppedAsset(assetID)
+                if let item = model.createPoppedAssetItem(assetID: assetID) {
+                    openWindow(value: AlbumPopOutPayload(itemID: item.id))
+                }
             }
         }
         .frame(width: width, height: actionRowHeightPoints, alignment: .center)

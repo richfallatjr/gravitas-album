@@ -1,5 +1,14 @@
 import SwiftUI
 import CoreGraphics
+import Vision
+import ImageIO
+import AVFoundation
+import CoreLocation
+import CoreVideo
+
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public enum AlbumDatasetSource: String, Sendable, Codable, CaseIterable {
     case photos
@@ -117,9 +126,11 @@ public final class AlbumModel: ObservableObject {
             history = historyAssetIDs.compactMap { item(for: $0) }
         }
     }
-    @Published public var poppedAssetIDs: [String] = []
+    @Published public var poppedItems: [AlbumSceneItemRecord] = []
     @Published private var pinnedAssetsByID: [String: AlbumAsset] = [:]
     @Published public var scenes: [AlbumSceneRecord] = []
+    @Published public var movieStatusLinesByItemID: [UUID: [String]] = [:]
+    @Published public var movieTitleGenerationInFlightItemIDs: Set<UUID> = []
 
     @Published public var aiNextAssetIDs: Set<String> = []
     @Published public var recommendedAssetID: String? = nil
@@ -1140,7 +1151,7 @@ public final class AlbumModel: ObservableObject {
     public func createScene(named name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let record = AlbumSceneRecord(name: trimmed, assetIDs: poppedAssetIDs)
+        let record = AlbumSceneRecord(name: trimmed, items: poppedItems)
         scenes.append(record)
         AlbumSceneStore.save(scenes)
     }
@@ -1152,30 +1163,566 @@ public final class AlbumModel: ObservableObject {
 
     public func updateScene(_ scene: AlbumSceneRecord) {
         guard let idx = scenes.firstIndex(where: { $0.id == scene.id }) else { return }
-        scenes[idx].assetIDs = poppedAssetIDs
+        scenes[idx].items = poppedItems
         scenes[idx].createdAt = Date()
         AlbumSceneStore.save(scenes)
     }
 
-    public func appendPoppedAsset(_ assetID: String) {
+    @discardableResult
+    public func createPoppedAssetItem(assetID: String) -> AlbumSceneItemRecord? {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !id.isEmpty else { return }
+        guard !id.isEmpty else { return nil }
 
-        if !poppedAssetIDs.contains(id) {
-            poppedAssetIDs.append(id)
-        }
-
+        let item = AlbumSceneItemRecord.asset(assetID: id)
+        poppedItems.append(item)
         pinAssetForPopOut(id)
+        return item
     }
 
-    public func removePoppedAsset(_ assetID: String) {
-        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !id.isEmpty else { return }
-        poppedAssetIDs.removeAll(where: { $0 == id })
-        if !historyAssetIDs.contains(id), currentAssetID != id {
-            pinnedAssetsByID[id] = nil
+    @discardableResult
+    public func createPoppedMovieItem() -> AlbumSceneItemRecord {
+        let item = AlbumSceneItemRecord.movie(draft: AlbumMovieDraft())
+        poppedItems.append(item)
+        return item
+    }
+
+    public func updatePoppedItemWindowMidX(itemID: UUID, midX: Double?) {
+        guard let idx = poppedItems.firstIndex(where: { $0.id == itemID }) else { return }
+        poppedItems[idx].lastKnownWindowMidX = midX
+    }
+
+    public func ensurePoppedItemExists(_ item: AlbumSceneItemRecord) {
+        guard poppedItems.contains(where: { $0.id == item.id }) == false else { return }
+        poppedItems.append(item)
+        if item.kind == .asset, let assetID = item.assetID, !assetID.isEmpty {
+            pinAssetForPopOut(assetID)
         }
-        pinnedAssetLoadsInFlight.remove(id)
+    }
+
+    public func sceneItem(for itemID: UUID) -> AlbumSceneItemRecord? {
+        if let hit = poppedItems.first(where: { $0.id == itemID }) {
+            return hit
+        }
+        for scene in scenes {
+            if let hit = scene.items.first(where: { $0.id == itemID }) {
+                return hit
+            }
+        }
+        return nil
+    }
+
+    public func poppedItem(for itemID: UUID) -> AlbumSceneItemRecord? {
+        poppedItems.first(where: { $0.id == itemID })
+    }
+
+    public func updatePoppedItem(_ itemID: UUID, _ update: (inout AlbumSceneItemRecord) -> Void) {
+        guard let idx = poppedItems.firstIndex(where: { $0.id == itemID }) else { return }
+        update(&poppedItems[idx])
+    }
+
+    public func generateMovie(itemID: UUID) async {
+        guard let movieItem = poppedItem(for: itemID), movieItem.kind == .movie else { return }
+
+        if movieItem.movie?.renderState.kind == .rendering {
+            return
+        }
+
+        let exportablesRaw = poppedItems
+            .filter { $0.kind == .asset && ($0.assetID?.isEmpty == false) }
+
+        let exportables = exportablesRaw.sorted { a, b in
+            let ax = a.lastKnownWindowMidX ?? 0
+            let bx = b.lastKnownWindowMidX ?? 0
+            if ax == bx { return a.id.uuidString < b.id.uuidString }
+            return ax < bx
+        }
+
+        guard !exportables.isEmpty else {
+            updatePoppedItem(itemID) { item in
+                var movie = item.movie ?? AlbumMovieDraft()
+                movie.renderState = .failed(message: "Add images or videos to the Scene to generate a movie.")
+                item.movie = movie
+            }
+            return
+        }
+
+        movieStatusLinesByItemID[itemID] = []
+        updatePoppedItem(itemID) { item in
+            var movie = item.movie ?? AlbumMovieDraft()
+            movie.renderState = .rendering(progress: 0)
+            item.movie = movie
+        }
+
+        let titleRaw = movieItem.movie?.draftTitle.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = titleRaw.isEmpty ? "Untitled Movie" : titleRaw
+        let subtitle = movieItem.movie?.draftSubtitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        appendMovieStatusLine(itemID: itemID, line: "Analyzing media…")
+
+        var segments: [AlbumMovieExportSegment] = []
+        segments.reserveCapacity(exportables.count)
+
+#if canImport(UIKit)
+        func cgImage(from image: UIImage) -> CGImage? {
+            if let cg = image.cgImage { return cg }
+            if let data = image.jpegData(compressionQuality: 0.95) ?? image.pngData(),
+               let source = CGImageSourceCreateWithData(data as CFData, nil),
+               let cg = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                return cg
+            }
+            return nil
+        }
+#endif
+
+        var missingCount = 0
+
+        for (index, item) in exportables.enumerated() {
+            guard let assetID = item.assetID else { continue }
+
+            if Task.isCancelled {
+                updatePoppedItem(itemID) { item in
+                    var movie = item.movie ?? AlbumMovieDraft()
+                    movie.renderState = .failed(message: "Cancelled")
+                    item.movie = movie
+                }
+                return
+            }
+
+            let pinned = await ensurePinnedAssetAvailable(assetID: assetID, reason: "movie_export")
+            guard pinned, let asset = asset(for: assetID) else {
+                missingCount += 1
+                appendMovieStatusLine(itemID: itemID, line: "Skipping missing asset (\(assetID)).")
+                continue
+            }
+
+            switch asset.mediaType {
+            case .photo:
+                appendMovieStatusLine(itemID: itemID, line: "Preparing image (\(index + 1)/\(exportables.count))…")
+                let img = await requestThumbnail(
+                    assetID: assetID,
+                    targetSize: CGSize(width: 2400, height: 2400),
+                    displayScale: 1
+                )
+#if canImport(UIKit)
+                guard let img, let cg = cgImage(from: img) else {
+                    missingCount += 1
+                    appendMovieStatusLine(itemID: itemID, line: "Skipping image (\(assetID)) (unavailable).")
+                    continue
+                }
+
+                let size = CGSize(width: cg.width, height: cg.height)
+                let anchors = effectiveKenBurnsAnchorsForExport(item: item, assetID: assetID, imageSize: size)
+                segments.append(.image(instanceID: item.id, assetID: assetID, cgImage: cg, startAnchor: anchors.start, endAnchor: anchors.end))
+#else
+                missingCount += 1
+                appendMovieStatusLine(itemID: itemID, line: "Skipping image (\(assetID)) (unsupported platform).")
+#endif
+
+            case .video:
+                appendMovieStatusLine(itemID: itemID, line: "Preparing video (\(index + 1)/\(exportables.count))…")
+                guard let url = await requestVideoURL(assetID: assetID) else {
+                    missingCount += 1
+                    appendMovieStatusLine(itemID: itemID, line: "Skipping video (\(assetID)) (unavailable).")
+                    continue
+                }
+
+                let duration = max(0, asset.duration ?? 0)
+                let defaultEnd = min(5.0, duration > 0 ? duration : 5.0)
+
+                var start = max(0, item.trimStartSeconds ?? 0)
+                var end = item.trimEndSeconds ?? defaultEnd
+                if duration > 0 {
+                    end = min(end, duration)
+                }
+                if end - start < 0.5 {
+                    end = min(max(start + 0.5, end), duration > 0 ? duration : start + 0.5)
+                }
+
+                segments.append(.video(instanceID: item.id, assetID: assetID, url: url, trimStart: start, trimEnd: end))
+            }
+        }
+
+        if segments.isEmpty {
+            updatePoppedItem(itemID) { item in
+                var movie = item.movie ?? AlbumMovieDraft()
+                movie.renderState = .failed(message: "No usable media items to export.")
+                item.movie = movie
+            }
+            return
+        }
+
+        if missingCount > 0 {
+            appendMovieStatusLine(itemID: itemID, line: "Skipped \(missingCount) missing items.")
+        }
+
+        do {
+            let request = AlbumMovieExportRequest(
+                title: title,
+                subtitle: subtitle?.isEmpty ?? true ? nil : subtitle,
+                segments: segments
+            )
+
+            let result = try await AlbumMovieExportPipeline.export(
+                request: request,
+                progress: { [weak self] progress in
+                    guard let self else { return }
+                    self.updatePoppedItem(itemID) { item in
+                        var movie = item.movie ?? AlbumMovieDraft()
+                        movie.renderState = .rendering(progress: max(0, min(1, progress)))
+                        item.movie = movie
+                    }
+                },
+                status: { [weak self] line in
+                    self?.appendMovieStatusLine(itemID: itemID, line: line)
+                }
+            )
+
+            updatePoppedItem(itemID) { item in
+                var movie = item.movie ?? AlbumMovieDraft()
+                movie.renderState = .ready
+                movie.artifactRelativePath = result.relativePath
+                movie.artifactMetadata = AlbumMovieArtifactMetadata(
+                    durationSeconds: result.durationSeconds,
+                    fileSizeBytes: result.fileSizeBytes,
+                    createdAt: result.createdAt,
+                    renderWidth: 1080,
+                    renderHeight: 1080,
+                    fps: 30
+                )
+                item.movie = movie
+            }
+            appendMovieStatusLine(itemID: itemID, line: "Done.")
+        } catch {
+            appendMovieStatusLine(itemID: itemID, line: "Export failed.")
+            updatePoppedItem(itemID) { item in
+                var movie = item.movie ?? AlbumMovieDraft()
+                movie.renderState = .failed(message: String(describing: error))
+                item.movie = movie
+            }
+        }
+    }
+
+    private func effectiveKenBurnsAnchorsForExport(item: AlbumSceneItemRecord, assetID: String, imageSize: CGSize) -> (start: CGPoint, end: CGPoint) {
+        let start = item.kenBurnsStartAnchor ?? CGPoint(x: 0.5, y: 0.5)
+        let end = item.kenBurnsEndAnchor ?? defaultKenBurnsEndAnchor(assetID: assetID)
+        let allowed = allowedKenBurnsNormalizedRect(imageSize: imageSize, renderSize: 1080)
+        return (clampKenBurnsAnchor(start, to: allowed), clampKenBurnsAnchor(end, to: allowed))
+    }
+
+    private func allowedKenBurnsNormalizedRect(imageSize: CGSize, renderSize: Double) -> CGRect {
+        let w = Double(imageSize.width)
+        let h = Double(imageSize.height)
+        guard w > 0, h > 0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+
+        let scale = max(renderSize / w, renderSize / h)
+        let cropSizePx = renderSize / max(0.000_001, scale)
+        let halfX = (cropSizePx / 2) / w
+        let halfY = (cropSizePx / 2) / h
+
+        let minX = min(max(halfX, 0), 0.5)
+        let maxX = max(min(1 - halfX, 1), 0.5)
+        let minY = min(max(halfY, 0), 0.5)
+        let maxY = max(min(1 - halfY, 1), 0.5)
+
+        return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+    }
+
+    private func clampKenBurnsAnchor(_ point: CGPoint, to rect: CGRect) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, rect.minX), rect.maxX),
+            y: min(max(point.y, rect.minY), rect.maxY)
+        )
+    }
+
+    private func defaultKenBurnsEndAnchor(assetID: String) -> CGPoint {
+        let options: [CGPoint] = [
+            CGPoint(x: 1.0 / 3.0, y: 1.0 / 3.0),
+            CGPoint(x: 2.0 / 3.0, y: 1.0 / 3.0),
+            CGPoint(x: 1.0 / 3.0, y: 2.0 / 3.0),
+            CGPoint(x: 2.0 / 3.0, y: 2.0 / 3.0),
+        ]
+        return options[stableHashMod4(assetID)]
+    }
+
+    private func stableHashMod4(_ input: String) -> Int {
+        var hash: UInt64 = 14695981039346656037
+        for byte in input.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211
+        }
+        return Int(hash % 4)
+    }
+
+    public func generateMovieDraftTitle(itemID: UUID) async {
+        guard let existing = poppedItem(for: itemID), existing.kind == .movie else { return }
+        guard !movieTitleGenerationInFlightItemIDs.contains(itemID) else { return }
+
+        movieTitleGenerationInFlightItemIDs.insert(itemID)
+        defer { movieTitleGenerationInFlightItemIDs.remove(itemID) }
+
+        appendMovieStatusLine(itemID: itemID, line: "Generating title…")
+
+        let exportables = poppedItems.filter { $0.kind == .asset }
+        let assets: [AlbumAsset] = exportables.compactMap { item in
+            guard let assetID = item.assetID, !assetID.isEmpty else { return nil }
+            return asset(for: assetID)
+        }
+
+        let dateText = movieDateSubtitle(from: assets)
+        let locationText = await movieLocationSubtitle(from: assets)
+        let subtitleSeed = [dateText, locationText].compactMap { $0 }.joined(separator: " • ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let subtitle = subtitleSeed.isEmpty ? nil : subtitleSeed
+
+        let labels = await movieTopLabels(for: exportables)
+
+        let generated: (title: String, subtitle: String?) = {
+            let fallbackTitle = movieFallbackTitle(topLabels: labels)
+            return (title: fallbackTitle, subtitle: subtitle)
+        }()
+
+#if canImport(FoundationModels)
+        if !labels.isEmpty, #available(visionOS 26.0, *) {
+            let requestID = UUID()
+            let context = subtitle
+            let llm = await AlbumFoundationModelsOracleEngine.shared.generateMovieTitle(topLabels: labels, context: context, requestID: requestID)
+            if let title = llm.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                let sub = llm.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let finalSubtitle = (sub?.isEmpty ?? true) ? subtitle : sub
+                applyGeneratedMovieTitle(itemID: itemID, title: title, subtitle: finalSubtitle)
+                appendMovieStatusLine(itemID: itemID, line: "Title ready.")
+                return
+            }
+        }
+#endif
+
+        applyGeneratedMovieTitle(itemID: itemID, title: generated.title, subtitle: generated.subtitle)
+        appendMovieStatusLine(itemID: itemID, line: "Title ready.")
+    }
+
+    private func applyGeneratedMovieTitle(itemID: UUID, title: String, subtitle: String?) {
+        updatePoppedItem(itemID) { item in
+            var movie = item.movie ?? AlbumMovieDraft()
+
+            let currentTitle = movie.draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !movie.titleUserEdited || currentTitle.isEmpty {
+                movie.draftTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            if let subtitle {
+                let trimmed = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    movie.draftSubtitle = trimmed
+                }
+            }
+
+            item.movie = movie
+        }
+    }
+
+    private func appendMovieStatusLine(itemID: UUID, line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var lines = movieStatusLinesByItemID[itemID] ?? []
+        lines.append(trimmed)
+        if lines.count > 60 {
+            lines.removeFirst(lines.count - 60)
+        }
+        movieStatusLinesByItemID[itemID] = lines
+    }
+
+    private func movieFallbackTitle(topLabels: [String]) -> String {
+        let joined = topLabels.map { $0.lowercased() }.joined(separator: " ")
+        func hasAny(_ terms: [String]) -> Bool {
+            terms.contains(where: { joined.contains($0) })
+        }
+
+        if hasAny(["beach", "ocean", "sand", "sea"]) { return "Beachside Days" }
+        if hasAny(["mountain", "hiking", "forest", "lake"]) { return "Mountain Mornings" }
+        if hasAny(["snow", "ski", "winter"]) { return "Winter Days" }
+        if hasAny(["city", "skyline", "street"]) { return "City Lights" }
+        if hasAny(["dog", "puppy"]) { return "Days With Our Pup" }
+        if hasAny(["cat", "kitten"]) { return "Days With Our Cat" }
+        return "Golden Afternoons"
+    }
+
+    private func movieDateSubtitle(from assets: [AlbumAsset]) -> String? {
+        let dates = assets.compactMap(\.creationDate).sorted()
+        guard let minDate = dates.first, let maxDate = dates.last else { return nil }
+
+        let cal = Calendar(identifier: .gregorian)
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.calendar = cal
+
+        if cal.isDate(minDate, inSameDayAs: maxDate) {
+            fmt.dateFormat = "MMM d, yyyy"
+            return fmt.string(from: minDate)
+        }
+
+        let minYear = cal.component(.year, from: minDate)
+        let maxYear = cal.component(.year, from: maxDate)
+
+        if minYear != maxYear {
+            return "\(minYear)–\(maxYear)"
+        }
+
+        let minMonth = cal.component(.month, from: minDate)
+        let maxMonth = cal.component(.month, from: maxDate)
+
+        if minMonth == maxMonth {
+            fmt.dateFormat = "MMM d"
+            let left = fmt.string(from: minDate)
+            fmt.dateFormat = "d, yyyy"
+            let right = fmt.string(from: maxDate)
+            return "\(left)–\(right)"
+        }
+
+        fmt.dateFormat = "MMM d"
+        let left = fmt.string(from: minDate)
+        fmt.dateFormat = "MMM d, yyyy"
+        let right = fmt.string(from: maxDate)
+        return "\(left)–\(right)"
+    }
+
+    private func movieLocationSubtitle(from assets: [AlbumAsset]) async -> String? {
+        guard let loc = assets.compactMap(\.location).first else { return nil }
+        let location = CLLocation(latitude: loc.latitude, longitude: loc.longitude)
+        return await withTimeout(seconds: 0.45) {
+            await self.reverseGeocode(location: location)
+        }
+    }
+
+    private func reverseGeocode(location: CLLocation) async -> String? {
+        await withCheckedContinuation { continuation in
+            CLGeocoder().reverseGeocodeLocation(location) { placemarks, _ in
+                let place = placemarks?.first
+                let parts = [place?.locality, place?.administrativeArea, place?.country]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+
+                if parts.isEmpty {
+                    continuation.resume(returning: nil)
+                } else {
+                    continuation.resume(returning: parts.prefix(2).joined(separator: ", "))
+                }
+            }
+        }
+    }
+
+    private func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async -> T?) async -> T? {
+        let nanos = UInt64(max(0, seconds) * 1_000_000_000)
+        return await withTaskGroup(of: T?.self) { group in
+            group.addTask { await operation() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: nanos)
+                return nil
+            }
+
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+    }
+
+    private func movieTopLabels(for items: [AlbumSceneItemRecord]) async -> [String] {
+        var weights: [String: Double] = [:]
+        weights.reserveCapacity(24)
+
+        for item in items {
+            guard let assetID = item.assetID, !assetID.isEmpty else { continue }
+            guard let asset = asset(for: assetID) else { continue }
+
+            let durationWeight: Double = {
+                switch asset.mediaType {
+                case .photo:
+                    return 5.0
+                case .video:
+                    let duration = asset.duration ?? 0
+                    if let s = item.trimStartSeconds, let e = item.trimEndSeconds, e > s {
+                        return max(0.5, e - s)
+                    }
+                    return min(5.0, max(0, duration))
+                }
+            }()
+
+            let labels: [AlbumVisionLabel]
+            switch asset.mediaType {
+            case .photo:
+                labels = await movieLabelsForImage(assetID: assetID)
+            case .video:
+                let start = item.trimStartSeconds ?? 0
+                let sampleTime = max(0, start + 0.25)
+                labels = await movieLabelsForVideo(assetID: assetID, sampleTime: sampleTime)
+            }
+
+            for label in labels {
+                let cleaned = normalizeVisionLabel(label.text)
+                guard !cleaned.isEmpty else { continue }
+                let w = Double(label.confidence) * durationWeight
+                weights[cleaned, default: 0] += w
+            }
+        }
+
+        return weights
+            .sorted(by: { lhs, rhs in
+                if lhs.value == rhs.value { return lhs.key < rhs.key }
+                return lhs.value > rhs.value
+            })
+            .prefix(8)
+            .map(\.key)
+    }
+
+    private func normalizeVisionLabel(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: " ")
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .joined(separator: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func movieLabelsForImage(assetID: String) async -> [AlbumVisionLabel] {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return [] }
+        guard datasetSource == .photos else { return [] }
+
+        if let cached = await AlbumMovieVisionLabeler.shared.cachedImageLabels(assetID: id) {
+            return cached
+        }
+
+        let data = await assetProvider.requestVisionThumbnailData(localIdentifier: id, maxDimension: 512)
+        guard let data else { return [] }
+        let labels = await AlbumMovieVisionLabeler.shared.classifyImage(assetID: id, imageData: data, maxDimension: 512)
+        return labels
+    }
+
+    private func movieLabelsForVideo(assetID: String, sampleTime: Double) async -> [AlbumVisionLabel] {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return [] }
+        guard datasetSource == .photos else { return [] }
+
+        let bucket = Int(max(0, sampleTime).rounded(.down))
+        if let cached = await AlbumMovieVisionLabeler.shared.cachedVideoLabels(assetID: id, bucket: bucket) {
+            return cached
+        }
+
+        guard let url = await requestVideoURL(assetID: id) else { return [] }
+        let labels = await AlbumMovieVisionLabeler.shared.classifyVideo(assetID: id, url: url, sampleTime: sampleTime, bucket: bucket)
+        return labels
+    }
+
+    public func removePoppedItem(_ itemID: UUID) {
+        guard let item = poppedItems.first(where: { $0.id == itemID }) else { return }
+        poppedItems.removeAll(where: { $0.id == itemID })
+
+        guard item.kind == .asset, let assetID = item.assetID, !assetID.isEmpty else { return }
+
+        let stillPopped = poppedItems.contains(where: { $0.kind == .asset && $0.assetID == assetID })
+        if !stillPopped, !historyAssetIDs.contains(assetID), currentAssetID != assetID {
+            pinnedAssetsByID[assetID] = nil
+        }
+        pinnedAssetLoadsInFlight.remove(assetID)
     }
 
     private func ensurePinnedAssetAvailable(assetID: String, reason: String) async -> Bool {
@@ -2102,5 +2649,663 @@ public final class AlbumModel: ObservableObject {
         }
 
         return "\(fmt.string(from: first)) – \(fmt.string(from: last))"
+    }
+}
+
+private struct AlbumVisionLabel: Sendable, Hashable {
+    let text: String
+    let confidence: Float
+}
+
+private actor AlbumMovieVisionLabeler {
+    static let shared = AlbumMovieVisionLabeler()
+
+    private var cache: [String: [AlbumVisionLabel]] = [:]
+
+    func cachedImageLabels(assetID: String) -> [AlbumVisionLabel]? {
+        cache[imageKey(assetID)]
+    }
+
+    func cachedVideoLabels(assetID: String, bucket: Int) -> [AlbumVisionLabel]? {
+        cache[videoKey(assetID, bucket: bucket)]
+    }
+
+    func classifyImage(assetID: String, imageData: Data, maxDimension: Int) -> [AlbumVisionLabel] {
+        let key = imageKey(assetID)
+        if let cached = cache[key] { return cached }
+
+        guard let cgImage = downsampleCGImage(data: imageData, maxDimension: max(64, maxDimension)) else {
+            cache[key] = []
+            return []
+        }
+
+        let labels = classify(cgImage: cgImage)
+        cache[key] = labels
+        return labels
+    }
+
+    func classifyVideo(assetID: String, url: URL, sampleTime: Double, bucket: Int) async -> [AlbumVisionLabel] {
+        let key = videoKey(assetID, bucket: bucket)
+        if let cached = cache[key] { return cached }
+
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 768, height: 768)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+
+        let time = CMTime(seconds: max(0, sampleTime), preferredTimescale: 600)
+
+        let frame: CGImage? = await withCheckedContinuation { continuation in
+            generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: time)]) { _, cgImage, _, _, _ in
+                continuation.resume(returning: cgImage)
+            }
+        }
+
+        guard let frame else {
+            cache[key] = []
+            return []
+        }
+
+        let labels = classify(cgImage: frame)
+        cache[key] = labels
+        return labels
+    }
+
+    private func imageKey(_ assetID: String) -> String {
+        "img:\(assetID)"
+    }
+
+    private func videoKey(_ assetID: String, bucket: Int) -> String {
+        "vid:\(assetID):\(bucket)"
+    }
+
+    private func classify(cgImage: CGImage) -> [AlbumVisionLabel] {
+        let classify = VNClassifyImageRequest()
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+
+        do {
+            try handler.perform([classify])
+        } catch {
+            return []
+        }
+
+        let results = classify.results ?? []
+        guard !results.isEmpty else { return [] }
+
+        let minConfidence: Float = 0.20
+        var labels: [AlbumVisionLabel] = []
+        labels.reserveCapacity(8)
+
+        var seen: Set<String> = []
+        seen.reserveCapacity(12)
+
+        for obs in results.sorted(by: { $0.confidence > $1.confidence }) {
+            guard obs.confidence >= minConfidence else { continue }
+            let cleaned = cleanLabel(obs.identifier)
+            guard !cleaned.isEmpty else { continue }
+            guard seen.insert(cleaned).inserted else { continue }
+            labels.append(AlbumVisionLabel(text: cleaned, confidence: obs.confidence))
+            if labels.count >= 8 { break }
+        }
+
+        return labels
+    }
+
+    private func cleanLabel(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: " ")
+            .lowercased()
+    }
+
+    private func downsampleCGImage(data: Data, maxDimension: Int) -> CGImage? {
+        let cfData = data as CFData
+        guard let source = CGImageSourceCreateWithData(cfData, nil) else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+}
+
+private enum AlbumMovieExportSegment {
+    case image(instanceID: UUID, assetID: String, cgImage: CGImage, startAnchor: CGPoint, endAnchor: CGPoint)
+    case video(instanceID: UUID, assetID: String, url: URL, trimStart: Double, trimEnd: Double)
+}
+
+private struct AlbumMovieExportRequest {
+    let title: String
+    let subtitle: String?
+    let segments: [AlbumMovieExportSegment]
+}
+
+private struct AlbumMovieExportResult {
+    let relativePath: String
+    let durationSeconds: Double
+    let fileSizeBytes: Int64
+    let createdAt: Date
+}
+
+private enum AlbumMovieExportPipeline {
+    private static let renderSize = CGSize(width: 1080, height: 1080)
+    private static let fps: Int32 = 30
+    private static let stillDurationSeconds: Double = 5.0
+    private static let titleCardDurationSeconds: Double = 2.0
+
+    private enum ExportError: Error, LocalizedError {
+        case exportSessionUnavailable
+        case unsupportedOutputType
+        case failed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .exportSessionUnavailable:
+                return "Movie export session unavailable"
+            case .unsupportedOutputType:
+                return "Movie export does not support mp4 output"
+            case .failed(let message):
+                return message
+            }
+        }
+    }
+
+    static func export(
+        request: AlbumMovieExportRequest,
+        progress: @escaping @MainActor @Sendable (Double) -> Void,
+        status: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> AlbumMovieExportResult {
+        await status("Analyzing media…")
+        await progress(0.02)
+
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw ExportError.failed("Application Support directory unavailable")
+        }
+
+        let moviesDir = appSupport.appendingPathComponent("Movies", isDirectory: true)
+        try fm.createDirectory(at: moviesDir, withIntermediateDirectories: true)
+
+        let createdAt = Date()
+
+        let safeBase = sanitizeFileBase(request.title)
+        let finalURL = uniqueOutputURL(in: moviesDir, baseName: safeBase, ext: "mp4")
+        let relativePath = "Movies/\(finalURL.lastPathComponent)"
+
+        let tempDir = fm.temporaryDirectory.appendingPathComponent("album_movie_\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        defer {
+            try? fm.removeItem(at: tempDir)
+        }
+
+        await status("Rendering title card…")
+        await progress(0.06)
+
+        let titleCardImage = makeTitleCardImage(title: request.title, subtitle: request.subtitle)
+        let titleCardURL = tempDir.appendingPathComponent("title_card.mp4", isDirectory: false)
+        try await renderImageClip(
+            cgImage: titleCardImage,
+            to: titleCardURL,
+            durationSeconds: titleCardDurationSeconds,
+            fps: fps,
+            startAnchor: CGPoint(x: 0.5, y: 0.5),
+            endAnchor: CGPoint(x: 0.5, y: 0.5),
+            startZoom: 1.0,
+            endZoom: 1.0
+        )
+
+        var renderedImageClips: [(id: UUID, url: URL)] = []
+        renderedImageClips.reserveCapacity(request.segments.count)
+
+        let images = request.segments.compactMap { seg -> (id: UUID, cgImage: CGImage, start: CGPoint, end: CGPoint)? in
+            if case .image(let instanceID, _, let cgImage, let start, let end) = seg {
+                return (id: instanceID, cgImage: cgImage, start: start, end: end)
+            }
+            return nil
+        }
+
+        if !images.isEmpty {
+            await status("Rendering images (0/\(images.count))…")
+        }
+
+        for (idx, image) in images.enumerated() {
+            await status("Rendering images (\(idx + 1)/\(images.count))…")
+            let p = 0.08 + (0.52 * (Double(idx) / Double(max(1, images.count))))
+            await progress(p)
+
+            let clipURL = tempDir.appendingPathComponent("img_\(idx).mp4", isDirectory: false)
+            try await renderImageClip(
+                cgImage: image.cgImage,
+                to: clipURL,
+                durationSeconds: stillDurationSeconds,
+                fps: fps,
+                startAnchor: image.start,
+                endAnchor: image.end,
+                startZoom: 1.02,
+                endZoom: 1.06
+            )
+            renderedImageClips.append((id: image.id, url: clipURL))
+        }
+
+        await status("Assembling timeline…")
+        await progress(0.62)
+
+        let composition = AVMutableComposition()
+        guard let compVideoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw ExportError.failed("Failed to create composition video track")
+        }
+
+        let compAudioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+
+        struct SegmentInfo {
+            let startTime: CMTime
+            let duration: CMTime
+            let sourceTrack: AVAssetTrack
+        }
+
+        var segmentInfos: [SegmentInfo] = []
+        segmentInfos.reserveCapacity(request.segments.count + 1)
+
+        var cursor = CMTime.zero
+
+        func insertClipAsset(url: URL) async throws {
+            let asset = AVURLAsset(url: url)
+            guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+                throw ExportError.failed("Clip missing video track")
+            }
+            let duration = (try? await asset.load(.duration)) ?? .zero
+            let range = CMTimeRange(start: .zero, duration: duration)
+            try compVideoTrack.insertTimeRange(range, of: track, at: cursor)
+            segmentInfos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track))
+            cursor = cursor + range.duration
+        }
+
+        try await insertClipAsset(url: titleCardURL)
+
+        for seg in request.segments {
+            switch seg {
+            case .image(let instanceID, _, _, _, _):
+                guard let clip = renderedImageClips.first(where: { $0.id == instanceID })?.url else {
+                    continue
+                }
+                try await insertClipAsset(url: clip)
+
+            case .video(_, _, let url, let trimStart, let trimEnd):
+                let asset = AVURLAsset(url: url)
+                guard let track = try await asset.loadTracks(withMediaType: .video).first else { continue }
+                let assetDuration = ((try? await asset.load(.duration)) ?? .zero).seconds
+
+                let startSeconds = min(max(0, trimStart), max(0, assetDuration))
+                let endSeconds = min(max(startSeconds + 0.5, trimEnd), max(startSeconds + 0.5, assetDuration))
+                let durationSeconds = max(0.5, endSeconds - startSeconds)
+
+                let start = CMTime(seconds: startSeconds, preferredTimescale: 600)
+                let dur = CMTime(seconds: durationSeconds, preferredTimescale: 600)
+                let range = CMTimeRange(start: start, duration: dur)
+
+                try compVideoTrack.insertTimeRange(range, of: track, at: cursor)
+
+                if let audioTracks = try? await asset.loadTracks(withMediaType: .audio),
+                   let sourceAudio = audioTracks.first,
+                   let compAudioTrack {
+                    try? compAudioTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
+                }
+
+                segmentInfos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track))
+                cursor = cursor + range.duration
+            }
+        }
+
+        let totalDuration = cursor
+
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.renderSize = renderSize
+        videoComposition.frameDuration = CMTime(value: 1, timescale: fps)
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: totalDuration)
+
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoTrack)
+
+        for info in segmentInfos {
+            let transform = aspectFillTransform(for: info.sourceTrack, renderSize: renderSize)
+            layerInstruction.setTransform(transform, at: info.startTime)
+        }
+
+        instruction.layerInstructions = [layerInstruction]
+        videoComposition.instructions = [instruction]
+
+        await status("Encoding mp4…")
+        await progress(0.68)
+
+        let tempOutURL = tempDir.appendingPathComponent("movie.mp4", isDirectory: false)
+        if fm.fileExists(atPath: tempOutURL.path) {
+            try? fm.removeItem(at: tempOutURL)
+        }
+
+        guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+            throw ExportError.exportSessionUnavailable
+        }
+        guard exportSession.supportedFileTypes.contains(.mp4) else {
+            throw ExportError.unsupportedOutputType
+        }
+
+        exportSession.outputURL = tempOutURL
+        exportSession.outputFileType = .mp4
+        exportSession.videoComposition = videoComposition
+        exportSession.shouldOptimizeForNetworkUse = true
+
+        let pollTask = Task {
+            while exportSession.status == .exporting || exportSession.status == .waiting {
+                let p = Double(exportSession.progress)
+                await progress(0.68 + (0.30 * max(0, min(1, p))))
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+        defer { pollTask.cancel() }
+
+        try await export(exportSession)
+
+        await progress(0.99)
+
+        if fm.fileExists(atPath: finalURL.path) {
+            try? fm.removeItem(at: finalURL)
+        }
+        try fm.moveItem(at: tempOutURL, to: finalURL)
+
+        let fileSizeBytes: Int64 = {
+            let attrs = (try? fm.attributesOfItem(atPath: finalURL.path)) ?? [:]
+            return (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        }()
+
+        let durationSeconds: Double = {
+            let asset = AVURLAsset(url: finalURL)
+            return asset.duration.seconds
+        }()
+
+        await progress(1.0)
+        return AlbumMovieExportResult(
+            relativePath: relativePath,
+            durationSeconds: max(0, durationSeconds),
+            fileSizeBytes: fileSizeBytes,
+            createdAt: createdAt
+        )
+    }
+
+    private static func export(_ session: AVAssetExportSession) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            session.exportAsynchronously {
+                switch session.status {
+                case .completed:
+                    continuation.resume()
+                case .failed:
+                    continuation.resume(throwing: session.error ?? ExportError.failed("Movie export failed"))
+                case .cancelled:
+                    continuation.resume(throwing: ExportError.failed("Movie export cancelled"))
+                default:
+                    continuation.resume(throwing: session.error ?? ExportError.failed("Movie export failed"))
+                }
+            }
+        }
+    }
+
+    private static func renderImageClip(
+        cgImage: CGImage,
+        to url: URL,
+        durationSeconds: Double,
+        fps: Int32,
+        startAnchor: CGPoint,
+        endAnchor: CGPoint,
+        startZoom: Double,
+        endZoom: Double
+    ) async throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: url.path) {
+            try? fm.removeItem(at: url)
+        }
+
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(renderSize.width),
+            AVVideoHeightKey: Int(renderSize.height),
+        ]
+
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        input.expectsMediaDataInRealTime = false
+
+        let attrs: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+            kCVPixelBufferWidthKey as String: Int(renderSize.width),
+            kCVPixelBufferHeightKey as String: Int(renderSize.height),
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+        ]
+
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: attrs)
+        guard writer.canAdd(input) else {
+            throw ExportError.failed("Movie clip writer cannot add input")
+        }
+        writer.add(input)
+
+        guard writer.startWriting() else {
+            throw writer.error ?? ExportError.failed("Movie clip writer failed to start")
+        }
+        writer.startSession(atSourceTime: .zero)
+
+        let totalFrames = max(1, Int((durationSeconds * Double(fps)).rounded(.up)))
+        let w = Double(cgImage.width)
+        let h = Double(cgImage.height)
+
+        let baseScale = max(Double(renderSize.width) / w, Double(renderSize.height) / h)
+        let baseCropSize = Double(renderSize.width) / max(0.000_001, baseScale)
+
+        func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
+
+        for frameIndex in 0..<totalFrames {
+            while !input.isReadyForMoreMediaData {
+                try? await Task.sleep(nanoseconds: 2_000_000)
+            }
+
+            guard let pool = adaptor.pixelBufferPool else {
+                throw ExportError.failed("Pixel buffer pool unavailable")
+            }
+
+            var buffer: CVPixelBuffer?
+            let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer)
+            guard status == kCVReturnSuccess, let pixelBuffer = buffer else {
+                throw ExportError.failed("Failed to allocate pixel buffer")
+            }
+
+            CVPixelBufferLockBaseAddress(pixelBuffer, [])
+            defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+
+            guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+                throw ExportError.failed("Pixel buffer base address unavailable")
+            }
+
+            let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+
+            guard let ctx = CGContext(
+                data: baseAddress,
+                width: Int(renderSize.width),
+                height: Int(renderSize.height),
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+            ) else {
+                throw ExportError.failed("Failed to create bitmap context")
+            }
+
+            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+            ctx.fill(CGRect(origin: .zero, size: renderSize))
+            ctx.interpolationQuality = .high
+
+            let t = totalFrames <= 1 ? CGFloat(0) : CGFloat(frameIndex) / CGFloat(totalFrames - 1)
+            let anchor = CGPoint(
+                x: lerp(startAnchor.x, endAnchor.x, t),
+                y: lerp(startAnchor.y, endAnchor.y, t)
+            )
+            let zoom = Double(lerp(CGFloat(startZoom), CGFloat(endZoom), t))
+            let cropSize = baseCropSize / max(0.000_001, zoom)
+
+            var cx = Double(anchor.x) * w
+            var cy = Double(anchor.y) * h
+            cx = min(max(cx, cropSize / 2), max(cropSize / 2, w - cropSize / 2))
+            cy = min(max(cy, cropSize / 2), max(cropSize / 2, h - cropSize / 2))
+
+            var originX = cx - (cropSize / 2)
+            var originY = cy - (cropSize / 2)
+            originX = min(max(0, originX), max(0, w - cropSize))
+            originY = min(max(0, originY), max(0, h - cropSize))
+
+            let scale = Double(renderSize.width) / max(0.000_001, cropSize)
+
+            ctx.saveGState()
+            ctx.translateBy(x: 0, y: renderSize.height)
+            ctx.scaleBy(x: 1, y: -1)
+
+            let drawRect = CGRect(
+                x: -originX * scale,
+                y: -originY * scale,
+                width: w * scale,
+                height: h * scale
+            )
+            ctx.draw(cgImage, in: drawRect)
+            ctx.restoreGState()
+
+            let presentationTime = CMTime(value: Int64(frameIndex), timescale: fps)
+            guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
+                throw writer.error ?? ExportError.failed("Failed to append frame")
+            }
+        }
+
+        input.markAsFinished()
+
+        try await withCheckedThrowingContinuation { continuation in
+            writer.finishWriting {
+                if writer.status == .completed {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: writer.error ?? ExportError.failed("Movie clip writer failed"))
+                }
+            }
+        }
+    }
+
+    private static func aspectFillTransform(for track: AVAssetTrack, renderSize: CGSize) -> CGAffineTransform {
+        let natural = track.naturalSize
+        guard natural.width > 0, natural.height > 0 else { return .identity }
+
+        let preferred = track.preferredTransform
+        let rect = CGRect(origin: .zero, size: natural).applying(preferred)
+        let orientedSize = CGSize(width: abs(rect.width), height: abs(rect.height))
+        guard orientedSize.width > 0, orientedSize.height > 0 else { return .identity }
+
+        let normalize = CGAffineTransform(translationX: -rect.origin.x, y: -rect.origin.y)
+        var transform = preferred.concatenating(normalize)
+
+        let scale = max(renderSize.width / orientedSize.width, renderSize.height / orientedSize.height)
+        transform = transform.concatenating(CGAffineTransform(scaleX: scale, y: scale))
+
+        let scaledSize = CGSize(width: orientedSize.width * scale, height: orientedSize.height * scale)
+        let tx = (renderSize.width - scaledSize.width) / 2
+        let ty = (renderSize.height - scaledSize.height) / 2
+        transform = transform.concatenating(CGAffineTransform(translationX: tx, y: ty))
+        return transform
+    }
+
+    private static func sanitizeFileBase(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Movie" }
+
+        let allowed = CharacterSet.alphanumerics.union(.whitespaces)
+        let filtered = trimmed.unicodeScalars.map { allowed.contains($0) ? Character($0) : " " }
+        let squashed = String(filtered)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let underscored = squashed.replacingOccurrences(of: " ", with: "_")
+        if underscored.isEmpty { return "Movie" }
+        return String(underscored.prefix(64))
+    }
+
+    private static func uniqueOutputURL(in dir: URL, baseName: String, ext: String) -> URL {
+        let fm = FileManager.default
+        let base = baseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Movie" : baseName
+        var candidate = dir.appendingPathComponent("\(base).\(ext)", isDirectory: false)
+        if !fm.fileExists(atPath: candidate.path) { return candidate }
+
+        for n in 2...999 {
+            let name = "\(base)-\(n).\(ext)"
+            candidate = dir.appendingPathComponent(name, isDirectory: false)
+            if !fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+
+        return dir.appendingPathComponent("\(base)-\(UUID().uuidString).\(ext)", isDirectory: false)
+    }
+
+    private static func makeTitleCardImage(title: String, subtitle: String?) -> CGImage {
+        let width = Int(renderSize.width)
+        let height = Int(renderSize.height)
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        ) else {
+            return CGImage(width: 1, height: 1, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 4, space: colorSpace, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue), provider: CGDataProvider(data: Data([0, 0, 0, 255]) as CFData)!, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        }
+
+        ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+#if canImport(UIKit)
+        UIGraphicsPushContext(ctx)
+        defer { UIGraphicsPopContext() }
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+
+        let titleFont = UIFont.systemFont(ofSize: 72, weight: .semibold)
+        let subtitleFont = UIFont.systemFont(ofSize: 34, weight: .regular)
+
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
+            .foregroundColor: UIColor.white,
+            .paragraphStyle: paragraph,
+        ]
+
+        let subtitleAttrs: [NSAttributedString.Key: Any] = [
+            .font: subtitleFont,
+            .foregroundColor: UIColor.white.withAlphaComponent(0.82),
+            .paragraphStyle: paragraph,
+        ]
+
+        let safeTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subtitleText = subtitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        let titleRect = CGRect(x: 80, y: 420, width: width - 160, height: 160)
+        (safeTitle as NSString).draw(in: titleRect, withAttributes: titleAttrs)
+
+        if !subtitleText.isEmpty {
+            let subtitleRect = CGRect(x: 120, y: 560, width: width - 240, height: 90)
+            (subtitleText as NSString).draw(in: subtitleRect, withAttributes: subtitleAttrs)
+        }
+#endif
+
+        return ctx.makeImage()!
     }
 }

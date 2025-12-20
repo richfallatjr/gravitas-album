@@ -192,6 +192,180 @@ actor AlbumFoundationModelsOracleEngine {
         }
     }
 
+    func generateMovieTitle(topLabels: [String], context: String?, requestID: UUID) async -> (title: String?, subtitle: String?, error: String?) {
+        await acquireResponseLock()
+        defer { releaseResponseLock() }
+
+        if Task.isCancelled {
+            return (nil, nil, "Cancelled")
+        }
+
+        let labels = topLabels
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let model = SystemLanguageModel.default
+        switch model.availability {
+        case .available:
+            break
+        case .unavailable(let reason):
+            return (nil, nil, "FoundationModels unavailable: \(reason)")
+        }
+
+        if !model.supportsLocale() {
+            return (nil, nil, "LLM unsupported language/locale (\(Locale.current.identifier))")
+        }
+
+        let system = Self.movieTitleInstructions()
+        let prompt = Self.movieTitlePrompt(labels: labels, context: context)
+        if prompt.count > Self.maxUserPromptChars {
+            return (nil, nil, "LLM prompt too large (\(prompt.count) chars; max \(Self.maxUserPromptChars))")
+        }
+
+        do {
+            var options = GenerationOptions()
+            options.maximumResponseTokens = 256
+
+            let baseSession = LanguageModelSession(model: model, instructions: system)
+            let repairSession = LanguageModelSession(model: model, instructions: "\(system)\n\nIMPORTANT: Return a single JSON object only, with keys: title, subtitle, alternates.")
+
+            for attempt in 1...Self.maxAttemptsPerRequest {
+                if Task.isCancelled { return (nil, nil, "Cancelled") }
+
+                let session = (attempt == 1) ? baseSession : repairSession
+                let response = try await session.respond(to: prompt, options: options)
+
+                if let decoded = Self.decodeJSON(MovieTitleResponse.self, from: response) {
+                    if let validationError = Self.validateMovieTitleResponse(decoded) {
+                        if attempt < Self.maxAttemptsPerRequest { continue }
+                        return (nil, nil, "LLM returned invalid output: \(validationError)")
+                    }
+
+                    let title = decoded.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let subtitle = decoded.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let cleanedSubtitle = (subtitle?.isEmpty ?? true) ? nil : subtitle
+                    return (title, cleanedSubtitle, nil)
+                }
+            }
+
+            return (nil, nil, "LLM failed after retries")
+        } catch {
+            if error is CancellationError { return (nil, nil, "Cancelled") }
+
+            let errorDescription: String
+            if let generationError = error as? LanguageModelSession.GenerationError {
+                switch generationError {
+                case .exceededContextWindowSize(let context):
+                    errorDescription = "LLM context too large: \(context.debugDescription)"
+                case .unsupportedLanguageOrLocale(let context):
+                    errorDescription = "LLM unsupported language/locale (\(Locale.current.identifier)): \(context.debugDescription)"
+                case .assetsUnavailable(let context):
+                    errorDescription = "LLM assets unavailable: \(context.debugDescription)"
+                case .rateLimited(let context):
+                    errorDescription = "LLM rate limited: \(context.debugDescription)"
+                case .concurrentRequests(let context):
+                    errorDescription = "LLM concurrent requests: \(context.debugDescription)"
+                case .refusal(_, let context):
+                    errorDescription = "LLM refusal: \(context.debugDescription)"
+                default:
+                    errorDescription = generationError.localizedDescription
+                }
+            } else {
+                errorDescription = error.localizedDescription
+            }
+
+            AlbumLLMDebugDump.dumpError(
+                requestID: requestID,
+                feedback: .up,
+                maxCandidates: 0,
+                error: error,
+                prompt: "SYSTEM:\n\(system)\n\nPROMPT:\n\(prompt)\n"
+            )
+
+            return (nil, nil, errorDescription)
+        }
+    }
+
+    private struct MovieTitleResponse: Decodable {
+        let title: String
+        let subtitle: String?
+        let alternates: [String]
+    }
+
+    private static func movieTitleInstructions() -> String {
+        """
+You generate short nostalgic home-movie titles.
+Use English.
+Return JSON only (no markdown, no code fences). Return a SINGLE JSON object on ONE line.
+
+Output shape:
+{"title":"...","subtitle":"...","alternates":["...","...","...","..."]}
+
+Rules:
+- title: 2–6 words, Title Case, warm/nostalgic, must relate to LABELS.
+- Avoid generic words: Memories, Recap, Highlights, Montage, Album.
+- No punctuation except apostrophes.
+- subtitle: may be empty; if provided, keep it short.
+- alternates: exactly 4 titles, same rules as title.
+"""
+    }
+
+    private static func movieTitlePrompt(labels: [String], context: String?) -> String {
+        func field(_ value: String) -> String {
+            value
+                .replacingOccurrences(of: "\t", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let labelsLine = labels.isEmpty ? "" : labels.map(field).joined(separator: ", ")
+        let contextLine: String = {
+            let trimmed = context?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? "" : field(trimmed)
+        }()
+
+        var lines: [String] = []
+        lines.reserveCapacity(4)
+        lines.append("LABELS: \(labelsLine)")
+        if !contextLine.isEmpty {
+            lines.append("CONTEXT: \(contextLine)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func validateMovieTitleResponse(_ response: MovieTitleResponse) -> String? {
+        func normalize(_ s: String) -> String {
+            s.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        func isValidTitle(_ title: String) -> String? {
+            let trimmed = normalize(title)
+            if trimmed.isEmpty { return "title is empty" }
+
+            let words = trimmed.split(whereSeparator: { $0.isWhitespace })
+            if words.count < 2 || words.count > 6 { return "title word count out of range" }
+
+            let lower = trimmed.lowercased()
+            let banned = ["memories", "recap", "highlights", "montage", "album"]
+            if banned.contains(where: { lower.contains($0) }) { return "title contains a banned generic word" }
+
+            let disallowedPunctuation = CharacterSet.punctuationCharacters.subtracting(CharacterSet(charactersIn: "'"))
+            if trimmed.rangeOfCharacter(from: disallowedPunctuation) != nil { return "title contains disallowed punctuation" }
+
+            return nil
+        }
+
+        if let err = isValidTitle(response.title) { return err }
+
+        if response.alternates.count != 4 { return "alternates must contain exactly 4 items" }
+        for alt in response.alternates {
+            if let err = isValidTitle(alt) { return "alternate invalid: \(err)" }
+        }
+
+        return nil
+    }
+
     private func acquireResponseLock() async {
         if !isResponding {
             isResponding = true

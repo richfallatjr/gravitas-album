@@ -14,6 +14,7 @@ public struct AlbumSceneManagerView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 currentWindowsPanel
+                makeMoviePanel
                 savedScenesPanel
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -28,7 +29,7 @@ public struct AlbumSceneManagerView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.poppedAssetIDs.isEmpty || sceneName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(model.poppedItems.isEmpty || sceneName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
 
                 HStack {
@@ -37,7 +38,7 @@ public struct AlbumSceneManagerView: View {
                         .disabled(selectedSceneID == nil)
                     Button("Overwrite") { overwriteSelectedScene() }
                         .buttonStyle(.bordered)
-                        .disabled(selectedSceneID == nil || model.poppedAssetIDs.isEmpty)
+                        .disabled(selectedSceneID == nil || model.poppedItems.isEmpty)
                 }
 
                 Spacer(minLength: 0)
@@ -53,15 +54,29 @@ public struct AlbumSceneManagerView: View {
                 }
             }
         }
-        .frame(width: 630, height: 690)
+            .frame(width: 630, height: 690)
+    }
+
+    private var makeMoviePanel: some View {
+        HStack(spacing: 12) {
+            Button {
+                makeMovie()
+            } label: {
+                Label("Make Movie", systemImage: "film")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Spacer(minLength: 0)
+        }
     }
 
     private var currentWindowsPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Current Windows • \(model.poppedAssetIDs.count)")
+            Text("Current Windows • \(model.poppedItems.count)")
                 .font(.headline)
 
-            if model.poppedAssetIDs.isEmpty {
+            if model.poppedItems.isEmpty {
                 Text("No windows open. Pop out an asset and it will appear here.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -69,14 +84,31 @@ public struct AlbumSceneManagerView: View {
                     .frame(maxWidth: .infinity)
             } else {
                 List {
-                    ForEach(model.poppedAssetIDs, id: \.self) { assetID in
+                    ForEach(model.poppedItems) { item in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(model.semanticHandle(for: assetID))
-                                .font(.footnote)
-                                .lineLimit(2)
+                            switch item.kind {
+                            case .asset:
+                                Text(model.semanticHandle(for: item.assetID ?? ""))
+                                    .font(.footnote)
+                                    .lineLimit(2)
 
-                            if let asset = model.asset(for: assetID) {
-                                Text(asset.mediaType == .video ? "Video" : "Photo")
+                                if let assetID = item.assetID, let asset = model.asset(for: assetID) {
+                                    Text(asset.mediaType == .video ? "Video" : "Photo")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("Asset")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                            case .movie:
+                                let title = item.movie?.draftTitle.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                Text(title.isEmpty ? "Movie Draft" : title)
+                                    .font(.footnote)
+                                    .lineLimit(2)
+
+                                Text("Movie")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -106,7 +138,7 @@ public struct AlbumSceneManagerView: View {
                     ForEach(model.scenes) { scene in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(scene.name).font(.headline)
-                            Text("\(scene.assetIDs.count) assets")
+                            Text("\(scene.items.count) windows")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -132,9 +164,9 @@ public struct AlbumSceneManagerView: View {
         guard let id = selectedSceneID,
               let scene = model.scenes.first(where: { $0.id == id }) else { return }
 
-        for assetID in scene.assetIDs {
-            openWindow(value: AlbumPopOutPayload(assetID: assetID))
-            model.appendPoppedAsset(assetID)
+        for item in scene.items {
+            model.ensurePoppedItemExists(item)
+            openWindow(value: AlbumPopOutPayload(itemID: item.id))
         }
     }
 
@@ -142,5 +174,11 @@ public struct AlbumSceneManagerView: View {
         guard let id = selectedSceneID,
               let scene = model.scenes.first(where: { $0.id == id }) else { return }
         model.updateScene(scene)
+    }
+
+    private func makeMovie() {
+        let item = model.createPoppedMovieItem()
+        openWindow(value: AlbumPopOutPayload(itemID: item.id))
+        Task { await model.generateMovieDraftTitle(itemID: item.id) }
     }
 }

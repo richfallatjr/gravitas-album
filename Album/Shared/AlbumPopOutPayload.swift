@@ -1,10 +1,9 @@
 import Foundation
 
 public struct AlbumPopOutPayload: Codable, Hashable {
-    public let assetID: String
+    public let itemID: UUID
 
-    public init(assetID: String) {
-        self.assetID = assetID
+    public init(itemID: UUID) {
+        self.itemID = itemID
     }
 }
-
