@@ -44,6 +44,7 @@ private struct AlbumPopOutWindowRootView: View {
     @EnvironmentObject private var model: AlbumModel
 
     @State private var activeItemID: UUID? = nil
+    @State private var hasGeometryMidX: Bool = false
 
     init(payload: Binding<AlbumPopOutPayload?>) {
         self._payload = payload
@@ -84,19 +85,42 @@ private struct AlbumPopOutWindowRootView: View {
             syncPoppedItem(with: nil)
         }
         .background {
-            AlbumWindowAttachmentObserver(
-                onAttach: { syncPoppedItem(with: itemID) },
-                onDetach: { syncPoppedItem(with: nil) },
-                onMidXChange: { midX in
-                    guard let activeItemID else { return }
-                    model.updatePoppedItemWindowMidX(itemID: activeItemID, midX: midX)
+            ZStack {
+                AlbumWindowAttachmentObserver(
+                    onAttach: { syncPoppedItem(with: itemID) },
+                    onDetach: { syncPoppedItem(with: nil) },
+                    onMidXChange: { midX in
+                        guard !hasGeometryMidX else { return }
+                        guard let activeItemID else { return }
+                        model.updatePoppedItemWindowMidX(itemID: activeItemID, midX: midX)
+                    }
+                )
+
+                GeometryReader3D { proxy in
+                    let rect = proxy.frame(in: .global)
+                    let transform = proxy.transform(in: .global)
+                    let midX = windowMidX(from: rect, transform: transform)
+                    let center = windowWorldCenter(from: rect, transform: transform)
+
+                    Color.clear
+                        .onAppear {
+                            updateWindowMidX(midX)
+                            updateWindowWorldCenter(center)
+                        }
+                        .onChange(of: midX) { newMidX in
+                            updateWindowMidX(newMidX)
+                        }
+                        .onChange(of: center) { newCenter in
+                            updateWindowWorldCenter(newCenter)
+                        }
                 }
-            )
+            }
         }
     }
 
     private func syncPoppedItem(with newItemID: UUID?) {
         if let existing = activeItemID, existing != newItemID {
+            model.updatePoppedItemWindowWorldCenter(itemID: existing, center: nil)
             model.removePoppedItem(existing)
         }
 
@@ -104,7 +128,48 @@ private struct AlbumPopOutWindowRootView: View {
             model.ensurePoppedItemExists(item)
         }
 
+        if newItemID != activeItemID {
+            hasGeometryMidX = false
+        }
         activeItemID = newItemID
+    }
+
+    private func windowMidX(from rect: Rect3D, transform: AffineTransform3D?) -> Double? {
+        if let transform {
+            let x = transform.translation.x
+            if x.isFinite { return x }
+        }
+        let x = rect.origin.x + (rect.size.width / 2)
+        return x.isFinite ? x : nil
+    }
+
+    private func updateWindowMidX(_ midX: Double?) {
+        guard let midX else { return }
+        guard let activeItemID else { return }
+        hasGeometryMidX = true
+        model.updatePoppedItemWindowMidX(itemID: activeItemID, midX: midX)
+    }
+
+    private func windowWorldCenter(from rect: Rect3D, transform: AffineTransform3D?) -> AlbumWindowWorldCenter? {
+        if let transform {
+            let t = transform.translation
+            let x = t.x
+            let y = t.y
+            let z = t.z
+            guard x.isFinite, y.isFinite, z.isFinite else { return nil }
+            return AlbumWindowWorldCenter(x: x, y: y, z: z)
+        }
+
+        let x = rect.origin.x + (rect.size.width / 2)
+        let y = rect.origin.y + (rect.size.height / 2)
+        let z = rect.origin.z + (rect.size.depth / 2)
+        guard x.isFinite, y.isFinite, z.isFinite else { return nil }
+        return AlbumWindowWorldCenter(x: x, y: y, z: z)
+    }
+
+    private func updateWindowWorldCenter(_ center: AlbumWindowWorldCenter?) {
+        guard let activeItemID else { return }
+        model.updatePoppedItemWindowWorldCenter(itemID: activeItemID, center: center)
     }
 }
 

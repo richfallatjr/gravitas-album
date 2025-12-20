@@ -47,6 +47,7 @@ public struct AlbumImmersiveRootView: View {
             scene.ensureBuilt(in: content, model: sim, anchorOffset: anchorOffset)
             scene.syncCurvedWall(in: content, using: attachments, model: sim, panels: curvedWallVisiblePanels)
         } update: { content, attachments in
+            scene.updateHeadTransformCache(model: sim)
             scene.syncCurvedWall(in: content, using: attachments, model: sim, panels: curvedWallVisiblePanels)
         } attachments: {
             if sim.curvedCanvasEnabled {
@@ -212,7 +213,7 @@ private final class AlbumImmersiveSceneState {
             content.add(head)
         }
 
-        updateHeadTransformCache()
+        updateHeadTransformCache(model: model)
         if initialHeadTransform == nil {
             initialHeadTransform = latestHeadTransform
         }
@@ -242,9 +243,11 @@ private final class AlbumImmersiveSceneState {
         startFrameLoopIfNeeded(model: model)
     }
 
-    private func updateHeadTransformCache() {
+    func updateHeadTransformCache(model: AlbumModel) {
         guard let headAnchor else { return }
-        latestHeadTransform = Transform(matrix: headAnchor.transformMatrix(relativeTo: nil))
+        let matrix = headAnchor.transformMatrix(relativeTo: nil)
+        latestHeadTransform = Transform(matrix: matrix)
+        model.updateHeadWorldTransform(matrix)
         if initialHeadTransform == nil {
             initialHeadTransform = latestHeadTransform
         }
@@ -428,7 +431,7 @@ private final class AlbumImmersiveSceneState {
     }
 
     func syncCurvedWall(in content: RealityViewContent, using attachments: RealityViewAttachments, model: AlbumModel, panels: [AlbumModel.CurvedWallPanel]) {
-        updateHeadTransformCache()
+        updateHeadTransformCache(model: model)
 
         let signature = "enabled=\(model.curvedCanvasEnabled) mode=\(model.panelMode.rawValue) panels=\(panels.count) first=\(panels.first?.assetID ?? "-") last=\(panels.last?.assetID ?? "-") dump=\(model.curvedWallDumpIndex)/\(model.curvedWallDumpPages.count) mem=\(model.memoryPageStartIndex)/\(model.memoryWindowItems.count)"
         if signature != lastCurvedWallLogSignature {

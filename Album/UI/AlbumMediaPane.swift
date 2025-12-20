@@ -464,6 +464,7 @@ private struct AlbumKenBurnsMoveOverlay: View {
         allowedNorm: CGRect
     ) -> some View {
         let size: CGFloat = 36
+        let hitSize: CGFloat = 56
 
         return ZStack {
             switch shape {
@@ -486,6 +487,8 @@ private struct AlbumKenBurnsMoveOverlay: View {
                 .stroke(Color.black.opacity(0.22), lineWidth: 1)
                 .opacity(shape == .circle ? 1 : 0)
         )
+        .frame(width: hitSize, height: hitSize)
+        .contentShape(Rectangle())
         .position(center)
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -663,6 +666,7 @@ private struct AlbumVideoCropMoveOverlay: View {
 
     private func handle(center: CGPoint, imageRect: CGRect, allowedNorm: CGRect) -> some View {
         let size: CGFloat = 36
+        let hitSize: CGFloat = 56
 
         return ZStack {
             Circle()
@@ -677,6 +681,8 @@ private struct AlbumVideoCropMoveOverlay: View {
             Circle()
                 .stroke(Color.black.opacity(0.22), lineWidth: 1)
         )
+        .frame(width: hitSize, height: hitSize)
+        .contentShape(Rectangle())
         .position(center)
         .gesture(
             DragGesture(minimumDistance: 0)

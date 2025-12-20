@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreGraphics
+import simd
 import Vision
 import ImageIO
 import AVFoundation
@@ -13,6 +14,25 @@ import UIKit
 public enum AlbumDatasetSource: String, Sendable, Codable, CaseIterable {
     case photos
     case demo
+}
+
+public struct AlbumWindowWorldCenter: Hashable, Sendable {
+    public let x: Double
+    public let y: Double
+    public let z: Double
+
+    public init(x: Double, y: Double, z: Double) {
+        self.x = x
+        self.y = y
+        self.z = z
+    }
+}
+
+public struct AlbumHeadFrame: Sendable {
+    public var current: simd_float4x4 = matrix_identity_float4x4
+    public var initial: simd_float4x4? = nil
+
+    public init() {}
 }
 
 @MainActor
@@ -127,6 +147,8 @@ public final class AlbumModel: ObservableObject {
         }
     }
     @Published public var poppedItems: [AlbumSceneItemRecord] = []
+    private var windowWorldCentersByItemID: [UUID: AlbumWindowWorldCenter] = [:]
+    public private(set) var headFrame: AlbumHeadFrame = AlbumHeadFrame()
     @Published private var pinnedAssetsByID: [String: AlbumAsset] = [:]
     @Published public var scenes: [AlbumSceneRecord] = []
     @Published public var movieStatusLinesByItemID: [UUID: [String]] = [:]
@@ -1191,6 +1213,49 @@ public final class AlbumModel: ObservableObject {
         poppedItems[idx].lastKnownWindowMidX = midX
     }
 
+    public func updatePoppedItemWindowWorldCenter(itemID: UUID, center: AlbumWindowWorldCenter?) {
+        if let center {
+            windowWorldCentersByItemID[itemID] = center
+        } else {
+            windowWorldCentersByItemID[itemID] = nil
+        }
+    }
+
+    public func windowWorldCenter(for itemID: UUID) -> AlbumWindowWorldCenter? {
+        windowWorldCentersByItemID[itemID]
+    }
+
+    public func updateHeadWorldTransform(_ m: simd_float4x4) {
+        headFrame.current = m
+        if headFrame.initial == nil {
+            headFrame.initial = m
+        }
+    }
+
+    public func resetInitialHeadAnchor() {
+        headFrame.initial = headFrame.current
+    }
+
+    private func headBasisForOrdering() -> (pos: SIMD3<Float>, right: SIMD3<Float>)? {
+        let m = headFrame.initial ?? headFrame.current
+        let pos = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
+        guard pos.x.isFinite, pos.y.isFinite, pos.z.isFinite else { return nil }
+
+        let rawRight = SIMD3<Float>(m.columns.0.x, m.columns.0.y, m.columns.0.z)
+        let len = simd_length(rawRight)
+        guard len.isFinite, len > 0.000_001 else { return nil }
+        let right = rawRight / len
+        return (pos, right)
+    }
+
+    private func sortKeyForItem(_ itemID: UUID) -> Float? {
+        guard let basis = headBasisForOrdering() else { return nil }
+        guard let c = windowWorldCentersByItemID[itemID] else { return nil }
+        let p = SIMD3<Float>(Float(c.x), Float(c.y), Float(c.z))
+        let v = p - basis.pos
+        return simd_dot(v, basis.right)
+    }
+
     public func ensurePoppedItemExists(_ item: AlbumSceneItemRecord) {
         guard poppedItems.contains(where: { $0.id == item.id }) == false else { return }
         poppedItems.append(item)
@@ -1227,14 +1292,50 @@ public final class AlbumModel: ObservableObject {
             return
         }
 
+        resetInitialHeadAnchor()
+
         let exportablesRaw = poppedItems
             .filter { $0.kind == .asset && ($0.assetID?.isEmpty == false) }
 
+        AlbumLog.model.info("Movie export window positions: \(exportablesRaw.count, privacy: .public)")
+        for item in exportablesRaw {
+            let midX = item.lastKnownWindowMidX
+            let center = windowWorldCentersByItemID[item.id]
+            if let center {
+                AlbumLog.model.info("Movie export item id=\(item.id.uuidString, privacy: .public) asset=\(item.assetID ?? "nil", privacy: .public) midX=\(midX ?? 0, privacy: .public) center=(\(center.x, privacy: .public), \(center.y, privacy: .public), \(center.z, privacy: .public))")
+            } else {
+                AlbumLog.model.info("Movie export item id=\(item.id.uuidString, privacy: .public) asset=\(item.assetID ?? "nil", privacy: .public) midX=\(midX ?? 0, privacy: .public) center=nil")
+            }
+        }
+
+        if let basis = headBasisForOrdering() {
+            AlbumLog.model.info("Movie ordering head pos=(\(basis.pos.x, privacy: .public), \(basis.pos.y, privacy: .public), \(basis.pos.z, privacy: .public)) right=(\(basis.right.x, privacy: .public), \(basis.right.y, privacy: .public), \(basis.right.z, privacy: .public))")
+        } else {
+            AlbumLog.model.info("Movie ordering head basis unavailable; falling back to window midX")
+        }
+        for item in exportablesRaw {
+            let key = sortKeyForItem(item.id) ?? -999
+            AlbumLog.model.info("Movie ordering item id=\(item.id.uuidString, privacy: .public) key=\(key, privacy: .public)")
+        }
+
         let exportables = exportablesRaw.sorted { a, b in
-            let ax = a.lastKnownWindowMidX ?? 0
-            let bx = b.lastKnownWindowMidX ?? 0
-            if ax == bx { return a.id.uuidString < b.id.uuidString }
-            return ax < bx
+            let ak = sortKeyForItem(a.id)
+            let bk = sortKeyForItem(b.id)
+
+            switch (ak, bk) {
+            case let (ak?, bk?):
+                if ak == bk { return a.id.uuidString < b.id.uuidString }
+                return ak < bk
+            case (nil, nil):
+                let ax = a.lastKnownWindowMidX ?? 0
+                let bx = b.lastKnownWindowMidX ?? 0
+                if ax == bx { return a.id.uuidString < b.id.uuidString }
+                return ax < bx
+            case (nil, _?):
+                return false
+            case (_?, nil):
+                return true
+            }
         }
 
         guard !exportables.isEmpty else {
@@ -1264,44 +1365,22 @@ public final class AlbumModel: ObservableObject {
 
 #if canImport(UIKit)
         func cgImage(from image: UIImage) -> CGImage? {
-            if image.imageOrientation == .up, let cg = image.cgImage {
-                return cg
-            }
-
             let pixelSize = CGSize(
                 width: image.size.width * image.scale,
                 height: image.size.height * image.scale
             )
 
-            if pixelSize.width > 0, pixelSize.height > 0 {
-                let format = UIGraphicsImageRendererFormat()
-                format.scale = 1
-                format.opaque = true
+            guard pixelSize.width > 0, pixelSize.height > 0 else { return nil }
 
-                let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
-                let rendered = renderer.image { ctx in
-                    ctx.cgContext.setFillColor(UIColor.black.cgColor)
-                    ctx.cgContext.fill(CGRect(origin: .zero, size: pixelSize))
-                    image.draw(in: CGRect(origin: .zero, size: pixelSize))
-                }
-                if let cg = rendered.cgImage { return cg }
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.opaque = true
+
+            let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
+            let rendered = renderer.image { _ in
+                image.draw(in: CGRect(origin: .zero, size: pixelSize))
             }
-
-            if let data = image.jpegData(compressionQuality: 0.95) ?? image.pngData(),
-               let source = CGImageSourceCreateWithData(data as CFData, nil) {
-                let maxDim = max(1, Int(max(pixelSize.width, pixelSize.height)))
-                let options: [CFString: Any] = [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: maxDim,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                ]
-                if let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
-                    return cg
-                }
-                return CGImageSourceCreateImageAtIndex(source, 0, nil)
-            }
-
-            return nil
+            return rendered.cgImage
         }
 #endif
 
@@ -1756,6 +1835,7 @@ public final class AlbumModel: ObservableObject {
     public func removePoppedItem(_ itemID: UUID) {
         guard let item = poppedItems.first(where: { $0.id == itemID }) else { return }
         poppedItems.removeAll(where: { $0.id == itemID })
+        windowWorldCentersByItemID[itemID] = nil
 
         guard item.kind == .asset, let assetID = item.assetID, !assetID.isEmpty else { return }
 
@@ -2947,6 +3027,8 @@ private enum AlbumMovieExportPipeline {
             let duration: CMTime
             let sourceTrack: AVAssetTrack
             let cropAnchor: CGPoint?
+            let zoomStart: CGFloat?
+            let zoomEnd: CGFloat?
         }
 
         var segmentInfos: [SegmentInfo] = []
@@ -2962,12 +3044,13 @@ private enum AlbumMovieExportPipeline {
             let duration = (try? await asset.load(.duration)) ?? .zero
             let range = CMTimeRange(start: .zero, duration: duration)
             try compVideoTrack.insertTimeRange(range, of: track, at: cursor)
-            segmentInfos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track, cropAnchor: nil))
+            segmentInfos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track, cropAnchor: nil, zoomStart: nil, zoomEnd: nil))
             cursor = cursor + range.duration
         }
 
         try await insertClipAsset(url: titleCardURL)
 
+        var nextVideoZoomIn = true
         for seg in request.segments {
             switch seg {
             case .image(let instanceID, _, _, _, _):
@@ -2997,7 +3080,18 @@ private enum AlbumMovieExportPipeline {
                     try? compAudioTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
                 }
 
-                segmentInfos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track, cropAnchor: cropAnchor))
+                let zoomStart: CGFloat = nextVideoZoomIn ? 1.0 : 1.1
+                let zoomEnd: CGFloat = nextVideoZoomIn ? 1.1 : 1.0
+                nextVideoZoomIn.toggle()
+
+                segmentInfos.append(SegmentInfo(
+                    startTime: cursor,
+                    duration: range.duration,
+                    sourceTrack: track,
+                    cropAnchor: cropAnchor,
+                    zoomStart: zoomStart,
+                    zoomEnd: zoomEnd
+                ))
                 cursor = cursor + range.duration
             }
         }
@@ -3014,8 +3108,15 @@ private enum AlbumMovieExportPipeline {
         let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoTrack)
 
         for info in segmentInfos {
-            let transform = aspectFillTransform(for: info.sourceTrack, renderSize: renderSize, cropAnchor: info.cropAnchor)
-            layerInstruction.setTransform(transform, at: info.startTime)
+            let baseTransform = aspectFillTransform(for: info.sourceTrack, renderSize: renderSize, cropAnchor: info.cropAnchor)
+            if let zoomStart = info.zoomStart, let zoomEnd = info.zoomEnd {
+                let startTransform = zoomTransform(baseTransform, scale: zoomStart, renderSize: renderSize)
+                let endTransform = zoomTransform(baseTransform, scale: zoomEnd, renderSize: renderSize)
+                let range = CMTimeRange(start: info.startTime, duration: info.duration)
+                layerInstruction.setTransformRamp(fromStart: startTransform, toEnd: endTransform, timeRange: range)
+            } else {
+                layerInstruction.setTransform(baseTransform, at: info.startTime)
+            }
         }
 
         instruction.layerInstructions = [layerInstruction]
@@ -3146,6 +3247,7 @@ private enum AlbumMovieExportPipeline {
 
         let baseScale = max(Double(renderSize.width) / w, Double(renderSize.height) / h)
         let baseCropSize = Double(renderSize.width) / max(0.000_001, baseScale)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
 
         func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
 
@@ -3167,29 +3269,6 @@ private enum AlbumMovieExportPipeline {
             CVPixelBufferLockBaseAddress(pixelBuffer, [])
             defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
 
-            guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
-                throw ExportError.failed("Pixel buffer base address unavailable")
-            }
-
-            let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-
-            guard let ctx = CGContext(
-                data: baseAddress,
-                width: Int(renderSize.width),
-                height: Int(renderSize.height),
-                bitsPerComponent: 8,
-                bytesPerRow: bytesPerRow,
-                space: colorSpace,
-                bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-            ) else {
-                throw ExportError.failed("Failed to create bitmap context")
-            }
-
-            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
-            ctx.fill(CGRect(origin: .zero, size: renderSize))
-            ctx.interpolationQuality = .high
-
             let t = totalFrames <= 1 ? CGFloat(0) : CGFloat(frameIndex) / CGFloat(totalFrames - 1)
             let anchor = CGPoint(
                 x: lerp(startAnchor.x, endAnchor.x, t),
@@ -3209,19 +3288,37 @@ private enum AlbumMovieExportPipeline {
             originY = min(max(0, originY), max(0, h - cropSize))
 
             let scale = Double(renderSize.width) / max(0.000_001, cropSize)
-
-            ctx.saveGState()
-            ctx.translateBy(x: 0, y: renderSize.height)
-            ctx.scaleBy(x: 1, y: -1)
-
+            let originYBottom = (h - cropSize) - originY
             let drawRect = CGRect(
                 x: -originX * scale,
-                y: -originY * scale,
+                y: -originYBottom * scale,
                 width: w * scale,
                 height: h * scale
             )
+
+            guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+                throw ExportError.failed("Pixel buffer base address unavailable")
+            }
+
+            let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+            let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            guard let ctx = CGContext(
+                data: baseAddress,
+                width: Int(renderSize.width),
+                height: Int(renderSize.height),
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo
+            ) else {
+                throw ExportError.failed("Failed to create pixel buffer context")
+            }
+
+            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+            ctx.fill(CGRect(origin: .zero, size: renderSize))
+
+            ctx.interpolationQuality = .high
             ctx.draw(cgImage, in: drawRect)
-            ctx.restoreGState()
 
             let presentationTime = CMTime(value: Int64(frameIndex), timescale: fps)
             guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
@@ -3292,6 +3389,15 @@ private enum AlbumMovieExportPipeline {
         let ty = (renderSize.height / 2) - (scaledSize.height * anchor.y)
         transform = transform.concatenating(CGAffineTransform(translationX: tx, y: ty))
         return transform
+    }
+
+    private static func zoomTransform(_ transform: CGAffineTransform, scale: CGFloat, renderSize: CGSize) -> CGAffineTransform {
+        let center = CGPoint(x: renderSize.width / 2, y: renderSize.height / 2)
+        var zoom = CGAffineTransform.identity
+        zoom = zoom.translatedBy(x: center.x, y: center.y)
+        zoom = zoom.scaledBy(x: scale, y: scale)
+        zoom = zoom.translatedBy(x: -center.x, y: -center.y)
+        return transform.concatenating(zoom)
     }
 
     private static func sanitizeFileBase(_ raw: String) -> String {
