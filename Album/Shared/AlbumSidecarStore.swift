@@ -95,7 +95,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         self.key = key
         self.updatedAt = updatedAt
         self.rating = max(-1, min(1, rating))
-        self.preferenceScore = max(-1, min(1, preferenceScore))
+        self.preferenceScore = preferenceScore.isFinite ? preferenceScore : 0
         self.hidden = hidden
         self.vision = vision
     }
@@ -128,7 +128,8 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         key = try container.decode(AlbumSidecarKey.self, forKey: .key)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
         rating = max(-1, min(1, try container.decodeIfPresent(Int.self, forKey: .rating) ?? 0))
-        preferenceScore = max(-1, min(1, try container.decodeIfPresent(Float.self, forKey: .preferenceScore) ?? 0))
+        let decodedPreferenceScore = try container.decodeIfPresent(Float.self, forKey: .preferenceScore) ?? 0
+        preferenceScore = decodedPreferenceScore.isFinite ? decodedPreferenceScore : 0
         hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
 
         if let vision = try container.decodeIfPresent(VisionInfo.self, forKey: .vision) {
@@ -368,14 +369,14 @@ public actor AlbumSidecarStore {
 
     public func setPreferenceScore(_ key: AlbumSidecarKey, preferenceScore: Float) async {
         await mutate(key) { record in
-            record.preferenceScore = max(-1, min(1, preferenceScore))
+            record.preferenceScore = preferenceScore.isFinite ? preferenceScore : 0
         }
     }
 
     public func setRatingAndPreferenceScore(_ key: AlbumSidecarKey, rating: Int, preferenceScore: Float) async {
         await mutate(key) { record in
             record.rating = max(-1, min(1, rating))
-            record.preferenceScore = max(-1, min(1, preferenceScore))
+            record.preferenceScore = preferenceScore.isFinite ? preferenceScore : 0
         }
     }
 

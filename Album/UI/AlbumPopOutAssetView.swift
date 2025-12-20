@@ -142,6 +142,9 @@ public struct AlbumMovieDraftView: View {
 
     @EnvironmentObject private var model: AlbumModel
     @State private var player: AVPlayer? = nil
+    @State private var renderStartDate: Date? = nil
+    @State private var renderEndDate: Date? = nil
+    @State private var lastRenderKind: AlbumMovieRenderState.Kind? = nil
 
     @State private var shareItems: [Any] = []
     @State private var isSharePresented: Bool = false
@@ -206,24 +209,9 @@ public struct AlbumMovieDraftView: View {
                     .tint(palette.historyButtonColor)
 
                 if !statusLines.isEmpty {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(statusLines, id: \.self) { line in
-                                Text(line)
-                                    .font(.caption2)
-                                    .foregroundStyle(palette.panelSecondaryText)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .padding(10)
-                    }
-                    .frame(maxHeight: 220)
-                    .background(palette.cardBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(palette.cardBorder.opacity(0.65), lineWidth: 1)
-                    )
+                    statusLogView(statusLines: statusLines, palette: palette)
                 }
+                elapsedTimerView(renderKind: draft.renderState.kind, palette: palette)
 
             case .ready:
                 moviePreview(draft: draft)
@@ -249,24 +237,9 @@ public struct AlbumMovieDraftView: View {
                 }
 
                 if !statusLines.isEmpty {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(statusLines, id: \.self) { line in
-                                Text(line)
-                                    .font(.caption2)
-                                    .foregroundStyle(palette.panelSecondaryText)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .padding(10)
-                    }
-                    .frame(maxHeight: 220)
-                    .background(palette.cardBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(palette.cardBorder.opacity(0.65), lineWidth: 1)
-                    )
+                    statusLogView(statusLines: statusLines, palette: palette)
                 }
+                elapsedTimerView(renderKind: draft.renderState.kind, palette: palette)
             }
 
             Spacer(minLength: 0)
@@ -280,8 +253,26 @@ public struct AlbumMovieDraftView: View {
         .onChange(of: draft.artifactRelativePath) { _ in
             configurePlayerIfReady()
         }
+        .onChange(of: draft.renderState.kind) { newKind in
+            let previous = lastRenderKind
+            lastRenderKind = newKind
+
+            if newKind == .rendering {
+                renderStartDate = Date()
+                renderEndDate = nil
+            } else if previous == .rendering {
+                renderEndDate = Date()
+            } else if newKind == .draft {
+                renderStartDate = nil
+                renderEndDate = nil
+            }
+        }
         .onAppear {
             configurePlayerIfReady()
+            lastRenderKind = draft.renderState.kind
+            if draft.renderState.kind == .rendering, renderStartDate == nil {
+                renderStartDate = Date()
+            }
         }
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -362,5 +353,89 @@ public struct AlbumMovieDraftView: View {
 
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
         return base.appendingPathComponent(relative, isDirectory: false)
+    }
+
+    private static let statusLogBottomID = "album-movie-status-log-bottom"
+
+    @ViewBuilder
+    private func statusLogView(statusLines: [String], palette: AlbumThemePalette) -> some View {
+        let indexedLines = Array(statusLines.enumerated())
+
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(indexedLines, id: \.offset) { _, line in
+                        Text(line)
+                            .font(.caption2)
+                            .foregroundStyle(palette.panelSecondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.statusLogBottomID)
+                }
+                .padding(10)
+            }
+            .onAppear {
+                scrollStatusLogToBottom(proxy, statusLines: statusLines)
+            }
+            .onChange(of: statusLines.count) { _ in
+                scrollStatusLogToBottom(proxy, statusLines: statusLines)
+            }
+        }
+        .frame(maxHeight: 220)
+        .background(palette.cardBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(palette.cardBorder.opacity(0.65), lineWidth: 1)
+        )
+    }
+
+    private func scrollStatusLogToBottom(_ proxy: ScrollViewProxy, statusLines: [String]) {
+        guard !statusLines.isEmpty else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(Self.statusLogBottomID, anchor: .bottom)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func elapsedTimerView(renderKind: AlbumMovieRenderState.Kind, palette: AlbumThemePalette) -> some View {
+        switch renderKind {
+        case .rendering:
+            if let renderStartDate {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let elapsed = max(0, context.date.timeIntervalSince(renderStartDate))
+                    Text("Elapsed: \(formatElapsed(elapsed))")
+                        .font(.caption2)
+                        .foregroundStyle(palette.panelSecondaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        case .failed:
+            if let renderStartDate, let renderEndDate {
+                let elapsed = max(0, renderEndDate.timeIntervalSince(renderStartDate))
+                Text("Elapsed: \(formatElapsed(elapsed))")
+                    .font(.caption2)
+                    .foregroundStyle(palette.panelSecondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .draft, .ready:
+            EmptyView()
+        }
+    }
+
+    private func formatElapsed(_ seconds: TimeInterval) -> String {
+        let totalSeconds = Int(max(0, seconds.rounded(.down)))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let secs = totalSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        }
+        return String(format: "%02d:%02d", minutes, secs)
     }
 }

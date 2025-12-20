@@ -4,6 +4,7 @@ import simd
 import Vision
 import ImageIO
 import AVFoundation
+import AudioToolbox
 import CoreLocation
 import CoreVideo
 
@@ -147,6 +148,7 @@ public final class AlbumModel: ObservableObject {
         }
     }
     @Published public var poppedItems: [AlbumSceneItemRecord] = []
+    private var windowMidXByItemID: [UUID: Double] = [:]
     private var windowWorldCentersByItemID: [UUID: AlbumWindowWorldCenter] = [:]
     public private(set) var headFrame: AlbumHeadFrame = AlbumHeadFrame()
     @Published private var pinnedAssetsByID: [String: AlbumAsset] = [:]
@@ -427,16 +429,52 @@ public final class AlbumModel: ObservableObject {
         baselineTuningMultipliers(forPreferenceScore: preferenceScore(for: assetID))
     }
 
+    private enum ThumbTuning {
+        // Debug-tuned: strong deltas so effects are unmistakable.
+        static let upMassGain: Float = 75.0
+        static let downMassLoss: Float = 105.0
+        static let downAccelGain: Float = 525.0
+
+        static var upTopMassMultiplier: Double { Double(1.0 + upMassGain) }
+        static let upTopAccelerationMultiplier: Double = 1.0
+
+        static var downTopMassMultiplier: Double { Double(1.0 / (1.0 + downMassLoss)) }
+        static var downTopAccelerationMultiplier: Double { Double(1.0 + downAccelGain) }
+    }
+
     private func baselineTuningMultipliers(forPreferenceScore scoreRaw: Float) -> (massMultiplier: Float, accelerationMultiplier: Float) {
-        let score = max(-1, min(1, scoreRaw))
-        let ln2 = log(2.0)
+        guard scoreRaw.isFinite else { return (1.0, 1.0) }
+        guard scoreRaw != 0 else { return (1.0, 1.0) }
 
-        let massMultiplierBase = Float(exp(ln2 * Double(score)))
-        let accelMultiplierBase = Float(exp(-ln2 * Double(score)))
+        if scoreRaw > 0 {
+            let exponent = Double(scoreRaw)
+            return (
+                powFloat(base: ThumbTuning.upTopMassMultiplier, exponent: exponent, fallback: Float.greatestFiniteMagnitude),
+                powFloat(base: ThumbTuning.upTopAccelerationMultiplier, exponent: exponent, fallback: 1.0)
+            )
+        }
 
-        let massMultiplier = min(3.0, max(0.3, massMultiplierBase))
-        let accelerationMultiplier = min(3.0, max(0.5, accelMultiplierBase))
-        return (massMultiplier, accelerationMultiplier)
+        let exponent = Double(-scoreRaw)
+        return (
+            powFloat(base: ThumbTuning.downTopMassMultiplier, exponent: exponent, fallback: Float.leastNonzeroMagnitude),
+            powFloat(base: ThumbTuning.downTopAccelerationMultiplier, exponent: exponent, fallback: Float.greatestFiniteMagnitude)
+        )
+    }
+
+    private func powFloat(base: Double, exponent: Double, fallback: Float) -> Float {
+        guard base.isFinite, exponent.isFinite else { return fallback }
+        if base == 0 { return 0 }
+        if exponent == 0 { return 1 }
+
+        let raw = pow(base, exponent)
+        guard raw.isFinite else { return fallback }
+
+        let asFloat = Float(raw)
+        if asFloat.isFinite {
+            if asFloat == 0 { return Float.leastNonzeroMagnitude }
+            return asFloat
+        }
+        return fallback
     }
 
     public func createdYearMonth(for assetID: String) -> String? {
@@ -1109,10 +1147,9 @@ public final class AlbumModel: ObservableObject {
         if persistPreference {
             let rating = feedback == .up ? 1 : -1
 
-            let step: Float = 0.25
             let priorScore = preferenceScoreByAssetID[id] ?? 0
-            let delta = (feedback == .up) ? step : -step
-            let newScore = max(-1, min(1, priorScore + delta))
+            let delta: Float = (feedback == .up) ? 1 : -1
+            let newScore = priorScore + delta
 
             if newScore != 0 {
                 preferenceScoreByAssetID[id] = newScore
@@ -1270,8 +1307,15 @@ public final class AlbumModel: ObservableObject {
     }
 
     public func updatePoppedItemWindowMidX(itemID: UUID, midX: Double?) {
-        guard let idx = poppedItems.firstIndex(where: { $0.id == itemID }) else { return }
-        poppedItems[idx].lastKnownWindowMidX = midX
+        if let midX, midX.isFinite {
+            windowMidXByItemID[itemID] = midX
+        } else {
+            windowMidXByItemID[itemID] = nil
+        }
+    }
+
+    public func windowMidX(for itemID: UUID) -> Double? {
+        windowMidXByItemID[itemID]
     }
 
     public func updatePoppedItemWindowWorldCenter(itemID: UUID, center: AlbumWindowWorldCenter?) {
@@ -1364,7 +1408,7 @@ public final class AlbumModel: ObservableObject {
 
         AlbumLog.model.info("Movie export window positions: \(exportablesRaw.count, privacy: .public)")
         for item in exportablesRaw {
-            let midX = item.lastKnownWindowMidX
+            let midX = windowMidXByItemID[item.id]
             let center = windowWorldCentersByItemID[item.id]
             if let center {
                 AlbumLog.model.info("Movie export item id=\(item.id.uuidString, privacy: .public) asset=\(item.assetID ?? "nil", privacy: .public) midX=\(midX ?? 0, privacy: .public) center=(\(center.x, privacy: .public), \(center.y, privacy: .public), \(center.z, privacy: .public))")
@@ -1375,13 +1419,13 @@ public final class AlbumModel: ObservableObject {
 
         AlbumLog.model.info("Movie ordering uses window world center.x (fallback: window midX).")
         for item in exportablesRaw {
-            let xKey = windowWorldCentersByItemID[item.id]?.x ?? item.lastKnownWindowMidX
+            let xKey = windowWorldCentersByItemID[item.id]?.x ?? windowMidXByItemID[item.id]
             AlbumLog.model.info("Movie ordering item id=\(item.id.uuidString, privacy: .public) xKey=\(xKey ?? 0, privacy: .public)")
         }
 
         let exportables = exportablesRaw.sorted { a, b in
-            let ax = windowWorldCentersByItemID[a.id]?.x ?? a.lastKnownWindowMidX ?? 0
-            let bx = windowWorldCentersByItemID[b.id]?.x ?? b.lastKnownWindowMidX ?? 0
+            let ax = windowWorldCentersByItemID[a.id]?.x ?? windowMidXByItemID[a.id] ?? 0
+            let bx = windowWorldCentersByItemID[b.id]?.x ?? windowMidXByItemID[b.id] ?? 0
             if ax == bx { return a.id.uuidString < b.id.uuidString }
             return ax < bx
         }
@@ -1883,6 +1927,7 @@ public final class AlbumModel: ObservableObject {
     public func removePoppedItem(_ itemID: UUID) {
         guard let item = poppedItems.first(where: { $0.id == itemID }) else { return }
         poppedItems.removeAll(where: { $0.id == itemID })
+        windowMidXByItemID[itemID] = nil
         windowWorldCentersByItemID[itemID] = nil
 
         guard item.kind == .asset, let assetID = item.assetID, !assetID.isEmpty else { return }
@@ -2532,12 +2577,9 @@ public final class AlbumModel: ObservableObject {
         let maxNeighbors = 20
         let similarityExponent: Float = 1.0
 
-        let upMassBoost: Float = 1.5
-        let upAccelDamp: Float = 0.8
-        let downMassShrink: Float = 0.7
-        let downAccelBoost: Float = 1.6
-
-        func lerp(_ a: Float, _ b: Float, _ t: Float) -> Float { a + (b - a) * t }
+        let massGain: Float = ThumbTuning.upMassGain
+        let massLoss: Float = ThumbTuning.downMassLoss
+        let accelGain: Float = ThumbTuning.downAccelGain
 
         var deltas: [AlbumItemTuningDelta] = []
         deltas.reserveCapacity(min(neighbors.count, maxNeighbors))
@@ -2563,11 +2605,11 @@ public final class AlbumModel: ObservableObject {
 
             switch feedback {
             case .up:
-                massMul = lerp(1.0, upMassBoost, w)
-                accelMul = lerp(1.0, upAccelDamp, w)
+                massMul = 1.0 + massGain * w
+                accelMul = 1.0
             case .down:
-                massMul = lerp(1.0, downMassShrink, w)
-                accelMul = lerp(1.0, downAccelBoost, w)
+                massMul = 1.0 / (1.0 + massLoss * w)
+                accelMul = 1.0 + accelGain * w
             }
 
             deltas.append(.init(itemID: id, massMultiplier: massMul, accelerationMultiplier: accelMul))
@@ -3209,12 +3251,47 @@ private enum AlbumMovieExportPipeline {
 
         try await export(exportSession)
 
-        await progress(0.99)
+        await progress(0.98)
 
         if fm.fileExists(atPath: finalURL.path) {
             try? fm.removeItem(at: finalURL)
         }
         try fm.moveItem(at: tempOutURL, to: finalURL)
+
+        let exportedAsset = AVURLAsset(url: finalURL)
+        let exportedAudioTracks = (try? await exportedAsset.loadTracks(withMediaType: .audio)) ?? []
+        if !exportedAudioTracks.isEmpty {
+            await status("Normalizing audio…")
+            let fixedURL = tempDir.appendingPathComponent("movie_audio_fixed.mp4", isDirectory: false)
+
+            let audioProgress: @MainActor @Sendable (Double) -> Void = { fraction in
+                progress(0.98 + (0.01 * max(0, min(1, fraction))))
+            }
+
+            do {
+                let normalizedURL = try await normalizeAudioForSocialIfNeeded(
+                    inputURL: finalURL,
+                    outputURL: fixedURL,
+                    progress: audioProgress
+                )
+
+                if normalizedURL != finalURL {
+                    do {
+                        _ = try fm.replaceItemAt(finalURL, withItemAt: normalizedURL)
+                    } catch {
+                        AlbumLog.model.error("Movie audio replace failed: \(String(describing: error), privacy: .public)")
+                        let details = String(describing: error).replacingOccurrences(of: "\n", with: " ")
+                        await status("Audio normalize replace failed; keeping original audio. (\(details))")
+                    }
+                }
+            } catch {
+                AlbumLog.model.error("Movie audio normalization failed: \(String(describing: error), privacy: .public)")
+                let details = String(describing: error).replacingOccurrences(of: "\n", with: " ")
+                await status("Audio normalization failed; keeping original audio. (\(details))")
+            }
+        }
+
+        await progress(0.99)
 
         let fileSizeBytes: Int64 = {
             let attrs = (try? fm.attributesOfItem(atPath: finalURL.path)) ?? [:]
@@ -3250,6 +3327,260 @@ private enum AlbumMovieExportPipeline {
                 }
             }
         }
+    }
+
+    private static func normalizeAudioForSocialIfNeeded(
+        inputURL: URL,
+        outputURL: URL,
+        progress: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> URL {
+        let asset = AVURLAsset(url: inputURL)
+
+        guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
+            throw ExportError.failed("Audio normalize: missing video track")
+        }
+
+        guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else {
+            return inputURL
+        }
+
+        let fm = FileManager.default
+        if fm.fileExists(atPath: outputURL.path) {
+            try? fm.removeItem(at: outputURL)
+        }
+
+        let totalSeconds = max(0.000_001, ((try? await asset.load(.duration)) ?? asset.duration).seconds)
+
+        let reader = try AVAssetReader(asset: asset)
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+        writer.shouldOptimizeForNetworkUse = true
+
+        let videoOutputSettings: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+        ]
+
+        let videoOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: videoOutputSettings)
+        videoOutput.alwaysCopiesSampleData = false
+        guard reader.canAdd(videoOutput) else {
+            throw ExportError.failed("Audio normalize: cannot read video track")
+        }
+        reader.add(videoOutput)
+
+        let videoCompression: [String: Any] = [
+            AVVideoAverageBitRateKey: 8_000_000,
+            AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+        ]
+
+        let videoInputSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(renderSize.width),
+            AVVideoHeightKey: Int(renderSize.height),
+            AVVideoCompressionPropertiesKey: videoCompression,
+        ]
+
+        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoInputSettings)
+        videoInput.expectsMediaDataInRealTime = false
+        guard writer.canAdd(videoInput) else {
+            throw ExportError.failed("Audio normalize: cannot write video track")
+        }
+        writer.add(videoInput)
+
+        let targetSampleRate: Double = 48_000
+        let targetChannels: Int = 2
+
+        let audioOutputSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: targetSampleRate,
+            AVNumberOfChannelsKey: targetChannels,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsNonInterleaved: false,
+            AVLinearPCMIsBigEndianKey: false,
+        ]
+
+        let audioOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: audioOutputSettings)
+        audioOutput.alwaysCopiesSampleData = false
+        guard reader.canAdd(audioOutput) else {
+            throw ExportError.failed("Audio normalize: cannot decode audio track")
+        }
+        reader.add(audioOutput)
+
+        let audioInputSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: targetSampleRate,
+            AVNumberOfChannelsKey: targetChannels,
+            AVEncoderBitRateKey: 192_000,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+        ]
+
+        let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioInputSettings)
+        audioInput.expectsMediaDataInRealTime = false
+        guard writer.canAdd(audioInput) else {
+            throw ExportError.failed("Audio normalize: cannot encode audio track")
+        }
+        writer.add(audioInput)
+
+        guard reader.startReading() else {
+            throw reader.error ?? ExportError.failed("Audio normalize: reader failed to start")
+        }
+        guard writer.startWriting() else {
+            throw writer.error ?? ExportError.failed("Audio normalize: writer failed to start")
+        }
+        writer.startSession(atSourceTime: .zero)
+
+        await progress(0)
+
+        let progressLock = NSLock()
+        var lastProgressWallTime = CFAbsoluteTimeGetCurrent()
+        var lastProgressSeconds: Double = 0
+
+        func maybeReportProgress(presentationSeconds: Double) {
+            guard presentationSeconds.isFinite else { return }
+
+            let now = CFAbsoluteTimeGetCurrent()
+
+            progressLock.lock()
+            let shouldReport = (now - lastProgressWallTime) >= 0.2
+                || (presentationSeconds - lastProgressSeconds) >= 1.0
+                || presentationSeconds >= totalSeconds
+            if shouldReport {
+                lastProgressWallTime = now
+                lastProgressSeconds = presentationSeconds
+            }
+            progressLock.unlock()
+
+            guard shouldReport else { return }
+            let fraction = max(0, min(1, presentationSeconds / totalSeconds))
+            Task { await progress(fraction) }
+        }
+
+        let errorLock = NSLock()
+        var firstError: Error? = nil
+        func recordError(_ error: Error) {
+            errorLock.lock()
+            if firstError == nil {
+                firstError = error
+            }
+            errorLock.unlock()
+        }
+        func currentError() -> Error? {
+            errorLock.lock()
+            defer { errorLock.unlock() }
+            return firstError
+        }
+
+        let group = DispatchGroup()
+
+        group.enter()
+        let videoQueue = DispatchQueue(label: "album.movie.audioNormalize.video")
+        var videoDone = false
+        videoInput.requestMediaDataWhenReady(on: videoQueue) {
+            while videoInput.isReadyForMoreMediaData {
+                if videoDone { return }
+
+                if currentError() != nil {
+                    videoDone = true
+                    videoInput.markAsFinished()
+                    group.leave()
+                    return
+                }
+
+                if reader.status == .failed {
+                    recordError(reader.error ?? ExportError.failed("Audio normalize: reader failed"))
+                    videoDone = true
+                    videoInput.markAsFinished()
+                    group.leave()
+                    return
+                }
+
+                guard let sample = videoOutput.copyNextSampleBuffer() else {
+                    videoDone = true
+                    videoInput.markAsFinished()
+                    group.leave()
+                    return
+                }
+
+                let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                if pts.isNumeric {
+                    maybeReportProgress(presentationSeconds: pts.seconds)
+                }
+
+                if !videoInput.append(sample) {
+                    recordError(writer.error ?? ExportError.failed("Audio normalize: failed to append video samples"))
+                    videoDone = true
+                    videoInput.markAsFinished()
+                    group.leave()
+                    return
+                }
+            }
+        }
+
+        group.enter()
+        let audioQueue = DispatchQueue(label: "album.movie.audioNormalize.audio")
+        var audioDone = false
+        audioInput.requestMediaDataWhenReady(on: audioQueue) {
+            while audioInput.isReadyForMoreMediaData {
+                if audioDone { return }
+
+                if currentError() != nil {
+                    audioDone = true
+                    audioInput.markAsFinished()
+                    group.leave()
+                    return
+                }
+
+                if reader.status == .failed {
+                    recordError(reader.error ?? ExportError.failed("Audio normalize: reader failed"))
+                    audioDone = true
+                    audioInput.markAsFinished()
+                    group.leave()
+                    return
+                }
+
+                guard let sample = audioOutput.copyNextSampleBuffer() else {
+                    audioDone = true
+                    audioInput.markAsFinished()
+                    group.leave()
+                    return
+                }
+
+                let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                if pts.isNumeric {
+                    maybeReportProgress(presentationSeconds: pts.seconds)
+                }
+
+                if !audioInput.append(sample) {
+                    recordError(writer.error ?? ExportError.failed("Audio normalize: failed to append audio samples"))
+                    audioDone = true
+                    audioInput.markAsFinished()
+                    group.leave()
+                    return
+                }
+            }
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            group.notify(queue: DispatchQueue.global(qos: .userInitiated)) {
+                if let error = currentError() {
+                    reader.cancelReading()
+                    writer.cancelWriting()
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                writer.finishWriting {
+                    if writer.status == .completed {
+                        continuation.resume()
+                    } else {
+                        continuation.resume(throwing: writer.error ?? ExportError.failed("Audio normalize: writer failed"))
+                    }
+                }
+            }
+        }
+
+        await progress(1)
+        return outputURL
     }
 
     private static func renderImageClip(
