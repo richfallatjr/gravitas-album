@@ -17,13 +17,14 @@ public struct AlbumSidecarKey: Codable, Hashable, Sendable {
 }
 
 public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
-    public static let currentSchemaVersion: Int = 2
+    public static let currentSchemaVersion: Int = 3
 
     public var schemaVersion: Int
     public var key: AlbumSidecarKey
     public var updatedAt: Date
 
     public var rating: Int
+    public var preferenceScore: Float
     public var hidden: Bool
 
     public enum VisionFillState: String, Codable, Sendable, CaseIterable {
@@ -86,6 +87,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         key: AlbumSidecarKey,
         updatedAt: Date = Date(),
         rating: Int = 0,
+        preferenceScore: Float = 0,
         hidden: Bool = false,
         vision: VisionInfo = VisionInfo()
     ) {
@@ -93,6 +95,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         self.key = key
         self.updatedAt = updatedAt
         self.rating = max(-1, min(1, rating))
+        self.preferenceScore = max(-1, min(1, preferenceScore))
         self.hidden = hidden
         self.vision = vision
     }
@@ -102,6 +105,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         case key
         case updatedAt
         case rating
+        case preferenceScore
         case hidden
         case vision
 
@@ -124,6 +128,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         key = try container.decode(AlbumSidecarKey.self, forKey: .key)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
         rating = max(-1, min(1, try container.decodeIfPresent(Int.self, forKey: .rating) ?? 0))
+        preferenceScore = max(-1, min(1, try container.decodeIfPresent(Float.self, forKey: .preferenceScore) ?? 0))
         hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
 
         if let vision = try container.decodeIfPresent(VisionInfo.self, forKey: .vision) {
@@ -181,6 +186,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         try container.encode(key, forKey: .key)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(rating, forKey: .rating)
+        try container.encode(preferenceScore, forKey: .preferenceScore)
         try container.encode(hidden, forKey: .hidden)
         try container.encode(vision, forKey: .vision)
     }
@@ -357,6 +363,19 @@ public actor AlbumSidecarStore {
     public func setRating(_ key: AlbumSidecarKey, rating: Int) async {
         await mutate(key) { record in
             record.rating = max(-1, min(1, rating))
+        }
+    }
+
+    public func setPreferenceScore(_ key: AlbumSidecarKey, preferenceScore: Float) async {
+        await mutate(key) { record in
+            record.preferenceScore = max(-1, min(1, preferenceScore))
+        }
+    }
+
+    public func setRatingAndPreferenceScore(_ key: AlbumSidecarKey, rating: Int, preferenceScore: Float) async {
+        await mutate(key) { record in
+            record.rating = max(-1, min(1, rating))
+            record.preferenceScore = max(-1, min(1, preferenceScore))
         }
     }
 

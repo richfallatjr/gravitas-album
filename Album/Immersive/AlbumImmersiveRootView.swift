@@ -301,7 +301,7 @@ private final class AlbumImmersiveSceneState {
                 t = 0.5
             }
             let normalized = Float(max(0, min(1, t)))
-            spawn(asset, basePosition: slot.basePosition, recency: normalized, root: root)
+            spawn(asset, basePosition: slot.basePosition, recency: normalized, root: root, model: model)
         }
 
         AlbumLog.immersive.info("Respawn complete. entities=\(self.balls.count)")
@@ -954,7 +954,7 @@ private final class AlbumImmersiveSceneState {
         }
     }
 
-    private func spawn(_ asset: AlbumAsset, basePosition: SIMD3<Float>, recency: Float, root: Entity) {
+    private func spawn(_ asset: AlbumAsset, basePosition: SIMD3<Float>, recency: Float, root: Entity, model: AlbumModel) {
         let isVideo = asset.mediaType == .video
         let mats: [RealityKit.Material] = isVideo ? [videoGlowMat] : [steelMat]
 
@@ -977,7 +977,13 @@ private final class AlbumImmersiveSceneState {
         ball.scale = SIMD3<Float>(repeating: scaleMultiplier)
 
         let baseMass: Float = 1.0 + recency * 1.5 + favoriteBonus
-        ball.components.set(AlbumDataNodeTuningComponent(mass: baseMass, accelerationMultiplier: 1.0))
+        let baseline = model.preferenceBaselineTuningMultipliers(for: asset.id)
+        ball.components.set(
+            AlbumDataNodeTuningComponent(
+                mass: baseMass * baseline.massMultiplier,
+                accelerationMultiplier: baseline.accelerationMultiplier
+            )
+        )
         ball.components.set(AlbumAssetIDComponent(assetID: asset.id))
 
         ball.generateCollisionShapes(recursive: false)

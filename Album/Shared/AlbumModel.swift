@@ -169,6 +169,8 @@ public final class AlbumModel: ObservableObject {
     @Published public var visionConfidenceByAssetID: [String: Float] = [:]
     @Published public var visionPendingAssetIDs: Set<String> = []
 
+    private var preferenceScoreByAssetID: [String: Float] = [:]
+
     @Published public var backfillStatus: BackfillStatus = BackfillStatus()
 
     @Published public private(set) var visionCoverage: AlbumVisionCoverage = AlbumVisionCoverage()
@@ -415,6 +417,28 @@ public final class AlbumModel: ObservableObject {
         return AlbumSidecarKey(source: source, id: assetID)
     }
 
+    public func preferenceScore(for assetID: String) -> Float {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return 0 }
+        return preferenceScoreByAssetID[id] ?? 0
+    }
+
+    public func preferenceBaselineTuningMultipliers(for assetID: String) -> (massMultiplier: Float, accelerationMultiplier: Float) {
+        baselineTuningMultipliers(forPreferenceScore: preferenceScore(for: assetID))
+    }
+
+    private func baselineTuningMultipliers(forPreferenceScore scoreRaw: Float) -> (massMultiplier: Float, accelerationMultiplier: Float) {
+        let score = max(-1, min(1, scoreRaw))
+        let ln2 = log(2.0)
+
+        let massMultiplierBase = Float(exp(ln2 * Double(score)))
+        let accelMultiplierBase = Float(exp(-ln2 * Double(score)))
+
+        let massMultiplier = min(3.0, max(0.3, massMultiplierBase))
+        let accelerationMultiplier = min(3.0, max(0.5, accelMultiplierBase))
+        return (massMultiplier, accelerationMultiplier)
+    }
+
     public func createdYearMonth(for assetID: String) -> String? {
         guard let asset = asset(for: assetID) else { return nil }
         return createdYearMonth(for: asset)
@@ -616,6 +640,7 @@ public final class AlbumModel: ObservableObject {
             visionSummaryByAssetID = [:]
             visionStateByAssetID = [:]
             visionConfidenceByAssetID = [:]
+            preferenceScoreByAssetID = [:]
             return []
         }
 
@@ -627,10 +652,12 @@ public final class AlbumModel: ObservableObject {
         var vision: [String: String] = [:]
         var visionState: [String: AlbumSidecarRecord.VisionFillState] = [:]
         var visionConfidence: [String: Float] = [:]
+        var preferenceScores: [String: Float] = [:]
 
         hidden.reserveCapacity(records.count / 4)
         feedback.reserveCapacity(records.count / 3)
         vision.reserveCapacity(records.count / 2)
+        preferenceScores.reserveCapacity(records.count / 3)
 
         for record in records {
             let id = record.key.id
@@ -647,6 +674,10 @@ public final class AlbumModel: ObservableObject {
                 feedback[id] = .down
             default:
                 break
+            }
+
+            if record.preferenceScore != 0 {
+                preferenceScores[id] = record.preferenceScore
             }
 
             if let summary = record.vision.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -666,6 +697,7 @@ public final class AlbumModel: ObservableObject {
         visionSummaryByAssetID = vision
         visionStateByAssetID = visionState
         visionConfidenceByAssetID = visionConfidence
+        preferenceScoreByAssetID = preferenceScores
 
         return fetched.filter { !hidden.contains($0.id) }
     }
@@ -700,7 +732,7 @@ public final class AlbumModel: ObservableObject {
     public func refreshRecommends() {
         guard let id = currentAssetID else { return }
         let feedback = thumbFeedbackByAssetID[id] ?? .up
-        sendThumb(feedback, assetID: id)
+        sendThumb(feedback, assetID: id, persistPreference: false)
     }
 
     private var curvedWallMaxColumns: Int { 8 }
@@ -1069,15 +1101,44 @@ public final class AlbumModel: ObservableObject {
         shiftMemoryPage(delta: 1)
     }
 
-    public func sendThumb(_ feedback: AlbumThumbFeedback, assetID: String) {
+    public func sendThumb(_ feedback: AlbumThumbFeedback, assetID: String, persistPreference: Bool = true) {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }
 
         thumbFeedbackByAssetID[id] = feedback
-        let rating = feedback == .up ? 1 : -1
-        let key = sidecarKey(for: id)
-        Task(priority: .utility) { [sidecarStore] in
-            await sidecarStore.setRating(key, rating: rating)
+        if persistPreference {
+            let rating = feedback == .up ? 1 : -1
+
+            let step: Float = 0.25
+            let priorScore = preferenceScoreByAssetID[id] ?? 0
+            let delta = (feedback == .up) ? step : -step
+            let newScore = max(-1, min(1, priorScore + delta))
+
+            if newScore != 0 {
+                preferenceScoreByAssetID[id] = newScore
+            } else {
+                preferenceScoreByAssetID[id] = nil
+            }
+
+            let oldBase = baselineTuningMultipliers(forPreferenceScore: priorScore)
+            let newBase = baselineTuningMultipliers(forPreferenceScore: newScore)
+
+            let massMultiplier = newBase.massMultiplier / max(0.000_001, oldBase.massMultiplier)
+            let accelerationMultiplier = newBase.accelerationMultiplier / max(0.000_001, oldBase.accelerationMultiplier)
+            tuningDeltaRequest = AlbumTuningDeltaRequest(
+                deltas: [
+                    AlbumItemTuningDelta(
+                        itemID: id,
+                        massMultiplier: massMultiplier,
+                        accelerationMultiplier: accelerationMultiplier
+                    )
+                ]
+            )
+
+            let key = sidecarKey(for: id)
+            Task(priority: .utility) { [sidecarStore] in
+                await sidecarStore.setRatingAndPreferenceScore(key, rating: rating, preferenceScore: newScore)
+            }
         }
 
 #if DEBUG
@@ -2471,10 +2532,12 @@ public final class AlbumModel: ObservableObject {
         let maxNeighbors = 20
         let similarityExponent: Float = 1.0
 
-        // Debug-tuned: 10× stronger deltas so effects are unmistakable.
-        let massGain: Float = 75.0
-        let massLoss: Float = 105.0
-        let accelGain: Float = 525.0
+        let upMassBoost: Float = 1.5
+        let upAccelDamp: Float = 0.8
+        let downMassShrink: Float = 0.7
+        let downAccelBoost: Float = 1.6
+
+        func lerp(_ a: Float, _ b: Float, _ t: Float) -> Float { a + (b - a) * t }
 
         var deltas: [AlbumItemTuningDelta] = []
         deltas.reserveCapacity(min(neighbors.count, maxNeighbors))
@@ -2500,11 +2563,11 @@ public final class AlbumModel: ObservableObject {
 
             switch feedback {
             case .up:
-                massMul = 1.0 + massGain * w
-                accelMul = 1.0
+                massMul = lerp(1.0, upMassBoost, w)
+                accelMul = lerp(1.0, upAccelDamp, w)
             case .down:
-                massMul = 1.0 / (1.0 + massLoss * w)
-                accelMul = 1.0 + accelGain * w
+                massMul = lerp(1.0, downMassShrink, w)
+                accelMul = lerp(1.0, downAccelBoost, w)
             }
 
             deltas.append(.init(itemID: id, massMultiplier: massMul, accelerationMultiplier: accelMul))
@@ -2722,6 +2785,12 @@ public final class AlbumModel: ObservableObject {
                 thumbFeedbackByAssetID[id] = .down
             default:
                 break
+            }
+
+            if record.preferenceScore != 0 {
+                preferenceScoreByAssetID[id] = record.preferenceScore
+            } else {
+                preferenceScoreByAssetID[id] = nil
             }
 
             if let summary = record.vision.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
