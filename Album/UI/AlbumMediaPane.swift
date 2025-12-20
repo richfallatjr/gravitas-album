@@ -66,8 +66,18 @@ public struct AlbumMediaPane: View {
     private func preview(asset: AlbumAsset) -> some View {
         ZStack {
             if asset.mediaType == .video, let player {
-                VideoPlayer(player: player)
-                    .onDisappear { player.pause() }
+                ZStack {
+                    VideoPlayer(player: player)
+                        .onDisappear { player.pause() }
+
+                    if showsSceneEditorButtons,
+                       kenBurnsMoveActive,
+                       let sceneItemID,
+                       asset.mediaType == .video {
+                        AlbumVideoCropMoveOverlay(asset: asset, itemID: sceneItemID)
+                            .environmentObject(model)
+                    }
+                }
             } else if let image {
 #if canImport(UIKit)
                 ZStack {
@@ -255,6 +265,7 @@ public struct AlbumMediaPane: View {
                 if asset.mediaType == .photo {
                     kenBurnsButton()
                 } else if asset.mediaType == .video {
+                    kenBurnsButton()
                     clipperButton(itemID: sceneItemID, assetID: asset.localIdentifier)
                 }
             }
@@ -506,6 +517,184 @@ private struct AlbumKenBurnsMoveOverlay: View {
             item.kenBurnsStartAnchor = (dragTarget == .start) ? normalized : current.start
             item.kenBurnsEndAnchor = (dragTarget == .end) ? normalized : current.end
         }
+    }
+
+    private func imageAspectRatio(asset: AlbumAsset) -> CGFloat {
+        let w = CGFloat(asset.pixelWidth ?? 0)
+        let h = CGFloat(asset.pixelHeight ?? 0)
+        guard w > 0, h > 0 else { return 1 }
+        return w / h
+    }
+
+    private func fittedRect(container: CGRect, imageAspect: CGFloat) -> CGRect {
+        let containerAspect = container.width / max(0.001, container.height)
+
+        if imageAspect > containerAspect {
+            let width = container.width
+            let height = width / max(0.001, imageAspect)
+            let y = container.midY - (height / 2)
+            return CGRect(x: container.minX, y: y, width: width, height: height)
+        } else {
+            let height = container.height
+            let width = height * imageAspect
+            let x = container.midX - (width / 2)
+            return CGRect(x: x, y: container.minY, width: width, height: height)
+        }
+    }
+
+    private func allowedNormalizedRect(asset: AlbumAsset, renderSize: Double) -> CGRect {
+        let w = Double(asset.pixelWidth ?? 0)
+        let h = Double(asset.pixelHeight ?? 0)
+        guard w > 0, h > 0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+
+        let scale = max(renderSize / w, renderSize / h)
+        let cropSizePx = renderSize / max(0.000_001, scale)
+        let halfX = (cropSizePx / 2) / w
+        let halfY = (cropSizePx / 2) / h
+
+        let minX = min(max(halfX, 0), 0.5)
+        let maxX = max(min(1 - halfX, 1), 0.5)
+        let minY = min(max(halfY, 0), 0.5)
+        let maxY = max(min(1 - halfY, 1), 0.5)
+
+        return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+    }
+
+    private func clampNormalized(_ point: CGPoint, to rect: CGRect) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, rect.minX), rect.maxX),
+            y: min(max(point.y, rect.minY), rect.maxY)
+        )
+    }
+
+    private func snapToThirds(_ point: CGPoint, threshold: CGFloat) -> CGPoint {
+        let thirds: [CGFloat] = [1.0 / 3.0, 2.0 / 3.0]
+        var x = point.x
+        var y = point.y
+
+        for t in thirds {
+            if abs(point.x - t) < threshold { x = t }
+            if abs(point.y - t) < threshold { y = t }
+        }
+        return CGPoint(x: x, y: y)
+    }
+
+    private func normalizedPoint(from location: CGPoint, in rect: CGRect) -> CGPoint {
+        let x = (location.x - rect.minX) / max(0.000_001, rect.width)
+        let y = (location.y - rect.minY) / max(0.000_001, rect.height)
+        return CGPoint(x: x, y: y)
+    }
+
+    private func pointFromNormalized(_ point: CGPoint, in rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.minX + point.x * rect.width, y: rect.minY + point.y * rect.height)
+    }
+
+    private func rectFromNormalized(_ rect: CGRect, in bounds: CGRect) -> CGRect {
+        CGRect(
+            x: bounds.minX + rect.minX * bounds.width,
+            y: bounds.minY + rect.minY * bounds.height,
+            width: rect.width * bounds.width,
+            height: rect.height * bounds.height
+        )
+    }
+
+    private func thirdsGuides(in rect: CGRect) -> Path {
+        Path { path in
+            let x1 = rect.minX + rect.width / 3
+            let x2 = rect.minX + (rect.width * 2 / 3)
+            let y1 = rect.minY + rect.height / 3
+            let y2 = rect.minY + (rect.height * 2 / 3)
+
+            path.move(to: CGPoint(x: x1, y: rect.minY))
+            path.addLine(to: CGPoint(x: x1, y: rect.maxY))
+            path.move(to: CGPoint(x: x2, y: rect.minY))
+            path.addLine(to: CGPoint(x: x2, y: rect.maxY))
+            path.move(to: CGPoint(x: rect.minX, y: y1))
+            path.addLine(to: CGPoint(x: rect.maxX, y: y1))
+            path.move(to: CGPoint(x: rect.minX, y: y2))
+            path.addLine(to: CGPoint(x: rect.maxX, y: y2))
+        }
+    }
+}
+
+private struct AlbumVideoCropMoveOverlay: View {
+    let asset: AlbumAsset
+    let itemID: UUID
+
+    @EnvironmentObject private var model: AlbumModel
+    @State private var isDragging: Bool = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let bounds = CGRect(origin: .zero, size: proxy.size)
+            let imageRect = fittedRect(container: bounds, imageAspect: imageAspectRatio(asset: asset))
+
+            let allowedNorm = allowedNormalizedRect(asset: asset, renderSize: 1080)
+            let allowedRect = rectFromNormalized(allowedNorm, in: imageRect)
+
+            let anchor = effectiveAnchor(allowedNorm: allowedNorm)
+            let center = pointFromNormalized(anchor, in: imageRect)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .path(in: allowedRect)
+                    .stroke(
+                        Color.white.opacity(0.55),
+                        style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [6, 5])
+                    )
+
+                if isDragging {
+                    thirdsGuides(in: imageRect)
+                        .stroke(Color.white.opacity(0.20), lineWidth: 1)
+                }
+
+                handle(center: center, imageRect: imageRect, allowedNorm: allowedNorm)
+            }
+            .contentShape(Rectangle())
+        }
+        .allowsHitTesting(true)
+    }
+
+    private func effectiveAnchor(allowedNorm: CGRect) -> CGPoint {
+        let stored = model.poppedItem(for: itemID)
+        let anchor = stored?.videoCropAnchor ?? CGPoint(x: 0.5, y: 0.5)
+        return clampNormalized(anchor, to: allowedNorm)
+    }
+
+    private func handle(center: CGPoint, imageRect: CGRect, allowedNorm: CGRect) -> some View {
+        let size: CGFloat = 36
+
+        return ZStack {
+            Circle()
+                .fill(Color(.sRGB, red: 0.74, green: 0.26, blue: 0.98, opacity: 0.95))
+
+            Text("C")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.black.opacity(0.78))
+        }
+        .frame(width: size, height: size)
+        .overlay(
+            Circle()
+                .stroke(Color.black.opacity(0.22), lineWidth: 1)
+        )
+        .position(center)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    isDragging = true
+                    let norm = normalizedPoint(from: value.location, in: imageRect)
+                    let snapped = snapToThirds(norm, threshold: 0.03)
+                    let clamped = clampNormalized(snapped, to: allowedNorm)
+
+                    model.updatePoppedItem(itemID) { item in
+                        item.videoCropAnchor = clamped
+                    }
+                }
+                .onEnded { _ in
+                    isDragging = false
+                }
+        )
+        .shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 2)
     }
 
     private func imageAspectRatio(asset: AlbumAsset) -> CGFloat {

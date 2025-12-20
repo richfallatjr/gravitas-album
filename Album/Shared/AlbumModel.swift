@@ -1264,12 +1264,43 @@ public final class AlbumModel: ObservableObject {
 
 #if canImport(UIKit)
         func cgImage(from image: UIImage) -> CGImage? {
-            if let cg = image.cgImage { return cg }
-            if let data = image.jpegData(compressionQuality: 0.95) ?? image.pngData(),
-               let source = CGImageSourceCreateWithData(data as CFData, nil),
-               let cg = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+            if image.imageOrientation == .up, let cg = image.cgImage {
                 return cg
             }
+
+            let pixelSize = CGSize(
+                width: image.size.width * image.scale,
+                height: image.size.height * image.scale
+            )
+
+            if pixelSize.width > 0, pixelSize.height > 0 {
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = 1
+                format.opaque = true
+
+                let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
+                let rendered = renderer.image { ctx in
+                    ctx.cgContext.setFillColor(UIColor.black.cgColor)
+                    ctx.cgContext.fill(CGRect(origin: .zero, size: pixelSize))
+                    image.draw(in: CGRect(origin: .zero, size: pixelSize))
+                }
+                if let cg = rendered.cgImage { return cg }
+            }
+
+            if let data = image.jpegData(compressionQuality: 0.95) ?? image.pngData(),
+               let source = CGImageSourceCreateWithData(data as CFData, nil) {
+                let maxDim = max(1, Int(max(pixelSize.width, pixelSize.height)))
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxDim,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                ]
+                if let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                    return cg
+                }
+                return CGImageSourceCreateImageAtIndex(source, 0, nil)
+            }
+
             return nil
         }
 #endif
@@ -1338,7 +1369,8 @@ public final class AlbumModel: ObservableObject {
                     end = min(max(start + 0.5, end), duration > 0 ? duration : start + 0.5)
                 }
 
-                segments.append(.video(instanceID: item.id, assetID: assetID, url: url, trimStart: start, trimEnd: end))
+                let cropAnchor = effectiveVideoCropAnchorForExport(item: item, asset: asset)
+                segments.append(.video(instanceID: item.id, assetID: assetID, url: url, trimStart: start, trimEnd: end, cropAnchor: cropAnchor))
             }
         }
 
@@ -1407,6 +1439,15 @@ public final class AlbumModel: ObservableObject {
         let end = item.kenBurnsEndAnchor ?? defaultKenBurnsEndAnchor(assetID: assetID)
         let allowed = allowedKenBurnsNormalizedRect(imageSize: imageSize, renderSize: 1080)
         return (clampKenBurnsAnchor(start, to: allowed), clampKenBurnsAnchor(end, to: allowed))
+    }
+
+    private func effectiveVideoCropAnchorForExport(item: AlbumSceneItemRecord, asset: AlbumAsset) -> CGPoint {
+        let anchor = item.videoCropAnchor ?? CGPoint(x: 0.5, y: 0.5)
+        let w = CGFloat(asset.pixelWidth ?? 0)
+        let h = CGFloat(asset.pixelHeight ?? 0)
+        guard w > 0, h > 0 else { return anchor }
+        let allowed = allowedKenBurnsNormalizedRect(imageSize: CGSize(width: w, height: h), renderSize: 1080)
+        return clampKenBurnsAnchor(anchor, to: allowed)
     }
 
     private func allowedKenBurnsNormalizedRect(imageSize: CGSize, renderSize: Double) -> CGRect {
@@ -2774,7 +2815,7 @@ private actor AlbumMovieVisionLabeler {
 
 private enum AlbumMovieExportSegment {
     case image(instanceID: UUID, assetID: String, cgImage: CGImage, startAnchor: CGPoint, endAnchor: CGPoint)
-    case video(instanceID: UUID, assetID: String, url: URL, trimStart: Double, trimEnd: Double)
+    case video(instanceID: UUID, assetID: String, url: URL, trimStart: Double, trimEnd: Double, cropAnchor: CGPoint)
 }
 
 private struct AlbumMovieExportRequest {
@@ -2905,6 +2946,7 @@ private enum AlbumMovieExportPipeline {
             let startTime: CMTime
             let duration: CMTime
             let sourceTrack: AVAssetTrack
+            let cropAnchor: CGPoint?
         }
 
         var segmentInfos: [SegmentInfo] = []
@@ -2920,7 +2962,7 @@ private enum AlbumMovieExportPipeline {
             let duration = (try? await asset.load(.duration)) ?? .zero
             let range = CMTimeRange(start: .zero, duration: duration)
             try compVideoTrack.insertTimeRange(range, of: track, at: cursor)
-            segmentInfos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track))
+            segmentInfos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track, cropAnchor: nil))
             cursor = cursor + range.duration
         }
 
@@ -2934,7 +2976,7 @@ private enum AlbumMovieExportPipeline {
                 }
                 try await insertClipAsset(url: clip)
 
-            case .video(_, _, let url, let trimStart, let trimEnd):
+            case .video(_, _, let url, let trimStart, let trimEnd, let cropAnchor):
                 let asset = AVURLAsset(url: url)
                 guard let track = try await asset.loadTracks(withMediaType: .video).first else { continue }
                 let assetDuration = ((try? await asset.load(.duration)) ?? .zero).seconds
@@ -2955,7 +2997,7 @@ private enum AlbumMovieExportPipeline {
                     try? compAudioTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
                 }
 
-                segmentInfos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track))
+                segmentInfos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track, cropAnchor: cropAnchor))
                 cursor = cursor + range.duration
             }
         }
@@ -2972,7 +3014,7 @@ private enum AlbumMovieExportPipeline {
         let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoTrack)
 
         for info in segmentInfos {
-            let transform = aspectFillTransform(for: info.sourceTrack, renderSize: renderSize)
+            let transform = aspectFillTransform(for: info.sourceTrack, renderSize: renderSize, cropAnchor: info.cropAnchor)
             layerInstruction.setTransform(transform, at: info.startTime)
         }
 
@@ -3200,7 +3242,7 @@ private enum AlbumMovieExportPipeline {
         }
     }
 
-    private static func aspectFillTransform(for track: AVAssetTrack, renderSize: CGSize) -> CGAffineTransform {
+    private static func aspectFillTransform(for track: AVAssetTrack, renderSize: CGSize, cropAnchor: CGPoint?) -> CGAffineTransform {
         let natural = track.naturalSize
         guard natural.width > 0, natural.height > 0 else { return .identity }
 
@@ -3216,8 +3258,38 @@ private enum AlbumMovieExportPipeline {
         transform = transform.concatenating(CGAffineTransform(scaleX: scale, y: scale))
 
         let scaledSize = CGSize(width: orientedSize.width * scale, height: orientedSize.height * scale)
-        let tx = (renderSize.width - scaledSize.width) / 2
-        let ty = (renderSize.height - scaledSize.height) / 2
+
+        func allowedCropRect(source: CGSize, renderSize: CGSize, scale: CGFloat) -> CGRect {
+            let w = Double(source.width)
+            let h = Double(source.height)
+            guard w > 0, h > 0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+
+            let s = Double(renderSize.width)
+            let cropSizePx = s / max(0.000_001, Double(scale))
+            let halfX = (cropSizePx / 2) / w
+            let halfY = (cropSizePx / 2) / h
+
+            let minX = min(max(halfX, 0), 0.5)
+            let maxX = max(min(1 - halfX, 1), 0.5)
+            let minY = min(max(halfY, 0), 0.5)
+            let maxY = max(min(1 - halfY, 1), 0.5)
+
+            return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+        }
+
+        func clamp(_ point: CGPoint, to rect: CGRect) -> CGPoint {
+            CGPoint(
+                x: min(max(point.x, rect.minX), rect.maxX),
+                y: min(max(point.y, rect.minY), rect.maxY)
+            )
+        }
+
+        let requestedAnchor = cropAnchor ?? CGPoint(x: 0.5, y: 0.5)
+        let allowedNorm = allowedCropRect(source: orientedSize, renderSize: renderSize, scale: scale)
+        let anchor = clamp(requestedAnchor, to: allowedNorm)
+
+        let tx = (renderSize.width / 2) - (scaledSize.width * anchor.x)
+        let ty = (renderSize.height / 2) - (scaledSize.height * anchor.y)
         transform = transform.concatenating(CGAffineTransform(translationX: tx, y: ty))
         return transform
     }

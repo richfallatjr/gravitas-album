@@ -95,6 +95,7 @@ public struct AlbumSceneItemRecord: Identifiable, Sendable, Codable, Hashable {
     public var kenBurnsUserDefined: Bool
     public var trimStartSeconds: Double?
     public var trimEndSeconds: Double?
+    public var videoCropAnchor: CGPoint?
 
     // Movie items
     public var movie: AlbumMovieDraft?
@@ -111,6 +112,7 @@ public struct AlbumSceneItemRecord: Identifiable, Sendable, Codable, Hashable {
         kenBurnsUserDefined: Bool = false,
         trimStartSeconds: Double? = nil,
         trimEndSeconds: Double? = nil,
+        videoCropAnchor: CGPoint? = nil,
         movie: AlbumMovieDraft? = nil,
         lastKnownWindowMidX: Double? = nil
     ) {
@@ -122,6 +124,7 @@ public struct AlbumSceneItemRecord: Identifiable, Sendable, Codable, Hashable {
         self.kenBurnsUserDefined = kenBurnsUserDefined
         self.trimStartSeconds = trimStartSeconds
         self.trimEndSeconds = trimEndSeconds
+        self.videoCropAnchor = videoCropAnchor
         self.movie = movie
         self.lastKnownWindowMidX = lastKnownWindowMidX
     }

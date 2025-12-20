@@ -232,7 +232,16 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
 
         private func emitMidXIfChanged(force: Bool) {
             guard let window else { return }
-            let midX = Double(window.frame.midX)
+
+            let center = CGPoint(x: window.bounds.midX, y: window.bounds.midY)
+            let scenePoint: CGPoint = {
+                if let scene = window.windowScene {
+                    return scene.coordinateSpace.convert(center, from: window.coordinateSpace)
+                }
+                return window.convert(center, to: nil)
+            }()
+
+            let midX = Double(scenePoint.x)
             guard midX.isFinite else { return }
 
             if force {
