@@ -13,29 +13,8 @@ public struct AlbumSceneManagerView: View {
     public var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                if model.scenes.isEmpty {
-                    Text("No saved scenes yet. Pop out a few assets and tap Save.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                } else {
-                    List(selection: $selectedSceneID) {
-                        ForEach(model.scenes) { scene in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(scene.name).font(.headline)
-                                Text("\(scene.assetIDs.count) assets")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .onDelete { indexSet in
-                            model.deleteScenes(at: indexSet)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .frame(maxHeight: 220)
-                }
+                currentWindowsPanel
+                savedScenesPanel
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Save current layout")
@@ -75,6 +54,71 @@ public struct AlbumSceneManagerView: View {
             }
         }
         .frame(width: 630, height: 690)
+    }
+
+    private var currentWindowsPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Current Windows • \(model.poppedAssetIDs.count)")
+                .font(.headline)
+
+            if model.poppedAssetIDs.isEmpty {
+                Text("No windows open. Pop out an asset and it will appear here.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            } else {
+                List {
+                    ForEach(model.poppedAssetIDs, id: \.self) { assetID in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.semanticHandle(for: assetID))
+                                .font(.footnote)
+                                .lineLimit(2)
+
+                            if let asset = model.asset(for: assetID) {
+                                Text(asset.mediaType == .video ? "Video" : "Photo")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .listStyle(.plain)
+                .frame(maxHeight: 160)
+            }
+        }
+    }
+
+    private var savedScenesPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Saved Scenes")
+                .font(.headline)
+
+            if model.scenes.isEmpty {
+                Text("No saved scenes yet. Pop out a few assets and tap Save.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            } else {
+                List(selection: $selectedSceneID) {
+                    ForEach(model.scenes) { scene in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(scene.name).font(.headline)
+                            Text("\(scene.assetIDs.count) assets")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .onDelete { indexSet in
+                        model.deleteScenes(at: indexSet)
+                    }
+                }
+                .listStyle(.plain)
+                .frame(maxHeight: 160)
+            }
+        }
     }
 
     private func saveScene() {

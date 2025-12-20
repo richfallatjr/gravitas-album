@@ -3,6 +3,7 @@ import AVKit
 
 public struct AlbumMediaPane: View {
     public let assetID: String?
+    public let showsFocusButton: Bool
 
     @EnvironmentObject private var model: AlbumModel
     @Environment(\.displayScale) private var displayScale
@@ -12,8 +13,9 @@ public struct AlbumMediaPane: View {
     @State private var currentVideoURL: URL? = nil
     @State private var isLoadingPreview: Bool = false
 
-    public init(assetID: String?) {
+    public init(assetID: String?, showsFocusButton: Bool = false) {
         self.assetID = assetID
+        self.showsFocusButton = showsFocusButton
     }
 
     public var body: some View {
@@ -221,7 +223,9 @@ public struct AlbumMediaPane: View {
 
     private func actionButtons(assetID: String) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            focusButton(assetID: assetID)
+            if showsFocusButton {
+                focusButton(assetID: assetID)
+            }
             thumbButtons(assetID: assetID)
         }
     }

@@ -18,7 +18,7 @@ public struct AlbumPopOutAssetView: View {
         let palette = model.palette
 
         VStack(alignment: .leading, spacing: 14) {
-            AlbumMediaPane(assetID: assetID)
+            AlbumMediaPane(assetID: assetID, showsFocusButton: true)
 
             HStack(spacing: 12) {
                 Button {
