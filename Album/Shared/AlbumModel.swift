@@ -1241,10 +1241,16 @@ public final class AlbumModel: ObservableObject {
         let pos = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
         guard pos.x.isFinite, pos.y.isFinite, pos.z.isFinite else { return nil }
 
-        let rawRight = SIMD3<Float>(m.columns.0.x, m.columns.0.y, m.columns.0.z)
-        let len = simd_length(rawRight)
-        guard len.isFinite, len > 0.000_001 else { return nil }
-        let right = rawRight / len
+        let fcol = SIMD3<Float>(m.columns.2.x, m.columns.2.y, m.columns.2.z)
+        let flen = simd_length(fcol)
+        guard flen.isFinite, flen > 0.000_001 else { return nil }
+        let forward = (-fcol) / flen
+
+        let up = SIMD3<Float>(0, 1, 0)
+        let rawRight = simd_cross(forward, up)
+        let rlen = simd_length(rawRight)
+        guard rlen.isFinite, rlen > 0.000_001 else { return nil }
+        let right = rawRight / rlen
         return (pos, right)
     }
 
@@ -1292,8 +1298,6 @@ public final class AlbumModel: ObservableObject {
             return
         }
 
-        resetInitialHeadAnchor()
-
         let exportablesRaw = poppedItems
             .filter { $0.kind == .asset && ($0.assetID?.isEmpty == false) }
 
@@ -1308,34 +1312,17 @@ public final class AlbumModel: ObservableObject {
             }
         }
 
-        if let basis = headBasisForOrdering() {
-            AlbumLog.model.info("Movie ordering head pos=(\(basis.pos.x, privacy: .public), \(basis.pos.y, privacy: .public), \(basis.pos.z, privacy: .public)) right=(\(basis.right.x, privacy: .public), \(basis.right.y, privacy: .public), \(basis.right.z, privacy: .public))")
-        } else {
-            AlbumLog.model.info("Movie ordering head basis unavailable; falling back to window midX")
-        }
+        AlbumLog.model.info("Movie ordering uses window world center.x (fallback: window midX).")
         for item in exportablesRaw {
-            let key = sortKeyForItem(item.id) ?? -999
-            AlbumLog.model.info("Movie ordering item id=\(item.id.uuidString, privacy: .public) key=\(key, privacy: .public)")
+            let xKey = windowWorldCentersByItemID[item.id]?.x ?? item.lastKnownWindowMidX
+            AlbumLog.model.info("Movie ordering item id=\(item.id.uuidString, privacy: .public) xKey=\(xKey ?? 0, privacy: .public)")
         }
 
         let exportables = exportablesRaw.sorted { a, b in
-            let ak = sortKeyForItem(a.id)
-            let bk = sortKeyForItem(b.id)
-
-            switch (ak, bk) {
-            case let (ak?, bk?):
-                if ak == bk { return a.id.uuidString < b.id.uuidString }
-                return ak < bk
-            case (nil, nil):
-                let ax = a.lastKnownWindowMidX ?? 0
-                let bx = b.lastKnownWindowMidX ?? 0
-                if ax == bx { return a.id.uuidString < b.id.uuidString }
-                return ax < bx
-            case (nil, _?):
-                return false
-            case (_?, nil):
-                return true
-            }
+            let ax = windowWorldCentersByItemID[a.id]?.x ?? a.lastKnownWindowMidX ?? 0
+            let bx = windowWorldCentersByItemID[b.id]?.x ?? b.lastKnownWindowMidX ?? 0
+            if ax == bx { return a.id.uuidString < b.id.uuidString }
+            return ax < bx
         }
 
         guard !exportables.isEmpty else {
