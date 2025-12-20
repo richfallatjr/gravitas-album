@@ -1110,6 +1110,28 @@ public final class AlbumModel: ObservableObject {
         _ = appendToHistoryIfNew(assetID: assetID)
     }
 
+    public func focusAssetInHistory(assetID: String) async {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+
+        let isAlreadyMemories = (panelMode == .memories)
+        let pinned = await ensurePinnedAssetAvailable(assetID: id, reason: "focus_history")
+        guard pinned, item(for: id) != nil else {
+            AlbumLog.model.info("Focus ignored (asset unavailable) id=\(id, privacy: .public)")
+            return
+        }
+
+        _ = appendToHistoryIfNew(assetID: id)
+        currentAssetID = id
+
+        if panelMode != .memories {
+            panelMode = .memories
+        } else if isAlreadyMemories {
+            memoryAnchorID = id
+            rebuildMemoryWindow(resetToAnchor: true)
+        }
+    }
+
     public func clearHistory() {
         historyAssetIDs.removeAll()
         aiNextAssetIDs.removeAll()
@@ -1150,8 +1172,60 @@ public final class AlbumModel: ObservableObject {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }
         poppedAssetIDs.removeAll(where: { $0 == id })
-        pinnedAssetsByID[id] = nil
+        if !historyAssetIDs.contains(id), currentAssetID != id {
+            pinnedAssetsByID[id] = nil
+        }
         pinnedAssetLoadsInFlight.remove(id)
+    }
+
+    private func ensurePinnedAssetAvailable(assetID: String, reason: String) async -> Bool {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return false }
+
+        if let existing = item(for: id) {
+            if pinnedAssetsByID[id] == nil {
+                pinnedAssetsByID[id] = existing
+            }
+            return true
+        }
+
+        guard datasetSource == .photos else { return false }
+
+        if pinnedAssetLoadsInFlight.contains(id) {
+            let pollLimitNanos: UInt64 = 4_500_000_000
+            let pollIntervalNanos: UInt64 = 150_000_000
+            var waited: UInt64 = 0
+
+            while waited < pollLimitNanos {
+                if let existing = item(for: id) {
+                    if pinnedAssetsByID[id] == nil {
+                        pinnedAssetsByID[id] = existing
+                    }
+                    return true
+                }
+                try? await Task.sleep(nanoseconds: pollIntervalNanos)
+                waited &+= pollIntervalNanos
+            }
+        }
+
+        guard !pinnedAssetLoadsInFlight.contains(id) else { return false }
+        pinnedAssetLoadsInFlight.insert(id)
+        defer { pinnedAssetLoadsInFlight.remove(id) }
+
+        AlbumLog.model.info("Pin requesting fetch id=\(id, privacy: .public) reason=\(reason, privacy: .public)")
+
+        do {
+            let fetched = try await assetProvider.fetchAssets(localIdentifiers: [id])
+            guard let asset = fetched.first(where: { $0.id == id }) else {
+                AlbumLog.photos.info("Pin fetchAssets returned no results id=\(id, privacy: .public)")
+                return false
+            }
+            pinnedAssetsByID[id] = asset
+            return true
+        } catch {
+            AlbumLog.photos.error("Pin fetchAssets error id=\(id, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            return false
+        }
     }
 
     private func pinAssetForPopOut(_ assetID: String) {

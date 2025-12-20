@@ -27,7 +27,7 @@ public struct AlbumMediaPane: View {
                     HStack(alignment: .bottom, spacing: 12) {
                         metaCard(asset: asset)
                         Spacer(minLength: 0)
-                        thumbButtons(assetID: assetID)
+                        actionButtons(assetID: assetID)
                     }
                 }
                 .onAppear {
@@ -217,6 +217,29 @@ public struct AlbumMediaPane: View {
             .buttonStyle(.plain)
             .background(palette.toggleFillColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+    }
+
+    private func actionButtons(assetID: String) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            focusButton(assetID: assetID)
+            thumbButtons(assetID: assetID)
+        }
+    }
+
+    private func focusButton(assetID: String) -> some View {
+        let palette = model.palette
+
+        return Button {
+            Task { await model.focusAssetInHistory(assetID: assetID) }
+        } label: {
+            Image(systemName: "scope")
+                .font(.title3)
+                .foregroundStyle(palette.buttonLabelOnColor)
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .background(palette.historyButtonColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityLabel("Focus")
     }
 
     @MainActor
