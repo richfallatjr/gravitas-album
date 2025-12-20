@@ -3451,6 +3451,11 @@ private enum AlbumMovieExportPipeline {
         ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
 
 #if canImport(UIKit)
+        // UIKit text drawing assumes a top-left origin; flip the bitmap context so the
+        // resulting CGImage matches our movie render pipeline orientation.
+        ctx.translateBy(x: 0, y: CGFloat(height))
+        ctx.scaleBy(x: 1, y: -1)
+
         UIGraphicsPushContext(ctx)
         defer { UIGraphicsPopContext() }
 
