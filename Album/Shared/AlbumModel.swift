@@ -409,8 +409,22 @@ public final class AlbumModel: ObservableObject {
     }
 
     public func semanticHandle(for assetID: String) -> String {
-        guard let asset = asset(for: assetID) else { return "" }
-        return semanticHandle(for: asset)
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return "" }
+
+        if let summary = visionSummaryByAssetID[id], !summary.isEmpty {
+            return summary
+        }
+
+        if let asset = asset(for: id) {
+            return semanticHandle(for: asset)
+        }
+
+        if let state = visionStateByAssetID[id] {
+            return "(\(state.rawValue)) \(id)"
+        }
+
+        return id
     }
 
     public func semanticHandle(for asset: AlbumAsset) -> String {
@@ -1084,6 +1098,11 @@ public final class AlbumModel: ObservableObject {
         guard !id.isEmpty else { return false }
         guard !historyAssetIDs.contains(id) else { return false }
         historyAssetIDs.append(id)
+
+        if pinnedAssetsByID[id] == nil, let asset = item(for: id) {
+            pinnedAssetsByID[id] = asset
+        }
+
         return true
     }
 
