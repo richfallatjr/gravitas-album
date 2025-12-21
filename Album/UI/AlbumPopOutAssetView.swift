@@ -141,13 +141,13 @@ public struct AlbumMovieDraftView: View {
     public let itemID: UUID
 
     @EnvironmentObject private var model: AlbumModel
+    @Environment(\.openWindow) private var openWindow
     @State private var player: AVPlayer? = nil
     @State private var renderStartDate: Date? = nil
     @State private var renderEndDate: Date? = nil
     @State private var lastRenderKind: AlbumMovieRenderState.Kind? = nil
-
-    @State private var shareItems: [Any] = []
-    @State private var isSharePresented: Bool = false
+    @State private var isPreparingShare: Bool = false
+    @State private var shareStatus: String? = nil
 
     public init(itemID: UUID) {
         self.itemID = itemID
@@ -217,14 +217,23 @@ public struct AlbumMovieDraftView: View {
                 moviePreview(draft: draft)
 
                 Button {
-                    presentShareIfReady(draft: draft)
+                    Task { await prepareAndOpenShareWindowIfReady(draft: draft) }
                 } label: {
-                    Label("Share Movie", systemImage: "square.and.arrow.up")
+                    Label(isPreparingShare ? "Preparing…" : "Share Movie", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(palette.copyButtonFill)
                 .foregroundStyle(palette.copyIconColor)
+                .disabled(isPreparingShare)
+
+                if let shareStatus, !shareStatus.isEmpty {
+                    Text(shareStatus)
+                        .font(.caption2)
+                        .foregroundStyle(palette.panelSecondaryText)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
 
             case .failed:
                 if let message = draft.renderState.message?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -245,11 +254,6 @@ public struct AlbumMovieDraftView: View {
             Spacer(minLength: 0)
         }
         .padding(18)
-#if canImport(UIKit)
-        .sheet(isPresented: $isSharePresented) {
-            AlbumShareSheet(items: shareItems)
-        }
-#endif
         .onChange(of: draft.artifactRelativePath) { _ in
             configurePlayerIfReady()
         }
@@ -336,12 +340,56 @@ public struct AlbumMovieDraftView: View {
         player?.play()
     }
 
-    private func presentShareIfReady(draft: AlbumMovieDraft) {
+    private func prepareAndOpenShareWindowIfReady(draft: AlbumMovieDraft) async {
 #if canImport(UIKit)
+        let alreadyPreparing = await MainActor.run { isPreparingShare }
+        guard !alreadyPreparing else { return }
         guard draft.renderState.kind == .ready else { return }
-        guard let url = resolveArtifactURL(draft: draft) else { return }
-        shareItems = [url]
-        isSharePresented = true
+        guard let sourceURL = resolveArtifactURL(draft: draft) else { return }
+
+        let fm = FileManager.default
+        guard fm.isReadableFile(atPath: sourceURL.path) else {
+            await MainActor.run {
+                shareStatus = "Share failed (file missing)"
+            }
+            return
+        }
+
+        await MainActor.run {
+            isPreparingShare = true
+            shareStatus = nil
+        }
+        defer {
+            Task { @MainActor in
+                isPreparingShare = false
+            }
+        }
+
+        let baseName: String = {
+            let rawTitle = draft.draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleaned = rawTitle.isEmpty ? "Movie" : rawTitle
+            let safe = cleaned.replacingOccurrences(of: "/", with: "_")
+            return safe.isEmpty ? "Movie" : safe
+        }()
+
+        let tempURL = fm.temporaryDirectory.appendingPathComponent("\(baseName)_\(UUID().uuidString).mp4", isDirectory: false)
+
+        do {
+            try? fm.removeItem(at: tempURL)
+            do {
+                try fm.linkItem(at: sourceURL, to: tempURL)
+            } catch {
+                try fm.copyItem(at: sourceURL, to: tempURL)
+            }
+
+            await MainActor.run {
+                openWindow(value: AlbumSharePayload(url: tempURL, title: baseName))
+            }
+        } catch {
+            await MainActor.run {
+                shareStatus = "Share failed (prepare error)"
+            }
+        }
 #else
         return
 #endif

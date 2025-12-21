@@ -27,6 +27,13 @@ struct GravitasAlbumApp: App {
         .restorationBehavior(.disabled)
         .defaultLaunchBehavior(.suppressed)
 
+        WindowGroup(for: AlbumSharePayload.self) { binding in
+            AlbumShareWindowRootView(payload: binding)
+        }
+        .defaultSize(width: 660, height: 660)
+        .restorationBehavior(.disabled)
+        .defaultLaunchBehavior(.suppressed)
+
         WindowGroup(id: "album-scene-manager") {
             AlbumSceneManagerView()
                 .environmentObject(model)
@@ -171,6 +178,64 @@ private struct AlbumPopOutWindowRootView: View {
     private func updateWindowWorldCenter(_ center: AlbumWindowWorldCenter?) {
         guard let activeItemID else { return }
         model.updatePoppedItemWindowWorldCenter(itemID: activeItemID, center: center)
+    }
+}
+
+private struct AlbumShareWindowRootView: View {
+    @Binding var payload: AlbumSharePayload?
+    @Environment(\.dismiss) private var dismiss
+
+    init(payload: Binding<AlbumSharePayload?>) {
+        self._payload = payload
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(titleText)
+                    .font(.headline)
+
+                Spacer(minLength: 0)
+
+                Button("Close") { dismiss() }
+                    .buttonStyle(.bordered)
+            }
+            .padding(16)
+
+            Divider()
+
+            Group {
+                if let payload {
+#if canImport(UIKit)
+                    let item: Any = {
+                        let provider = NSItemProvider(contentsOf: payload.url)
+                        let name = payload.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        if !name.isEmpty {
+                            provider?.suggestedName = name
+                        }
+                        return provider ?? payload.url
+                    }()
+
+                    AlbumShareSheet(items: [item]) { _, _, _, _ in
+                        dismiss()
+                    }
+#else
+                    Text("Share unavailable on this platform.")
+#endif
+                } else {
+                    Text("Nothing to share.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var titleText: String {
+        let raw = payload?.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? "Share" : raw
     }
 }
 

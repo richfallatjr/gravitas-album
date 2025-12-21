@@ -7,3 +7,13 @@ public struct AlbumPopOutPayload: Codable, Hashable {
         self.itemID = itemID
     }
 }
+
+public struct AlbumSharePayload: Codable, Hashable {
+    public let url: URL
+    public let title: String?
+
+    public init(url: URL, title: String? = nil) {
+        self.url = url
+        self.title = title
+    }
+}
