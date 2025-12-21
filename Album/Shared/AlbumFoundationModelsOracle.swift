@@ -391,9 +391,13 @@ Rules:
             case .up:
                 return "- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS."
             case .down:
-                return "- nextID MUST be one of the candidate IDs and MUST NOT be in ALREADY_SEEN_IDS (it will NOT be surfaced in UI)."
+                return "- nextID MUST be null."
             }
         }()
+
+        let exampleOutput = (feedback == .down)
+            ? #"{"nextID":null,"neighbors":[{"id":"c1","similarity":1},{"id":"c2","similarity":2}]}"#
+            : #"{"nextID":"c0","neighbors":[{"id":"c1","similarity":1},{"id":"c2","similarity":2}]}"#
 
         return """
 You are a recommendation engine for Gravitas Album.
@@ -415,14 +419,14 @@ Rules:
 - Return at most 20 neighbors.
 
 Example output:
-{"nextID":"c0","neighbors":[{"id":"c1","similarity":1},{"id":"c2","similarity":2}]}
+\(exampleOutput)
 """
     }
 
     private static func repairNudge(feedback: AlbumThumbFeedback) -> String {
         let nextRule = (feedback == .up)
             ? "nextID must be a candidate ID from the leftmost column (like c12)."
-            : "nextID must be a candidate ID from the leftmost column (like c12) (it will NOT be surfaced in UI)."
+            : "nextID must be null."
         return """
 IMPORTANT:
 - IDs in JSON MUST be from the LEFTMOST column only (like c12).
@@ -453,15 +457,13 @@ IMPORTANT:
             guard isValidID(nextID) else { return "nextID is not a candidate ID (got \(nextID))" }
             if alreadySeenIDs.contains(nextID) { return "nextID is already seen" }
         case .down:
-            guard let nextID = normalizeID(response.nextID) else { return "nextID missing" }
-            guard isValidID(nextID) else { return "nextID is not a candidate ID (got \(nextID))" }
-            if alreadySeenIDs.contains(nextID) { return "nextID is already seen" }
+            break
         }
 
         var seen: Set<String> = []
         seen.reserveCapacity(min(32, response.neighbors.count))
 
-        let nextID = normalizeID(response.nextID)
+        let nextID = (feedback == .up) ? normalizeID(response.nextID) : nil
 
         for n in response.neighbors {
             let id = n.id.trimmingCharacters(in: .whitespacesAndNewlines)

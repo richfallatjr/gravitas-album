@@ -2268,7 +2268,13 @@ public final class AlbumModel: ObservableObject {
 
         applyOracleResult(feedback: feedback, snapshot: snapshot, result: result)
 
-        var status = "\(feedback == .up ? "👍" : "👎") Neighbors ready (\(recommendItems.count)) • \(outcome.backend.rawValue)"
+        var status: String
+        switch feedback {
+        case .up:
+            status = "👍 Neighbors ready (\(recommendItems.count)) • \(outcome.backend.rawValue)"
+        case .down:
+            status = "👎 nextID ignored • Neighbors ready (\(recommendItems.count)) • \(outcome.backend.rawValue)"
+        }
         if let note = outcome.note?.trimmingCharacters(in: .whitespacesAndNewlines),
            !note.isEmpty {
             let capped = note.count > 140 ? "\(note.prefix(140))…" : note
