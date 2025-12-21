@@ -392,6 +392,28 @@ public struct AlbumControlView: View {
 
             Spacer(minLength: 0)
 
+            Menu {
+                if model.scenes.isEmpty {
+                    Button("No saved scenes") {}
+                        .disabled(true)
+                } else {
+                    ForEach(model.scenes) { scene in
+                        Button(scene.name) {
+                            let assetID = model.currentAssetID ?? "nil"
+                            let added = model.bookmarkCurrentAsset(into: scene.id)
+                            AlbumLog.ui.info("Bookmark pressed; added=\(added) scene=\(scene.id.uuidString, privacy: .public) name=\(scene.name, privacy: .public) asset=\(assetID, privacy: .public)")
+                        }
+                    }
+                }
+            } label: {
+                Label("Bookmark", systemImage: "bookmark.fill")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.bordered)
+            .tint(palette.historyButtonColor)
+            .foregroundStyle(palette.buttonLabelOnColor)
+            .disabled(model.currentAssetID == nil)
+
             Button {
                 openWindow(id: "album-scene-manager")
             } label: {

@@ -1023,10 +1023,10 @@ public final class AlbumModel: ObservableObject {
             return
         }
 
-        dumpRecommendsNeighborsToCurvedWall(anchorID: anchorID, neighborIDs: recommendItems.map(\.id))
+        dumpRecommendsNeighborsToCurvedWall(anchorID: anchorID, neighborIDs: recommendItems.map(\.id), openCanvas: true, jumpToNewContent: true)
     }
 
-    private func dumpRecommendsNeighborsToCurvedWall(anchorID: String, neighborIDs rawNeighborIDs: [String]) {
+    private func dumpRecommendsNeighborsToCurvedWall(anchorID: String, neighborIDs rawNeighborIDs: [String], openCanvas: Bool, jumpToNewContent: Bool) {
         let anchorID = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !anchorID.isEmpty else { return }
 
@@ -1076,11 +1076,17 @@ public final class AlbumModel: ObservableObject {
         }()
 
         let starts = curvedWallPageStartIndices(for: all)
-        let jumpPage = curvedWallPageIndex(for: jumpIndex, pageStarts: starts)
-        curvedWallPageWindows[placementID] = jumpPage
-        AlbumLog.model.info("CurvedWall dump anchor=\(anchorID, privacy: .public) neighbors=\(capped.count) dumps=\(self.curvedWallDumpPages.count) totalItems=\(total) jumpPage=\(jumpPage)")
+        if jumpToNewContent {
+            let jumpPage = curvedWallPageIndex(for: jumpIndex, pageStarts: starts)
+            curvedWallPageWindows[placementID] = jumpPage
+            AlbumLog.model.info("CurvedWall dump anchor=\(anchorID, privacy: .public) neighbors=\(capped.count) dumps=\(self.curvedWallDumpPages.count) totalItems=\(total) jumpPage=\(jumpPage)")
+        } else {
+            AlbumLog.model.info("CurvedWall dump anchor=\(anchorID, privacy: .public) neighbors=\(capped.count) dumps=\(self.curvedWallDumpPages.count) totalItems=\(total)")
+        }
 
-        curvedCanvasEnabled = true
+        if openCanvas {
+            curvedCanvasEnabled = true
+        }
     }
 
     public func curvedWallPageBack() {
@@ -1287,6 +1293,30 @@ public final class AlbumModel: ObservableObject {
         scenes[idx].items = poppedItems
         scenes[idx].createdAt = Date()
         AlbumSceneStore.save(scenes)
+    }
+
+    @discardableResult
+    public func bookmarkCurrentAsset(into sceneID: AlbumSceneRecord.ID) -> Bool {
+        guard let assetID = currentAssetID else { return false }
+        return bookmarkAsset(assetID, into: sceneID)
+    }
+
+    @discardableResult
+    public func bookmarkAsset(_ assetID: String, into sceneID: AlbumSceneRecord.ID) -> Bool {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return false }
+        guard !hiddenIDs.contains(id) else { return false }
+        guard item(for: id) != nil else { return false }
+
+        guard let idx = scenes.firstIndex(where: { $0.id == sceneID }) else { return false }
+
+        let alreadyInScene = scenes[idx].items.contains(where: { $0.kind == .asset && $0.assetID == id })
+        guard !alreadyInScene else { return false }
+
+        scenes[idx].items.append(.asset(assetID: id))
+        scenes[idx].createdAt = Date()
+        AlbumSceneStore.save(scenes)
+        return true
     }
 
     @discardableResult
@@ -2558,8 +2588,13 @@ public final class AlbumModel: ObservableObject {
         neighborsReady = !recommendItems.isEmpty
 
         if feedback == .up, neighborsReady {
-            panelMode = .recommends
-            dumpRecommendsNeighborsToCurvedWall(anchorID: anchorID, neighborIDs: result.neighbors.map(\.id))
+            let isShowingRecommendsInCurvedWall = (curvedCanvasEnabled && panelMode == .recommends)
+            dumpRecommendsNeighborsToCurvedWall(
+                anchorID: anchorID,
+                neighborIDs: result.neighbors.map(\.id),
+                openCanvas: false,
+                jumpToNewContent: !isShowingRecommendsInCurvedWall
+            )
         }
 
         switch feedback {
@@ -3145,7 +3180,8 @@ private enum AlbumMovieExportPipeline {
                 )
             }
 
-            let maxConcurrency = min(8, jobs.count)
+            let cpuCount = max(1, ProcessInfo.processInfo.activeProcessorCount)
+            let maxConcurrency = min(8, jobs.count, max(1, cpuCount / 2))
             var nextJobIndex = 0
             var completedCount = 0
 
@@ -3187,6 +3223,9 @@ private enum AlbumMovieExportPipeline {
                     }
                 }
             }
+
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 80_000_000)
         }
 
         await status("Assembling timeline…")
@@ -3305,28 +3344,347 @@ private enum AlbumMovieExportPipeline {
             try? fm.removeItem(at: tempOutURL)
         }
 
-        guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
-            throw ExportError.exportSessionUnavailable
-        }
-        guard exportSession.supportedFileTypes.contains(.mp4) else {
-            throw ExportError.unsupportedOutputType
+        func containsOSStatus(_ error: NSError, code: Int) -> Bool {
+            if error.domain == NSOSStatusErrorDomain, error.code == code { return true }
+            if error.code == code { return true }
+
+            if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError, containsOSStatus(underlying, code: code) {
+                return true
+            }
+
+            if let multiple = error.userInfo[NSMultipleUnderlyingErrorsKey] as? [NSError] {
+                for entry in multiple where containsOSStatus(entry, code: code) { return true }
+            }
+
+            return false
         }
 
-        exportSession.outputURL = tempOutURL
-        exportSession.outputFileType = .mp4
-        exportSession.videoComposition = videoComposition
-        exportSession.shouldOptimizeForNetworkUse = true
+        func isPresetNotCompatible(_ error: Error) -> Bool {
+            let nsError = error as NSError
+            if containsOSStatus(nsError, code: -16_976) { return true }
+            let message = String(describing: error).lowercased()
+            return message.contains("preset") && message.contains("compat")
+        }
 
-        let pollTask = Task {
-            while exportSession.status == .exporting || exportSession.status == .waiting {
-                let p = Double(exportSession.progress)
-                await progress(0.68 + (0.30 * max(0, min(1, p))))
-                try? await Task.sleep(nanoseconds: 200_000_000)
+        func runExport(attempt: Int) async throws {
+            guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+                throw ExportError.exportSessionUnavailable
+            }
+            guard exportSession.supportedFileTypes.contains(.mp4) else {
+                throw ExportError.unsupportedOutputType
+            }
+
+            if fm.fileExists(atPath: tempOutURL.path) {
+                try? fm.removeItem(at: tempOutURL)
+            }
+
+            exportSession.outputURL = tempOutURL
+            exportSession.outputFileType = .mp4
+            exportSession.videoComposition = videoComposition
+            exportSession.shouldOptimizeForNetworkUse = true
+
+            let pollTask = Task {
+                while exportSession.status == .exporting || exportSession.status == .waiting {
+                    let p = Double(exportSession.progress)
+                    await progress(0.68 + (0.30 * max(0, min(1, p))))
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+            }
+            defer { pollTask.cancel() }
+
+            do {
+                try await export(exportSession)
+            } catch {
+                let sessionError = exportSession.error ?? error
+                AlbumLog.model.error("Movie export failed attempt=\(attempt, privacy: .public) error=\(String(describing: sessionError), privacy: .public)")
+                throw sessionError
             }
         }
-        defer { pollTask.cancel() }
 
-        try await export(exportSession)
+        let exportBackoffNanos: [UInt64] = [
+            0,
+            450_000_000,
+            1_200_000_000,
+        ]
+
+        func exportViaReaderWriter() async throws {
+            if fm.fileExists(atPath: tempOutURL.path) {
+                try? fm.removeItem(at: tempOutURL)
+            }
+
+            let reader = try AVAssetReader(asset: composition)
+
+            let readerVideoOutput = AVAssetReaderVideoCompositionOutput(
+                videoTracks: [compVideoTrack],
+                videoSettings: [
+                    kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+                ]
+            )
+            readerVideoOutput.videoComposition = videoComposition
+
+            guard reader.canAdd(readerVideoOutput) else {
+                throw ExportError.failed("Movie export fallback: cannot read video track")
+            }
+            reader.add(readerVideoOutput)
+
+            let shouldIncludeAudio: Bool = {
+                guard let compAudioTrack else { return false }
+                return !compAudioTrack.segments.isEmpty
+            }()
+
+            var readerAudioOutput: AVAssetReaderTrackOutput? = nil
+            if shouldIncludeAudio, let compAudioTrack {
+                let audioOutput = AVAssetReaderTrackOutput(
+                    track: compAudioTrack,
+                    outputSettings: [
+                        AVFormatIDKey: kAudioFormatLinearPCM,
+                        AVLinearPCMIsFloatKey: false,
+                        AVLinearPCMBitDepthKey: 16,
+                        AVLinearPCMIsNonInterleaved: false,
+                        AVLinearPCMIsBigEndianKey: false,
+                    ]
+                )
+                if reader.canAdd(audioOutput) {
+                    reader.add(audioOutput)
+                    readerAudioOutput = audioOutput
+                }
+            }
+
+            let writer = try AVAssetWriter(outputURL: tempOutURL, fileType: .mp4)
+
+            let writerVideoInput = AVAssetWriterInput(
+                mediaType: .video,
+                outputSettings: [
+                    AVVideoCodecKey: AVVideoCodecType.h264,
+                    AVVideoWidthKey: Int(renderSize.width),
+                    AVVideoHeightKey: Int(renderSize.height),
+                ]
+            )
+            writerVideoInput.expectsMediaDataInRealTime = false
+            guard writer.canAdd(writerVideoInput) else {
+                throw ExportError.failed("Movie export fallback: cannot write video track")
+            }
+            writer.add(writerVideoInput)
+
+            var writerAudioInput: AVAssetWriterInput? = nil
+            if let readerAudioOutput {
+                var sampleRate: Double = 44_100
+                var channelCount: Int = 2
+
+                if let compAudioTrack,
+                   let rawDescs = try? await compAudioTrack.load(.formatDescriptions) {
+                    for entry in rawDescs {
+                        if let desc = entry as? CMAudioFormatDescription,
+                           let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc) {
+                            let sr = asbd.pointee.mSampleRate
+                            let ch = Int(asbd.pointee.mChannelsPerFrame)
+                            if sr.isFinite, sr > 0 { sampleRate = sr }
+                            if ch > 0 { channelCount = ch }
+                            break
+                        }
+                    }
+                }
+
+                let audioSettings: [String: Any] = [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: sampleRate,
+                    AVNumberOfChannelsKey: channelCount,
+                    AVEncoderBitRateKey: 192_000,
+                ]
+
+                let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+                input.expectsMediaDataInRealTime = false
+                if writer.canAdd(input) {
+                    writer.add(input)
+                    writerAudioInput = input
+                } else {
+                    AlbumLog.model.error("Movie export fallback: cannot add audio input; exporting silent audio track")
+                }
+            }
+
+            let durationSeconds = max(0.000_001, totalDuration.seconds)
+
+            let errorLock = NSLock()
+            var firstError: Error? = nil
+
+            func recordError(_ error: Error) {
+                errorLock.lock()
+                if firstError == nil {
+                    firstError = error
+                    reader.cancelReading()
+                    writer.cancelWriting()
+                }
+                errorLock.unlock()
+            }
+
+            func currentError() -> Error? {
+                errorLock.lock()
+                defer { errorLock.unlock() }
+                return firstError
+            }
+
+            let progressLock = NSLock()
+            var lastProgressSeconds: Double = 0
+
+            func maybeReportProgress(_ seconds: Double) {
+                guard seconds.isFinite else { return }
+                let clamped = max(0, min(durationSeconds, seconds))
+
+                progressLock.lock()
+                let delta = clamped - lastProgressSeconds
+                if delta < 0.35 {
+                    progressLock.unlock()
+                    return
+                }
+                lastProgressSeconds = clamped
+                progressLock.unlock()
+
+                let fraction = max(0, min(1, clamped / durationSeconds))
+                Task { await progress(0.68 + (0.30 * fraction)) }
+            }
+
+            guard reader.startReading() else {
+                throw reader.error ?? ExportError.failed("Movie export fallback: reader failed to start")
+            }
+            guard writer.startWriting() else {
+                throw writer.error ?? ExportError.failed("Movie export fallback: writer failed to start")
+            }
+            writer.startSession(atSourceTime: .zero)
+
+            let group = DispatchGroup()
+
+            group.enter()
+            let videoQueue = DispatchQueue(label: "album.movie.exportFallback.video")
+            var videoDone = false
+            writerVideoInput.requestMediaDataWhenReady(on: videoQueue) {
+                while writerVideoInput.isReadyForMoreMediaData {
+                    if videoDone { return }
+
+                    if currentError() != nil {
+                        videoDone = true
+                        writerVideoInput.markAsFinished()
+                        group.leave()
+                        return
+                    }
+
+                    if reader.status == .failed {
+                        recordError(reader.error ?? ExportError.failed("Movie export fallback: reader failed"))
+                        videoDone = true
+                        writerVideoInput.markAsFinished()
+                        group.leave()
+                        return
+                    }
+
+                    guard let sample = readerVideoOutput.copyNextSampleBuffer() else {
+                        videoDone = true
+                        writerVideoInput.markAsFinished()
+                        group.leave()
+                        return
+                    }
+
+                    let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                    if pts.isNumeric {
+                        maybeReportProgress(pts.seconds)
+                    }
+
+                    if !writerVideoInput.append(sample) {
+                        recordError(writer.error ?? ExportError.failed("Movie export fallback: failed to append video samples"))
+                        videoDone = true
+                        writerVideoInput.markAsFinished()
+                        group.leave()
+                        return
+                    }
+                }
+            }
+
+            if let readerAudioOutput, let writerAudioInput {
+                group.enter()
+                let audioQueue = DispatchQueue(label: "album.movie.exportFallback.audio")
+                var audioDone = false
+                writerAudioInput.requestMediaDataWhenReady(on: audioQueue) {
+                    while writerAudioInput.isReadyForMoreMediaData {
+                        if audioDone { return }
+
+                        if currentError() != nil {
+                            audioDone = true
+                            writerAudioInput.markAsFinished()
+                            group.leave()
+                            return
+                        }
+
+                        if reader.status == .failed {
+                            recordError(reader.error ?? ExportError.failed("Movie export fallback: reader failed"))
+                            audioDone = true
+                            writerAudioInput.markAsFinished()
+                            group.leave()
+                            return
+                        }
+
+                        guard let sample = readerAudioOutput.copyNextSampleBuffer() else {
+                            audioDone = true
+                            writerAudioInput.markAsFinished()
+                            group.leave()
+                            return
+                        }
+
+                        let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                        if pts.isNumeric {
+                            maybeReportProgress(pts.seconds)
+                        }
+
+                        if !writerAudioInput.append(sample) {
+                            recordError(writer.error ?? ExportError.failed("Movie export fallback: failed to append audio samples"))
+                            audioDone = true
+                            writerAudioInput.markAsFinished()
+                            group.leave()
+                            return
+                        }
+                    }
+                }
+            }
+
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                group.notify(queue: DispatchQueue.global(qos: .userInitiated)) {
+                    if let error = currentError() {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    writer.finishWriting {
+                        if writer.status == .completed {
+                            continuation.resume()
+                        } else {
+                            continuation.resume(throwing: writer.error ?? ExportError.failed("Movie export fallback: writer failed"))
+                        }
+                    }
+                }
+            }
+        }
+
+        var exportFailure: Error? = nil
+        for attempt in 1...exportBackoffNanos.count {
+            if attempt > 1 {
+                await status("Encoder reset…")
+                try? await Task.sleep(nanoseconds: exportBackoffNanos[attempt - 1])
+            }
+
+            do {
+                try await runExport(attempt: attempt)
+                exportFailure = nil
+                break
+            } catch {
+                exportFailure = error
+                if !isPresetNotCompatible(error) {
+                    throw error
+                }
+            }
+        }
+
+        if let exportFailure {
+            AlbumLog.model.error("Movie export session repeatedly failed; falling back to reader/writer. error=\(String(describing: exportFailure), privacy: .public)")
+            await status("Encoding mp4 (fallback)…")
+            try await exportViaReaderWriter()
+        }
 
         await progress(0.98)
 
