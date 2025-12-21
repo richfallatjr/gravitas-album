@@ -1470,7 +1470,15 @@ public final class AlbumModel: ObservableObject {
         }
 
         let titleRaw = movieItem.movie?.draftTitle.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let title = titleRaw.isEmpty ? "Untitled Movie" : titleRaw
+        let titleClamped = AlbumMovieDraft.clampedTitle(titleRaw)
+        if titleClamped != titleRaw {
+            updatePoppedItem(itemID) { item in
+                var movie = item.movie ?? AlbumMovieDraft()
+                movie.draftTitle = titleClamped
+                item.movie = movie
+            }
+        }
+        let title = titleClamped.isEmpty ? "Untitled Movie" : titleClamped
         let subtitle = movieItem.movie?.draftSubtitle?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         appendMovieStatusLine(itemID: itemID, line: "Analyzing media…")
@@ -1740,7 +1748,7 @@ public final class AlbumModel: ObservableObject {
 
             let currentTitle = movie.draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !movie.titleUserEdited || currentTitle.isEmpty {
-                movie.draftTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                movie.draftTitle = AlbumMovieDraft.clampedTitle(title.trimmingCharacters(in: .whitespacesAndNewlines))
             }
 
             if let subtitle {
@@ -3841,33 +3849,15 @@ private enum AlbumMovieExportPipeline {
     }
 
     private static func makeTitleCardImage(title: String, subtitle: String?) -> CGImage {
-        let width = Int(renderSize.width)
-        let height = Int(renderSize.height)
-
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: colorSpace,
-            bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-        ) else {
-            return CGImage(width: 1, height: 1, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 4, space: colorSpace, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue), provider: CGDataProvider(data: Data([0, 0, 0, 255]) as CFData)!, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
-        }
-
-        ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
-        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
-
 #if canImport(UIKit)
-        // UIKit text drawing assumes a top-left origin; flip the bitmap context so the
-        // resulting CGImage matches our movie render pipeline orientation.
-        ctx.translateBy(x: 0, y: CGFloat(height))
-        ctx.scaleBy(x: 1, y: -1)
-
-        UIGraphicsPushContext(ctx)
-        defer { UIGraphicsPopContext() }
+        let width = Int(renderSize.width)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: renderSize, format: format)
+        let image = renderer.image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(origin: .zero, size: renderSize))
 
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
@@ -3897,8 +3887,23 @@ private enum AlbumMovieExportPipeline {
             let subtitleRect = CGRect(x: 120, y: 560, width: width - 240, height: 90)
             (subtitleText as NSString).draw(in: subtitleRect, withAttributes: subtitleAttrs)
         }
-#endif
+        }
 
-        return ctx.makeImage()!
+        if let cg = image.cgImage { return cg }
+#endif
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        return CGImage(
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: 4,
+            space: colorSpace,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue),
+            provider: CGDataProvider(data: Data([0, 0, 0, 255]) as CFData)!,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )!
     }
 }

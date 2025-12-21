@@ -169,7 +169,7 @@ public struct AlbumMovieDraftView: View {
                     set: { newValue in
                         model.updatePoppedItem(itemID) { item in
                             var movie = item.movie ?? AlbumMovieDraft()
-                            movie.draftTitle = newValue
+                            movie.draftTitle = AlbumMovieDraft.clampedTitle(newValue)
                             movie.titleUserEdited = true
                             item.movie = movie
                         }
@@ -373,17 +373,19 @@ public struct AlbumMovieDraftView: View {
         }()
 
         let tempURL = fm.temporaryDirectory.appendingPathComponent("\(baseName)_\(UUID().uuidString).mp4", isDirectory: false)
+        var shareURL = sourceURL
 
         do {
             try? fm.removeItem(at: tempURL)
             do {
                 try fm.linkItem(at: sourceURL, to: tempURL)
+                shareURL = tempURL
             } catch {
-                try fm.copyItem(at: sourceURL, to: tempURL)
+                shareURL = sourceURL
             }
 
             await MainActor.run {
-                openWindow(value: AlbumSharePayload(url: tempURL, title: baseName))
+                openWindow(value: AlbumSharePayload(url: shareURL, title: baseName))
             }
         } catch {
             await MainActor.run {

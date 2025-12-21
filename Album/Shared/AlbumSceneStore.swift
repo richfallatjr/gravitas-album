@@ -60,12 +60,19 @@ public struct AlbumMovieRenderState: Sendable, Codable, Hashable {
 }
 
 public struct AlbumMovieDraft: Sendable, Codable, Hashable {
+    public static let maxTitleCharacters: Int = 64
+
     public var draftTitle: String
     public var draftSubtitle: String?
     public var titleUserEdited: Bool
     public var renderState: AlbumMovieRenderState
     public var artifactRelativePath: String?
     public var artifactMetadata: AlbumMovieArtifactMetadata?
+
+    public static func clampedTitle(_ raw: String) -> String {
+        if raw.count <= maxTitleCharacters { return raw }
+        return String(raw.prefix(maxTitleCharacters))
+    }
 
     public init(
         draftTitle: String = "",

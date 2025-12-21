@@ -101,7 +101,9 @@ private struct AlbumPopOutWindowRootView: View {
                     onDetach: { syncPoppedItem(with: nil) },
                     onMidXChange: { midX in
                         guard let activeItemID else { return }
-                        model.updatePoppedItemWindowMidX(itemID: activeItemID, midX: midX)
+                        DispatchQueue.main.async {
+                            model.updatePoppedItemWindowMidX(itemID: activeItemID, midX: midX)
+                        }
                     }
                 )
 
@@ -121,16 +123,20 @@ private struct AlbumPopOutWindowRootView: View {
     }
 
     private func syncPoppedItem(with newItemID: UUID?) {
-        if let existing = activeItemID, existing != newItemID {
-            model.updatePoppedItemWindowWorldCenter(itemID: existing, center: nil)
-            model.removePoppedItem(existing)
-        }
-
-        if let newItemID, newItemID != activeItemID, let item = model.sceneItem(for: newItemID) {
-            model.ensurePoppedItemExists(item)
-        }
-
+        let previous = activeItemID
+        guard previous != newItemID else { return }
         activeItemID = newItemID
+
+        DispatchQueue.main.async {
+            if let previous, previous != newItemID {
+                model.updatePoppedItemWindowWorldCenter(itemID: previous, center: nil)
+                model.removePoppedItem(previous)
+            }
+
+            if let newItemID, newItemID != previous, let item = model.sceneItem(for: newItemID) {
+                model.ensurePoppedItemExists(item)
+            }
+        }
     }
 
     private func windowWorldCenter(from proxy: GeometryProxy3D) -> AlbumWindowWorldCenter? {
@@ -177,7 +183,9 @@ private struct AlbumPopOutWindowRootView: View {
 
     private func updateWindowWorldCenter(_ center: AlbumWindowWorldCenter?) {
         guard let activeItemID else { return }
-        model.updatePoppedItemWindowWorldCenter(itemID: activeItemID, center: center)
+        DispatchQueue.main.async {
+            model.updatePoppedItemWindowWorldCenter(itemID: activeItemID, center: center)
+        }
     }
 }
 
@@ -206,22 +214,20 @@ private struct AlbumShareWindowRootView: View {
 
             Group {
                 if let payload {
-#if canImport(UIKit)
-                    let item: Any = {
-                        let provider = NSItemProvider(contentsOf: payload.url)
-                        let name = payload.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        if !name.isEmpty {
-                            provider?.suggestedName = name
+                    VStack(spacing: 16) {
+                        ShareLink(item: payload.url, preview: SharePreview(titleText)) {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
                         }
-                        return provider ?? payload.url
-                    }()
+                        .buttonStyle(.borderedProminent)
 
-                    AlbumShareSheet(items: [item]) { _, _, _, _ in
-                        dismiss()
+                        Text(payload.url.lastPathComponent)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
-#else
-                    Text("Share unavailable on this platform.")
-#endif
+                    .padding(16)
                 } else {
                     Text("Nothing to share.")
                         .font(.callout)
