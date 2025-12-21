@@ -1,4 +1,8 @@
 import SwiftUI
+#if canImport(Spatial)
+import Spatial
+#endif
+import simd
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -44,7 +48,6 @@ private struct AlbumPopOutWindowRootView: View {
     @EnvironmentObject private var model: AlbumModel
 
     @State private var activeItemID: UUID? = nil
-    @State private var hasGeometryMidX: Bool = false
 
     init(payload: Binding<AlbumPopOutPayload?>) {
         self._payload = payload
@@ -90,25 +93,17 @@ private struct AlbumPopOutWindowRootView: View {
                     onAttach: { syncPoppedItem(with: itemID) },
                     onDetach: { syncPoppedItem(with: nil) },
                     onMidXChange: { midX in
-                        guard !hasGeometryMidX else { return }
                         guard let activeItemID else { return }
                         model.updatePoppedItemWindowMidX(itemID: activeItemID, midX: midX)
                     }
                 )
 
                 GeometryReader3D { proxy in
-                    let rect = proxy.frame(in: .global)
-                    let transform = proxy.transform(in: .global)
-                    let midX = windowMidX(from: rect, transform: transform)
-                    let center = windowWorldCenter(from: rect, transform: transform)
+                    let center = windowWorldCenter(from: proxy)
 
                     Color.clear
                         .onAppear {
-                            updateWindowMidX(midX)
                             updateWindowWorldCenter(center)
-                        }
-                        .onChange(of: midX) { newMidX in
-                            updateWindowMidX(newMidX)
                         }
                         .onChange(of: center) { newCenter in
                             updateWindowWorldCenter(newCenter)
@@ -128,36 +123,42 @@ private struct AlbumPopOutWindowRootView: View {
             model.ensurePoppedItemExists(item)
         }
 
-        if newItemID != activeItemID {
-            hasGeometryMidX = false
-        }
         activeItemID = newItemID
     }
 
-    private func windowMidX(from rect: Rect3D, transform: AffineTransform3D?) -> Double? {
-        if let transform {
-            let x = transform.translation.x
-            if x.isFinite { return x }
+    private func windowWorldCenter(from proxy: GeometryProxy3D) -> AlbumWindowWorldCenter? {
+        let rect = proxy.frame(in: .global)
+
+        if #available(visionOS 26.0, *) {
+            let centerInSpace = SIMD4<Double>(
+                Double(rect.origin.x + (rect.size.width / 2)),
+                Double(rect.origin.y + (rect.size.height / 2)),
+                Double(rect.origin.z + (rect.size.depth / 2)),
+                1.0
+            )
+
+            let coordinateSpace = proxy.coordinateSpace3D(for: .global)
+            if let t = try? coordinateSpace.ancestorFromSpaceTransform() {
+                let transformed = simd_mul(t.matrix, centerInSpace)
+                let w = transformed.w.isFinite && transformed.w != 0 ? transformed.w : 1.0
+                let x = transformed.x / w
+                let y = transformed.y / w
+                let z = transformed.z / w
+                if x.isFinite, y.isFinite, z.isFinite {
+                    return AlbumWindowWorldCenter(x: x, y: y, z: z)
+                }
+            }
         }
-        let x = rect.origin.x + (rect.size.width / 2)
-        return x.isFinite ? x : nil
-    }
 
-    private func updateWindowMidX(_ midX: Double?) {
-        guard let midX else { return }
-        guard let activeItemID else { return }
-        hasGeometryMidX = true
-        model.updatePoppedItemWindowMidX(itemID: activeItemID, midX: midX)
-    }
-
-    private func windowWorldCenter(from rect: Rect3D, transform: AffineTransform3D?) -> AlbumWindowWorldCenter? {
+        let transform = proxy.transform(in: .global)
         if let transform {
             let t = transform.translation
             let x = t.x
             let y = t.y
             let z = t.z
-            guard x.isFinite, y.isFinite, z.isFinite else { return nil }
-            return AlbumWindowWorldCenter(x: x, y: y, z: z)
+            if x.isFinite, y.isFinite, z.isFinite {
+                return AlbumWindowWorldCenter(x: x, y: y, z: z)
+            }
         }
 
         let x = rect.origin.x + (rect.size.width / 2)
@@ -301,6 +302,9 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
             let center = CGPoint(x: window.bounds.midX, y: window.bounds.midY)
             let scenePoint: CGPoint = {
                 if let scene = window.windowScene {
+                    if #available(visionOS 26.0, *) {
+                        return scene.effectiveGeometry.coordinateSpace.convert(center, from: window.coordinateSpace)
+                    }
                     return scene.coordinateSpace.convert(center, from: window.coordinateSpace)
                 }
                 return window.convert(center, to: nil)

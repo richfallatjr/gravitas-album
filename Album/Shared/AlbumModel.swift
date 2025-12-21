@@ -1417,17 +1417,40 @@ public final class AlbumModel: ObservableObject {
             }
         }
 
-        AlbumLog.model.info("Movie ordering uses window world center.x (fallback: window midX).")
+        if let basis = headBasisForOrdering() {
+            AlbumLog.model.info("Movie ordering head pos=(\(basis.pos.x, privacy: .public), \(basis.pos.y, privacy: .public), \(basis.pos.z, privacy: .public)) right=(\(basis.right.x, privacy: .public), \(basis.right.y, privacy: .public), \(basis.right.z, privacy: .public))")
+        } else {
+            AlbumLog.model.info("Movie ordering head basis unavailable; falling back to world center.x / midX")
+        }
         for item in exportablesRaw {
-            let xKey = windowWorldCentersByItemID[item.id]?.x ?? windowMidXByItemID[item.id]
-            AlbumLog.model.info("Movie ordering item id=\(item.id.uuidString, privacy: .public) xKey=\(xKey ?? 0, privacy: .public)")
+            let midX = windowMidXByItemID[item.id]
+            let center = windowWorldCentersByItemID[item.id]
+            let key = sortKeyForItem(item.id)
+            if let center {
+                AlbumLog.model.info("Movie ordering item id=\(item.id.uuidString, privacy: .public) key=\(key ?? -999, privacy: .public) center=(\(center.x, privacy: .public), \(center.y, privacy: .public), \(center.z, privacy: .public)) midX=\(midX ?? 0, privacy: .public)")
+            } else {
+                AlbumLog.model.info("Movie ordering item id=\(item.id.uuidString, privacy: .public) key=\(key ?? -999, privacy: .public) center=nil midX=\(midX ?? 0, privacy: .public)")
+            }
         }
 
         let exportables = exportablesRaw.sorted { a, b in
-            let ax = windowWorldCentersByItemID[a.id]?.x ?? windowMidXByItemID[a.id] ?? 0
-            let bx = windowWorldCentersByItemID[b.id]?.x ?? windowMidXByItemID[b.id] ?? 0
-            if ax == bx { return a.id.uuidString < b.id.uuidString }
-            return ax < bx
+            let ak = sortKeyForItem(a.id)
+            let bk = sortKeyForItem(b.id)
+
+            switch (ak, bk) {
+            case let (ak?, bk?):
+                if ak == bk { return a.id.uuidString < b.id.uuidString }
+                return ak < bk
+            case (nil, nil):
+                let ax = windowWorldCentersByItemID[a.id]?.x ?? windowMidXByItemID[a.id] ?? 0
+                let bx = windowWorldCentersByItemID[b.id]?.x ?? windowMidXByItemID[b.id] ?? 0
+                if ax == bx { return a.id.uuidString < b.id.uuidString }
+                return ax < bx
+            case (nil, _?):
+                return false
+            case (_?, nil):
+                return true
+            }
         }
 
         guard !exportables.isEmpty else {
