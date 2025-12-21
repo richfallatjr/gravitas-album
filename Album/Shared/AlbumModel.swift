@@ -1023,14 +1023,18 @@ public final class AlbumModel: ObservableObject {
             return
         }
 
-        let neighborIDs = recommendItems.map(\.id)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && $0 != anchorID && !hiddenIDs.contains($0) }
+        dumpRecommendsNeighborsToCurvedWall(anchorID: anchorID, neighborIDs: recommendItems.map(\.id))
+    }
 
-        guard !neighborIDs.isEmpty else {
-            thumbStatusMessage = "No neighbors for focused asset"
-            return
-        }
+    private func dumpRecommendsNeighborsToCurvedWall(anchorID: String, neighborIDs rawNeighborIDs: [String]) {
+        let anchorID = anchorID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !anchorID.isEmpty else { return }
+
+        let neighborIDs = rawNeighborIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != anchorID && !hiddenIDs.contains($0) && item(for: $0) != nil }
+
+        guard !neighborIDs.isEmpty else { return }
 
         let capped = Array(neighborIDs.prefix(20))
         let maxStoredPages = 10
@@ -1055,29 +1059,26 @@ public final class AlbumModel: ObservableObject {
         let all = curvedWallRecommendsAllAssetIDs
         let total = all.count
 
-        if let placementID = curvedWallPlacementID {
-            let jumpIndex: Int = {
-                let preferred = capped
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty && !hiddenIDs.contains($0) && item(for: $0) != nil && !priorSet.contains($0) }
+        let placementID = Self.curvedWallRecommendsPlacementID
+        let jumpIndex: Int = {
+            let preferred = capped
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && !hiddenIDs.contains($0) && item(for: $0) != nil && !priorSet.contains($0) }
 
-                if let first = preferred.first, let idx = all.firstIndex(of: first) { return idx }
+            if let first = preferred.first, let idx = all.firstIndex(of: first) { return idx }
 
-                let fallback = capped
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .first(where: { !$0.isEmpty && !hiddenIDs.contains($0) && item(for: $0) != nil })
+            let fallback = capped
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first(where: { !$0.isEmpty && !hiddenIDs.contains($0) && item(for: $0) != nil })
 
-                if let fallback, let idx = all.firstIndex(of: fallback) { return idx }
-                return max(0, total - 1)
-            }()
+            if let fallback, let idx = all.firstIndex(of: fallback) { return idx }
+            return max(0, total - 1)
+        }()
 
-            let starts = curvedWallPageStartIndices(for: all)
-            let jumpPage = curvedWallPageIndex(for: jumpIndex, pageStarts: starts)
-            curvedWallPageWindows[placementID] = jumpPage
-            AlbumLog.model.info("CurvedWall dump anchor=\(anchorID, privacy: .public) neighbors=\(capped.count) dumps=\(self.curvedWallDumpPages.count) totalItems=\(total) jumpPage=\(jumpPage)")
-        } else {
-            AlbumLog.model.info("CurvedWall dump anchor=\(anchorID, privacy: .public) neighbors=\(capped.count) dumps=\(self.curvedWallDumpPages.count) totalItems=\(total)")
-        }
+        let starts = curvedWallPageStartIndices(for: all)
+        let jumpPage = curvedWallPageIndex(for: jumpIndex, pageStarts: starts)
+        curvedWallPageWindows[placementID] = jumpPage
+        AlbumLog.model.info("CurvedWall dump anchor=\(anchorID, privacy: .public) neighbors=\(capped.count) dumps=\(self.curvedWallDumpPages.count) totalItems=\(total) jumpPage=\(jumpPage)")
 
         curvedCanvasEnabled = true
     }
@@ -2556,6 +2557,11 @@ public final class AlbumModel: ObservableObject {
             .filter { $0.id != anchorID && !hiddenIDs.contains($0.id) }
         neighborsReady = !recommendItems.isEmpty
 
+        if feedback == .up, neighborsReady {
+            panelMode = .recommends
+            dumpRecommendsNeighborsToCurvedWall(anchorID: anchorID, neighborIDs: result.neighbors.map(\.id))
+        }
+
         switch feedback {
         case .up:
             if let nextUpID = result.nextID?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -3108,8 +3114,8 @@ private enum AlbumMovieExportPipeline {
             endZoom: 1.0
         )
 
-        var renderedImageClips: [(id: UUID, url: URL)] = []
-        renderedImageClips.reserveCapacity(request.segments.count)
+        var renderedImageClipURLByID: [UUID: URL] = [:]
+        renderedImageClipURLByID.reserveCapacity(request.segments.count)
 
         let images = request.segments.compactMap { seg -> (id: UUID, cgImage: CGImage, start: CGPoint, end: CGPoint)? in
             if case .image(let instanceID, _, let cgImage, let start, let end) = seg {
@@ -3120,25 +3126,67 @@ private enum AlbumMovieExportPipeline {
 
         if !images.isEmpty {
             await status("Rendering images (0/\(images.count))…")
-        }
 
-        for (idx, image) in images.enumerated() {
-            await status("Rendering images (\(idx + 1)/\(images.count))…")
-            let p = 0.08 + (0.52 * (Double(idx) / Double(max(1, images.count))))
-            await progress(p)
+            struct ImageRenderJob: Sendable {
+                let index: Int
+                let instanceID: UUID
+                let cgImage: CGImage
+                let startAnchor: CGPoint
+                let endAnchor: CGPoint
+            }
 
-            let clipURL = tempDir.appendingPathComponent("img_\(idx).mp4", isDirectory: false)
-            try await renderImageClip(
-                cgImage: image.cgImage,
-                to: clipURL,
-                durationSeconds: stillDurationSeconds,
-                fps: fps,
-                startAnchor: image.start,
-                endAnchor: image.end,
-                startZoom: 1.02,
-                endZoom: 1.06
-            )
-            renderedImageClips.append((id: image.id, url: clipURL))
+            let jobs: [ImageRenderJob] = images.enumerated().map { idx, image in
+                ImageRenderJob(
+                    index: idx,
+                    instanceID: image.id,
+                    cgImage: image.cgImage,
+                    startAnchor: image.start,
+                    endAnchor: image.end
+                )
+            }
+
+            let maxConcurrency = min(8, jobs.count)
+            var nextJobIndex = 0
+            var completedCount = 0
+
+            try await withThrowingTaskGroup(of: (UUID, URL).self) { group in
+                func enqueue(_ job: ImageRenderJob) {
+                    group.addTask {
+                        let clipURL = tempDir.appendingPathComponent("img_\(job.index).mp4", isDirectory: false)
+                        try await renderImageClip(
+                            cgImage: job.cgImage,
+                            to: clipURL,
+                            durationSeconds: stillDurationSeconds,
+                            fps: fps,
+                            startAnchor: job.startAnchor,
+                            endAnchor: job.endAnchor,
+                            startZoom: 1.02,
+                            endZoom: 1.06
+                        )
+                        return (job.instanceID, clipURL)
+                    }
+                }
+
+                for _ in 0..<maxConcurrency {
+                    guard nextJobIndex < jobs.count else { break }
+                    enqueue(jobs[nextJobIndex])
+                    nextJobIndex += 1
+                }
+
+                while let (instanceID, clipURL) = try await group.next() {
+                    renderedImageClipURLByID[instanceID] = clipURL
+                    completedCount += 1
+
+                    await status("Rendering images (\(completedCount)/\(jobs.count))…")
+                    let p = 0.08 + (0.52 * (Double(completedCount) / Double(max(1, jobs.count))))
+                    await progress(p)
+
+                    if nextJobIndex < jobs.count {
+                        enqueue(jobs[nextJobIndex])
+                        nextJobIndex += 1
+                    }
+                }
+            }
         }
 
         await status("Assembling timeline…")
@@ -3183,10 +3231,8 @@ private enum AlbumMovieExportPipeline {
         for seg in request.segments {
             switch seg {
             case .image(let instanceID, _, _, _, _):
-                guard let clip = renderedImageClips.first(where: { $0.id == instanceID })?.url else {
-                    continue
-                }
-                try await insertClipAsset(url: clip)
+                guard let clipURL = renderedImageClipURLByID[instanceID] else { continue }
+                try await insertClipAsset(url: clipURL)
 
             case .video(_, _, let url, let trimStart, let trimEnd, let cropAnchor):
                 let asset = AVURLAsset(url: url)
