@@ -183,15 +183,17 @@ public final class AlbumModel: ObservableObject {
     @Published public private(set) var visionCoverage: AlbumVisionCoverage = AlbumVisionCoverage()
     @Published public private(set) var visionCoverageIsRefreshing: Bool = false
 
-	    public struct Settings: Sendable, Hashable {
-	        public var autofillOnThumbUp: Bool
-	        public var thumbUpAutofillCount: Int
+		    public struct Settings: Sendable, Hashable {
+		        public var autofillOnThumbUp: Bool
+		        public var thumbUpAutofillCount: Int
+		        public var showFacesDebugUI: Bool
 
-	        public init(autofillOnThumbUp: Bool = false, thumbUpAutofillCount: Int = 5) {
-	            self.autofillOnThumbUp = autofillOnThumbUp
-	            self.thumbUpAutofillCount = max(0, thumbUpAutofillCount)
-	        }
-	    }
+		        public init(autofillOnThumbUp: Bool = false, thumbUpAutofillCount: Int = 5, showFacesDebugUI: Bool = false) {
+		            self.autofillOnThumbUp = autofillOnThumbUp
+		            self.thumbUpAutofillCount = max(0, thumbUpAutofillCount)
+		            self.showFacesDebugUI = showFacesDebugUI
+		        }
+		    }
 
     @Published public var settings: Settings = Settings()
 

@@ -190,10 +190,46 @@ public struct AlbumControlView: View {
                     Text("Load Limit")
                         .foregroundStyle(palette.panelSecondaryText)
 
-                    Stepper(value: $assetLimit, in: 50...300, step: 50) {
+                    HStack(spacing: 10) {
+                        Button {
+                            assetLimit = max(50, assetLimit - 50)
+                        } label: {
+                            Image(systemName: "minus")
+                                .font(.footnote.weight(.semibold))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .background(palette.cardBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(palette.cardBorder.opacity(0.65), lineWidth: 1)
+                        )
+                        .foregroundStyle(palette.panelPrimaryText)
+                        .disabled(assetLimit <= 50)
+                        .accessibilityLabel("Decrease load limit")
+
                         Text("\(assetLimit)")
                             .font(.footnote.monospacedDigit())
                             .foregroundStyle(palette.panelPrimaryText)
+                            .frame(minWidth: 44, alignment: .center)
+                            .accessibilityLabel("Load limit")
+
+                        Button {
+                            assetLimit = min(300, assetLimit + 50)
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.footnote.weight(.semibold))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .background(palette.cardBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(palette.cardBorder.opacity(0.65), lineWidth: 1)
+                        )
+                        .foregroundStyle(palette.panelPrimaryText)
+                        .disabled(assetLimit >= 300)
+                        .accessibilityLabel("Increase load limit")
                     }
                 }
             }
@@ -558,10 +594,10 @@ public struct AlbumControlView: View {
     private var bottomRightButtons: some View {
         let palette = model.palette
 
-        return HStack(spacing: 12) {
-            Button {
-                let current = self.model.currentAssetID ?? "nil"
-                let anchor = self.model.recommendAnchorID ?? "nil"
+	        return HStack(spacing: 12) {
+	            Button {
+	                let current = self.model.currentAssetID ?? "nil"
+	                let anchor = self.model.recommendAnchorID ?? "nil"
                 AlbumLog.ui.info("Layout pressed; mode=\(self.model.panelMode.rawValue, privacy: .public) current=\(current, privacy: .public) anchor=\(anchor, privacy: .public) neighbors=\(self.model.recommendItems.count)")
                 model.dumpFocusedNeighborsToCurvedWall()
             } label: {
@@ -570,25 +606,29 @@ public struct AlbumControlView: View {
                     .padding(.horizontal, 14)
             }
             .buttonStyle(.borderedProminent)
-            .tint(palette.copyButtonFill)
-            .foregroundStyle(palette.buttonLabelOnColor)
-            .disabled(!layoutEnabled)
+	            .tint(palette.copyButtonFill)
+	            .foregroundStyle(palette.buttonLabelOnColor)
+	            .disabled(!layoutEnabled)
 
-            Button {
-                presentedSheet = .faces
-            } label: {
-                Label("Faces", systemImage: "person.2.square.stack")
-                    .labelStyle(.titleAndIcon)
-                    .padding(.horizontal, 14)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(palette.historyButtonColor)
-            .foregroundStyle(palette.buttonLabelOnColor)
-            .disabled(!launched)
+#if DEBUG
+	            if model.settings.showFacesDebugUI {
+	                Button {
+	                    presentedSheet = .faces
+	                } label: {
+	                    Label("Faces", systemImage: "person.2.square.stack")
+	                        .labelStyle(.titleAndIcon)
+	                        .padding(.horizontal, 14)
+	                }
+	                .buttonStyle(.borderedProminent)
+	                .tint(palette.historyButtonColor)
+	                .foregroundStyle(palette.buttonLabelOnColor)
+	                .disabled(!launched)
+	            }
+#endif
 
-            Button {
-                if let id = model.currentAssetID {
-                    if let item = model.createPoppedAssetItem(assetID: id) {
+	            Button {
+	                if let id = model.currentAssetID {
+	                    if let item = model.createPoppedAssetItem(assetID: id) {
                         openWindow(value: AlbumPopOutPayload(itemID: item.id))
                     }
                 }

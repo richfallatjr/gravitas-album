@@ -192,20 +192,23 @@ public struct AlbumSettingsSheet: View {
             }
 
 #if DEBUG
-            GroupBox {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Developer")
-                        .font(.headline)
+	            GroupBox {
+	                VStack(alignment: .leading, spacing: 10) {
+	                    Text("Developer")
+	                        .font(.headline)
 
-                    Toggle("Thumb-Up Neighbor Autofill", isOn: $model.settings.autofillOnThumbUp)
-                        .toggleStyle(.switch)
+	                    Toggle("Show Faces Button", isOn: $model.settings.showFacesDebugUI)
+	                        .toggleStyle(.switch)
 
-                    Text("Uses 5 neighbors and only overwrites autofilled items.")
-                        .font(.caption2)
-                        .foregroundStyle(palette.panelSecondaryText)
-                }
-                .padding(8)
-            }
+	                    Toggle("Thumb-Up Neighbor Autofill", isOn: $model.settings.autofillOnThumbUp)
+	                        .toggleStyle(.switch)
+
+	                    Text("Uses 5 neighbors and only overwrites autofilled items.")
+	                        .font(.caption2)
+	                        .foregroundStyle(palette.panelSecondaryText)
+	                }
+	                .padding(8)
+	            }
 #endif
 
             Spacer(minLength: 0)
