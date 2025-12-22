@@ -1342,6 +1342,16 @@ public final class AlbumModel: ObservableObject {
         _ = appendToHistoryIfNew(assetID: assetID)
     }
 
+    public func loadAssetIntoHistory(_ assetID: String) {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        guard !hiddenIDs.contains(id) else { return }
+
+        Task { @MainActor in
+            await self.focusAssetInHistory(assetID: id)
+        }
+    }
+
     public func focusAssetInHistory(assetID: String) async {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }

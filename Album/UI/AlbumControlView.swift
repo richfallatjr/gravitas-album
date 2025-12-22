@@ -13,12 +13,14 @@ public struct AlbumControlView: View {
         case queryPicker
         case settings
         case faces
+        case fileBrowser
 
         var id: Int {
             switch self {
             case .queryPicker: return 0
             case .settings: return 1
             case .faces: return 2
+            case .fileBrowser: return 3
             }
         }
     }
@@ -90,6 +92,9 @@ public struct AlbumControlView: View {
             case .faces:
                 AlbumFacesSheet()
                     .environmentObject(model)
+            case .fileBrowser:
+                AlbumFileBrowserSheet(query: model.selectedQuery)
+                    .environmentObject(model)
             }
         }
     }
@@ -133,37 +138,64 @@ public struct AlbumControlView: View {
                     .lineLimit(2)
             }
 
-            HStack(spacing: 12) {
-                Button {
-                    presentedSheet = .queryPicker
-                } label: {
-                    Label(model.selectedQuery.title, systemImage: "photo.on.rectangle")
-                        .labelStyle(.titleAndIcon)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    Button {
+                        presentedSheet = .queryPicker
+                    } label: {
+                        Label(model.selectedQuery.title, systemImage: "photo.on.rectangle")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(palette.historyButtonColor)
+                    .foregroundStyle(palette.buttonLabelOnColor)
+
+                    Button("Reload") {
+                        AlbumLog.ui.info("Reload pressed; loadItems(limit: \(self.assetLimit), query: \(self.model.selectedQuery.id, privacy: .public))")
+                        Task { await model.loadItems(limit: assetLimit, query: model.selectedQuery) }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(palette.copyButtonFill)
+                    .foregroundStyle(palette.buttonLabelOnColor)
+
+                    Button {
+                        presentedSheet = .fileBrowser
+                    } label: {
+                        Label("Files", systemImage: "photo.on.rectangle")
+                            .labelStyle(.iconOnly)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .background(palette.readButtonColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(palette.readButtonColor.opacity(0.35), lineWidth: 1)
+                    )
+                    .foregroundStyle(palette.readButtonColor)
+                    .disabled(model.datasetSource != .photos)
+
+                    Spacer(minLength: 0)
+
+                    Picker("Mode", selection: $model.panelMode) {
+                        Text("MEMORIES").tag(AlbumPanelMode.memories)
+                        Text("RECOMMENDS").tag(AlbumPanelMode.recommends)
+                    }
+                    .pickerStyle(.segmented)
+                    .tint(palette.toggleFillColor)
+                    .frame(maxWidth: 360)
                 }
-                .buttonStyle(.bordered)
-                .tint(palette.historyButtonColor)
-                .foregroundStyle(palette.buttonLabelOnColor)
 
-                Stepper("Limit \(assetLimit)", value: $assetLimit, in: 50...300, step: 50)
-                    .labelsHidden()
+                HStack(spacing: 12) {
+                    Text("Load Limit")
+                        .foregroundStyle(palette.panelSecondaryText)
 
-                Button("Reload") {
-                    AlbumLog.ui.info("Reload pressed; loadItems(limit: \(self.assetLimit), query: \(self.model.selectedQuery.id, privacy: .public))")
-                    Task { await model.loadItems(limit: assetLimit, query: model.selectedQuery) }
+                    Stepper(value: $assetLimit, in: 50...300, step: 50) {
+                        Text("\(assetLimit)")
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(palette.panelPrimaryText)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .tint(palette.copyButtonFill)
-                .foregroundStyle(palette.buttonLabelOnColor)
-
-                Spacer(minLength: 0)
-
-                Picker("Mode", selection: $model.panelMode) {
-                    Text("MEMORIES").tag(AlbumPanelMode.memories)
-                    Text("RECOMMENDS").tag(AlbumPanelMode.recommends)
-                }
-                .pickerStyle(.segmented)
-                .tint(palette.toggleFillColor)
-                .frame(maxWidth: 360)
             }
             .font(.footnote)
 
