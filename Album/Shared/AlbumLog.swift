@@ -10,5 +10,5 @@ public enum AlbumLog {
     public static let model = Logger(subsystem: subsystem, category: "Model")
     public static let photos = Logger(subsystem: subsystem, category: "Photos")
     public static let immersive = Logger(subsystem: subsystem, category: "Immersive")
+    public static let faces = Logger(subsystem: subsystem, category: "Faces")
 }
-

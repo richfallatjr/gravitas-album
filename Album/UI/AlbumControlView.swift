@@ -12,11 +12,13 @@ public struct AlbumControlView: View {
     private enum PresentedSheet: Identifiable {
         case queryPicker
         case settings
+        case faces
 
         var id: Int {
             switch self {
             case .queryPicker: return 0
             case .settings: return 1
+            case .faces: return 2
             }
         }
     }
@@ -84,6 +86,9 @@ public struct AlbumControlView: View {
                     .environmentObject(model)
             case .settings:
                 AlbumSettingsSheet()
+                    .environmentObject(model)
+            case .faces:
+                AlbumFacesSheet()
                     .environmentObject(model)
             }
         }
@@ -536,6 +541,18 @@ public struct AlbumControlView: View {
             .tint(palette.copyButtonFill)
             .foregroundStyle(palette.buttonLabelOnColor)
             .disabled(!layoutEnabled)
+
+            Button {
+                presentedSheet = .faces
+            } label: {
+                Label("Faces", systemImage: "person.2.square.stack")
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 14)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(palette.historyButtonColor)
+            .foregroundStyle(palette.buttonLabelOnColor)
+            .disabled(!launched)
 
             Button {
                 if let id = model.currentAssetID {

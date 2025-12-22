@@ -42,6 +42,8 @@ public final class AlbumModel: ObservableObject {
     private let sidecarStore: AlbumSidecarStore
     private let libraryIndexStore: AlbumLibraryIndexStore
     private let backfillManager: AlbumBackfillManager
+    private let faceIndexStore: FaceIndexStore
+    private let faceEngine: AlbumFaceEngine
     public let oracle: AlbumOracle
 
     @Published public var theme: AlbumTheme = .dark
@@ -57,6 +59,9 @@ public final class AlbumModel: ObservableObject {
                     memoryAnchorID = id
                     rebuildMemoryWindow(resetToAnchor: true)
                 }
+            } else {
+                memoryFacesIndexTask?.cancel()
+                memoryFacesIndexTask = nil
             }
         }
     }
@@ -190,10 +195,18 @@ public final class AlbumModel: ObservableObject {
 
     @Published public var settings: Settings = Settings()
 
-    @Published public var curvedCanvasEnabled: Bool = false
+    @Published public var curvedCanvasEnabled: Bool = false {
+        didSet {
+            guard curvedCanvasEnabled != oldValue else { return }
+            if !curvedCanvasEnabled {
+                curvedWallOverride = nil
+            }
+        }
+    }
     @Published public private(set) var curvedWallDumpPages: [CurvedWallDumpPage] = []
     @Published public private(set) var curvedWallDumpIndex: Int = 0
     @Published private var curvedWallPageWindows: [UUID: Int] = [:]
+    @Published private var curvedWallOverride: CurvedWallOverride? = nil
 
     @Published public private(set) var isLoadingItems: Bool = false
 
@@ -204,6 +217,7 @@ public final class AlbumModel: ObservableObject {
     private var recommendsFeedbackByAnchorID: [String: AlbumThumbFeedback] = [:]
     private var thumbUpAutofillNeighborIDsByAnchorID: [String: [String]] = [:]
     private var memoryRebuildTask: Task<Void, Never>? = nil
+    private var memoryFacesIndexTask: Task<Void, Never>? = nil
     private var visionCoverageRefreshTask: Task<Void, Never>? = nil
     private var pinnedAssetLoadsInFlight: Set<String> = []
 
@@ -236,6 +250,11 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
+    private struct CurvedWallOverride: Sendable, Equatable {
+        var title: String
+        var assetIDs: [String]
+    }
+
     public init(
         assetProvider: (any AlbumAssetProvider)? = nil,
         sidecarStore: AlbumSidecarStore = AlbumSidecarStore(),
@@ -243,12 +262,16 @@ public final class AlbumModel: ObservableObject {
     ) {
         let provider = assetProvider ?? PhotosAlbumAssetProvider()
         let indexStore = AlbumLibraryIndexStore()
-        let backfillManager = AlbumBackfillManager(sidecarStore: sidecarStore, libraryIndexStore: indexStore, assetProvider: provider)
+        let faceIndexStore = FaceIndexStore()
+        let faceEngine = AlbumFaceEngine(sidecarStore: sidecarStore, indexStore: faceIndexStore)
+        let backfillManager = AlbumBackfillManager(sidecarStore: sidecarStore, libraryIndexStore: indexStore, assetProvider: provider, faceEngine: faceEngine)
 
         self.assetProvider = provider
         self.sidecarStore = sidecarStore
         self.libraryIndexStore = indexStore
         self.backfillManager = backfillManager
+        self.faceIndexStore = faceIndexStore
+        self.faceEngine = faceEngine
         self.oracle = oracle
         self.scenes = AlbumSceneStore.load()
         self.libraryAuthorization = self.assetProvider.authorizationStatus()
@@ -386,6 +409,8 @@ public final class AlbumModel: ObservableObject {
 
         memoryRebuildTask?.cancel()
         memoryRebuildTask = nil
+        memoryFacesIndexTask?.cancel()
+        memoryFacesIndexTask = nil
 
         Task(priority: .userInitiated) { [backfillManager] in
             await backfillManager.pause()
@@ -536,6 +561,13 @@ public final class AlbumModel: ObservableObject {
         if asset.isFavorite { parts.append("favorite") }
 
         return parts.joined(separator: " | ")
+    }
+
+    public func faceIDs(for assetID: String) async -> [String] {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return [] }
+        guard datasetSource == .photos else { return [] }
+        return await faceIndexStore.faceIDs(for: id)
     }
 
     public func loadAssetsIfNeeded(limit: Int = 600, mode: AlbumSamplingMode = .recent) async {
@@ -780,8 +812,12 @@ public final class AlbumModel: ObservableObject {
 
     private static let curvedWallRecommendsPlacementID = UUID(uuidString: "D2DCA22B-0D3E-4D48-9A6B-3B0D2D7E7A1A")!
     private static let curvedWallMemoriesPlacementID = UUID(uuidString: "7CF31D5B-4C65-48D7-8E15-2E01B7D2D9AC")!
+    private static let curvedWallOverridePlacementID = UUID(uuidString: "7BE0E0CE-6FB9-47C7-974C-3E209729B500")!
 
     private var curvedWallPlacementID: UUID? {
+        if curvedWallOverride != nil {
+            return Self.curvedWallOverridePlacementID
+        }
         switch panelMode {
         case .recommends:
             return Self.curvedWallRecommendsPlacementID
@@ -820,6 +856,9 @@ public final class AlbumModel: ObservableObject {
     }
 
     private var curvedWallAllAssetIDsForPaging: [String] {
+        if let curvedWallOverride {
+            return curvedWallOverride.assetIDs
+        }
         switch panelMode {
         case .recommends:
             return curvedWallRecommendsAllAssetIDs
@@ -948,6 +987,9 @@ public final class AlbumModel: ObservableObject {
         guard !ids.isEmpty else { return false }
         let maxIndex = curvedWallMaxPageIndex(for: ids)
         let index = curvedWallCurrentPageIndex(for: placementID, maxIndex: maxIndex)
+        if curvedWallOverride != nil {
+            return index > 0
+        }
         if panelMode == .memories {
             return index > 0 || memoryPrevEnabled
         }
@@ -960,6 +1002,9 @@ public final class AlbumModel: ObservableObject {
         guard !ids.isEmpty else { return false }
         let maxIndex = curvedWallMaxPageIndex(for: ids)
         let index = curvedWallCurrentPageIndex(for: placementID, maxIndex: maxIndex)
+        if curvedWallOverride != nil {
+            return index < maxIndex
+        }
         if panelMode == .memories {
             return index < maxIndex || memoryNextEnabled
         }
@@ -991,7 +1036,54 @@ public final class AlbumModel: ObservableObject {
         }
     }
 
+    public func faceBucketSummaries() async -> [FaceBucketSummary] {
+        await faceIndexStore.bucketSummaries()
+    }
+
+    public func openFaceBucket(faceID: String) async {
+        let normalizedFaceID = faceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFaceID.isEmpty else { return }
+        guard datasetSource == .photos else { return }
+
+        let bucketAssetIDsRaw = await faceIndexStore.assets(for: normalizedFaceID)
+        let bucketAssetIDs = bucketAssetIDsRaw
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !hiddenIDs.contains($0) }
+
+        guard !bucketAssetIDs.isEmpty else { return }
+
+        let fetched: [AlbumAsset]
+        do {
+            fetched = try await assetProvider.fetchAssets(localIdentifiers: bucketAssetIDs)
+        } catch {
+            AlbumLog.photos.error("Face bucket fetchAssets error faceID=\(normalizedFaceID, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            return
+        }
+
+        var byID: [String: AlbumAsset] = [:]
+        byID.reserveCapacity(fetched.count)
+        for asset in fetched {
+            byID[asset.id] = asset
+            pinnedAssetsByID[asset.id] = asset
+        }
+
+        let availableIDs = bucketAssetIDs.filter { byID[$0] != nil }
+        guard !availableIDs.isEmpty else { return }
+
+        let orderedIDs = availableIDs.sorted { a, b in
+            let da = byID[a]?.creationDate ?? .distantPast
+            let db = byID[b]?.creationDate ?? .distantPast
+            if da != db { return da < db }
+            return a < b
+        }
+
+        curvedWallOverride = CurvedWallOverride(title: normalizedFaceID, assetIDs: orderedIDs)
+        curvedWallPageWindows[Self.curvedWallOverridePlacementID] = 0
+        curvedCanvasEnabled = true
+    }
+
     public func dumpFocusedNeighborsToCurvedWall() {
+        curvedWallOverride = nil
         guard panelMode == .recommends else {
             AlbumLog.model.info("CurvedWall dump (memories): open anchor=\(self.memoryAnchorID ?? "nil", privacy: .public) window=\(self.memoryWindowItems.count) start=\(self.memoryPageStartIndex) label=\(self.memoryLabel, privacy: .public)")
             if let placementID = curvedWallPlacementID {
@@ -1104,6 +1196,7 @@ public final class AlbumModel: ObservableObject {
             return
         }
 
+        guard curvedWallOverride == nil else { return }
         guard panelMode == .memories, memoryPrevEnabled else { return }
         memoryPrevPage()
         let updatedIDs = curvedWallMemoriesAllAssetIDs
@@ -1130,6 +1223,7 @@ public final class AlbumModel: ObservableObject {
             return
         }
 
+        guard curvedWallOverride == nil else { return }
         guard panelMode == .memories, memoryNextEnabled else { return }
         memoryNextPage()
         curvedWallPageWindows[placementID] = 0
@@ -2188,13 +2282,6 @@ public final class AlbumModel: ObservableObject {
             return
         }
 
-        if visionStateByAssetID[id] == .computed,
-           !AlbumVisionSummaryUtils.isPlaceholder(visionSummaryByAssetID[id]) {
-            return
-        }
-
-        visionPendingAssetIDs.insert(id)
-
         let backfillPriority: AlbumBackfillManager.Priority = {
             switch priority {
             case .userInitiated:
@@ -2205,6 +2292,16 @@ public final class AlbumModel: ObservableObject {
                 return .background
             }
         }()
+
+        if visionStateByAssetID[id] == .computed,
+           !AlbumVisionSummaryUtils.isPlaceholder(visionSummaryByAssetID[id]) {
+            Task(priority: priority) { [backfillManager] in
+                await backfillManager.ensureVision(for: id, priority: backfillPriority)
+            }
+            return
+        }
+
+        visionPendingAssetIDs.insert(id)
 
         Task(priority: priority) { [backfillManager] in
             await backfillManager.ensureVision(for: id, priority: backfillPriority)
@@ -2318,14 +2415,28 @@ public final class AlbumModel: ObservableObject {
                 .replacingOccurrences(of: " ", with: "_")
         }
 
-        func promptVisionSummary(_ summary: String) -> String {
-            promptField(summary, maxLen: 96)
-        }
+	        func promptVisionSummary(_ summary: String) -> String {
+	            promptField(summary, maxLen: 96)
+	        }
 
-        func tokenize(_ text: String) -> Set<String> {
-            let lowered = text.lowercased()
-            let parts = lowered.split { ch in
-                !(ch.isLetter || ch.isNumber)
+	        func promptFaces(_ faceIDs: [String]) -> String {
+	            let trimmed = faceIDs
+	                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+	                .filter { !$0.isEmpty }
+	            guard !trimmed.isEmpty else { return "none" }
+	            let maxShown = 4
+	            let shown = Array(trimmed.prefix(maxShown))
+	            let overflow = max(0, trimmed.count - shown.count)
+	            if overflow > 0 {
+	                return "\(shown.joined(separator: ","))+\(overflow)"
+	            }
+	            return shown.joined(separator: ",")
+	        }
+
+	        func tokenize(_ text: String) -> Set<String> {
+	            let lowered = text.lowercased()
+	            let parts = lowered.split { ch in
+	                !(ch.isLetter || ch.isNumber)
             }
             var tokens = Set<String>()
             tokens.reserveCapacity(min(parts.count, 32))
@@ -2351,13 +2462,14 @@ public final class AlbumModel: ObservableObject {
             return trimmed.isEmpty ? "unknown" : trimmed
         }
 
-        if datasetSource == .demo {
-            let thumbedHandle = promptVisionSummary(semanticHandle(for: thumbed))
-            let thumbTokens = tokenize(thumbedHandle)
+	        if datasetSource == .demo {
+	            let thumbedHandle = promptVisionSummary(semanticHandle(for: thumbed))
+	            let thumbTokens = tokenize(thumbedHandle)
+	            let thumbedFaceIDs: [String] = []
 
-            let candidateItems: [AlbumAsset] = items.compactMap { item in
-                if item.id == thumbed.id { return nil }
-                if hiddenIDs.contains(item.id) { return nil }
+	            let candidateItems: [AlbumAsset] = items.compactMap { item in
+	                if item.id == thumbed.id { return nil }
+	                if hiddenIDs.contains(item.id) { return nil }
                 return item
             }
 
@@ -2376,57 +2488,61 @@ public final class AlbumModel: ObservableObject {
                 scored.append(.init(asset: item, summary: summary, score: score))
             }
 
-            scored.sort {
-                if $0.score != $1.score { return $0.score > $1.score }
-                return $0.asset.id < $1.asset.id
-            }
+	            scored.sort {
+	                if $0.score != $1.score { return $0.score > $1.score }
+	                return $0.asset.id < $1.asset.id
+	            }
 
-            let baseLines: [String] = [
-                "THUMBED_FILE: \(promptFileName(thumbed))",
-                "THUMBED_VISION: \(thumbedHandle)",
-                "ALREADY_SEEN_IDS:",
-                "CANDIDATES (ID\\tFILE\\tVISION):"
-            ]
-            var promptChars = baseLines.reduce(0) { $0 + $1.count } + (baseLines.count - 1)
+	            let baseLines: [String] = [
+	                "THUMBED_FILE: \(promptFileName(thumbed))",
+	                "THUMBED_VISION: \(thumbedHandle)",
+	                "THUMBED_FACES: \(promptFaces(thumbedFaceIDs))",
+	                "ALREADY_SEEN_IDS:",
+	                "CANDIDATES (ID\\tFILE\\tVISION\\tFACES):"
+	            ]
+	            var promptChars = baseLines.reduce(0) { $0 + $1.count } + (baseLines.count - 1)
 
-            var candidates: [AlbumOracleCandidate] = []
+	            var candidates: [AlbumOracleCandidate] = []
             candidates.reserveCapacity(min(scored.count, maxCandidates))
 
-            for entry in scored {
-                guard candidates.count < maxCandidates else { break }
-                let key = "c\(candidates.count)"
-                let line = "\(key)\t\(promptFileName(entry.asset))\t\(entry.summary)"
+	            for entry in scored {
+	                guard candidates.count < maxCandidates else { break }
+	                let key = "c\(candidates.count)"
+	                let faces = promptFaces([])
+	                let line = "\(key)\t\(promptFileName(entry.asset))\t\(entry.summary)\t\(faces)"
 
-                let projected = promptChars + line.count + 1
-                guard projected <= maxPromptChars else { break }
-                promptChars = projected
+	                let projected = promptChars + line.count + 1
+	                guard projected <= maxPromptChars else { break }
+	                promptChars = projected
 
-                candidates.append(
-                    AlbumOracleCandidate(
-                        assetID: entry.asset.id,
-                        promptID: key,
-                        fileName: promptFileName(entry.asset),
-                        visionSummary: entry.summary,
-                        mediaType: entry.asset.mediaType,
-                        createdYearMonth: createdYearMonth(for: entry.asset),
-                        locationBucket: locationBucket(for: entry.asset)
-                    )
+	                candidates.append(
+	                    AlbumOracleCandidate(
+	                        assetID: entry.asset.id,
+	                        promptID: key,
+	                        fileName: promptFileName(entry.asset),
+	                        visionSummary: entry.summary,
+	                        faceIDs: [],
+	                        mediaType: entry.asset.mediaType,
+	                        createdYearMonth: createdYearMonth(for: entry.asset),
+	                        locationBucket: locationBucket(for: entry.asset)
+	                    )
                 )
             }
 
-            let alreadySeen = Set(history.map(\.id)).union([thumbed.id])
+	            let alreadySeen = Set(history.map(\.id)).union([thumbed.id])
 
-            return AlbumOracleSnapshot(
-                thumbedAssetID: thumbed.id,
-                thumbedFileName: promptFileName(thumbed),
-                thumbedMediaType: thumbed.mediaType,
-                thumbedCreatedYearMonth: createdYearMonth(for: thumbed),
-                thumbedLocationBucket: locationBucket(for: thumbed),
-                thumbedVisionSummary: thumbedHandle,
-                candidates: candidates,
-                alreadySeenAssetIDs: alreadySeen
-            )
-        }
+	            return AlbumOracleSnapshot(
+	                thumbedAssetID: thumbed.id,
+	                thumbedFileName: promptFileName(thumbed),
+	                thumbedMediaType: thumbed.mediaType,
+	                thumbedCreatedYearMonth: createdYearMonth(for: thumbed),
+	                thumbedLocationBucket: locationBucket(for: thumbed),
+	                thumbedVisionSummary: thumbedHandle,
+	                thumbedFaceIDs: thumbedFaceIDs,
+	                candidates: candidates,
+	                alreadySeenAssetIDs: alreadySeen
+	            )
+	        }
 
         let candidateItems = items.filter { item in
             if item.id == thumbed.id { return false }
@@ -2434,13 +2550,14 @@ public final class AlbumModel: ObservableObject {
             return true
         }
 
-        let allIDs = ([thumbed.id] + candidateItems.map(\.id))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+	        let allIDs = ([thumbed.id] + candidateItems.map(\.id))
+	            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+	            .filter { !$0.isEmpty }
 
-        let records = await sidecarStore.loadMany(allIDs.map { AlbumSidecarKey(source: .photos, id: $0) })
-        var recordByID: [String: AlbumSidecarRecord] = [:]
-        recordByID.reserveCapacity(records.count)
+	        let faceIDsByAssetID = await faceIndexStore.faceIDsByAssetID(for: allIDs)
+	        let records = await sidecarStore.loadMany(allIDs.map { AlbumSidecarKey(source: .photos, id: $0) })
+	        var recordByID: [String: AlbumSidecarRecord] = [:]
+	        recordByID.reserveCapacity(records.count)
 
         for record in records {
             let id = record.key.id
@@ -2460,10 +2577,10 @@ public final class AlbumModel: ObservableObject {
             }
         }
 
-        func oracleVisionSummary(assetID: String, mediaType: AlbumMediaType) -> String {
-            let trimmedID = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let summary = visionSummaryByAssetID[trimmedID]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !summary.isEmpty {
+	        func oracleVisionSummary(assetID: String, mediaType: AlbumMediaType) -> String {
+	            let trimmedID = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+	            if let summary = visionSummaryByAssetID[trimmedID]?.trimmingCharacters(in: .whitespacesAndNewlines),
+	               !summary.isEmpty {
                 return normalizeVisionSummary(summary)
             }
 
@@ -2473,8 +2590,19 @@ public final class AlbumModel: ObservableObject {
                 return normalizeVisionSummary(summary)
             }
 
-            return "unlabeled"
-        }
+	            return "unlabeled"
+	        }
+
+	        func oracleFaceIDs(assetID: String) -> [String] {
+	            let trimmedID = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+	            if let faceIDs = faceIDsByAssetID[trimmedID], !faceIDs.isEmpty {
+	                return faceIDs
+	            }
+	            if let record = recordByID[trimmedID] {
+	                return record.faces.faceIDs
+	            }
+	            return []
+	        }
 
         func normalizeVisionSummary(_ summary: String) -> String {
             let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2499,11 +2627,12 @@ public final class AlbumModel: ObservableObject {
             idsNeedingCompute.insert(id)
         }
 
-        let thumbedVisionRaw = oracleVisionSummary(assetID: thumbed.id, mediaType: thumbed.mediaType)
-        let thumbedVision = promptVisionSummary(thumbedVisionRaw)
-        noteIfNeedsCompute(assetID: thumbed.id)
+	        let thumbedVisionRaw = oracleVisionSummary(assetID: thumbed.id, mediaType: thumbed.mediaType)
+	        let thumbedVision = promptVisionSummary(thumbedVisionRaw)
+	        let thumbedFaceIDs = oracleFaceIDs(assetID: thumbed.id)
+	        noteIfNeedsCompute(assetID: thumbed.id)
 
-        let thumbTokens = tokenize(thumbedVisionRaw)
+	        let thumbTokens = tokenize(thumbedVisionRaw)
 
         struct ScoredCandidate {
             let asset: AlbumAsset
@@ -2520,30 +2649,33 @@ public final class AlbumModel: ObservableObject {
             scored.append(.init(asset: item, summary: promptVisionSummary(summary), score: score))
         }
 
-        scored.sort {
-            if $0.score != $1.score { return $0.score > $1.score }
-            return $0.asset.id < $1.asset.id
-        }
+	        scored.sort {
+	            if $0.score != $1.score { return $0.score > $1.score }
+	            return $0.asset.id < $1.asset.id
+	        }
 
-        let baseLines: [String] = [
-            "THUMBED_FILE: \(promptFileName(thumbed))",
-            "THUMBED_VISION: \(thumbedVision)",
-            "ALREADY_SEEN_IDS:",
-            "CANDIDATES (ID\\tFILE\\tVISION):"
-        ]
-        var promptChars = baseLines.reduce(0) { $0 + $1.count } + (baseLines.count - 1)
+	        let baseLines: [String] = [
+	            "THUMBED_FILE: \(promptFileName(thumbed))",
+	            "THUMBED_VISION: \(thumbedVision)",
+	            "THUMBED_FACES: \(promptFaces(thumbedFaceIDs))",
+	            "ALREADY_SEEN_IDS:",
+	            "CANDIDATES (ID\\tFILE\\tVISION\\tFACES):"
+	        ]
+	        var promptChars = baseLines.reduce(0) { $0 + $1.count } + (baseLines.count - 1)
 
-        var candidates: [AlbumOracleCandidate] = []
+	        var candidates: [AlbumOracleCandidate] = []
         candidates.reserveCapacity(min(scored.count, maxCandidates))
 
-        for entry in scored {
-            guard candidates.count < maxCandidates else { break }
-            let key = "c\(candidates.count)"
-            let line = "\(key)\t\(promptFileName(entry.asset))\t\(entry.summary)"
+	        for entry in scored {
+	            guard candidates.count < maxCandidates else { break }
+	            let key = "c\(candidates.count)"
+	            let faceIDs = oracleFaceIDs(assetID: entry.asset.id)
+	            let facesColumn = promptFaces(faceIDs)
+	            let line = "\(key)\t\(promptFileName(entry.asset))\t\(entry.summary)\t\(facesColumn)"
 
-            let projected = promptChars + line.count + 1
-            guard projected <= maxPromptChars else { break }
-            promptChars = projected
+	            let projected = promptChars + line.count + 1
+	            guard projected <= maxPromptChars else { break }
+	            promptChars = projected
 
             if entry.summary.lowercased().hasPrefix("unlabeled") {
                 noteIfNeedsCompute(assetID: entry.asset.id)
@@ -2551,16 +2683,17 @@ public final class AlbumModel: ObservableObject {
                 noteIfNeedsCompute(assetID: entry.asset.id)
             }
 
-            candidates.append(
-                AlbumOracleCandidate(
-                    assetID: entry.asset.id,
-                    promptID: key,
-                    fileName: promptFileName(entry.asset),
-                    visionSummary: entry.summary,
-                    mediaType: entry.asset.mediaType,
-                    createdYearMonth: createdYearMonth(for: entry.asset),
-                    locationBucket: locationBucket(for: entry.asset)
-                )
+	            candidates.append(
+	                AlbumOracleCandidate(
+	                    assetID: entry.asset.id,
+	                    promptID: key,
+	                    fileName: promptFileName(entry.asset),
+	                    visionSummary: entry.summary,
+	                    faceIDs: faceIDs,
+	                    mediaType: entry.asset.mediaType,
+	                    createdYearMonth: createdYearMonth(for: entry.asset),
+	                    locationBucket: locationBucket(for: entry.asset)
+	                )
             )
         }
 
@@ -2568,19 +2701,20 @@ public final class AlbumModel: ObservableObject {
             enqueueVisionForActiveSet(assetIDs: Array(idsNeedingCompute), reason: "oracle_snapshot")
         }
 
-        let alreadySeen = Set(history.map(\.id)).union([thumbed.id])
+	        let alreadySeen = Set(history.map(\.id)).union([thumbed.id])
 
-        return AlbumOracleSnapshot(
-            thumbedAssetID: thumbed.id,
-            thumbedFileName: promptFileName(thumbed),
-            thumbedMediaType: thumbed.mediaType,
-            thumbedCreatedYearMonth: createdYearMonth(for: thumbed),
-            thumbedLocationBucket: locationBucket(for: thumbed),
-            thumbedVisionSummary: thumbedVision,
-            candidates: candidates,
-            alreadySeenAssetIDs: alreadySeen
-        )
-    }
+	        return AlbumOracleSnapshot(
+	            thumbedAssetID: thumbed.id,
+	            thumbedFileName: promptFileName(thumbed),
+	            thumbedMediaType: thumbed.mediaType,
+	            thumbedCreatedYearMonth: createdYearMonth(for: thumbed),
+	            thumbedLocationBucket: locationBucket(for: thumbed),
+	            thumbedVisionSummary: thumbedVision,
+	            thumbedFaceIDs: thumbedFaceIDs,
+	            candidates: candidates,
+	            alreadySeenAssetIDs: alreadySeen
+	        )
+	    }
 
     private func applyOracleResult(feedback: AlbumThumbFeedback, snapshot: AlbumOracleSnapshot, result: AlbumRecResponse) {
         let anchorID = snapshot.thumbedAssetID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2739,6 +2873,8 @@ public final class AlbumModel: ObservableObject {
     private func rebuildMemoryWindow(resetToAnchor: Bool) {
         if datasetSource == .photos {
             memoryRebuildTask?.cancel()
+            memoryFacesIndexTask?.cancel()
+            memoryFacesIndexTask = nil
             memoryRebuildTask = Task { [weak self] in
                 guard let self else { return }
                 await self.rebuildMemoryWindowFromLibrary(resetToAnchor: resetToAnchor)
@@ -2751,6 +2887,8 @@ public final class AlbumModel: ObservableObject {
             memoryLabel = ""
             memoryPrevEnabled = false
             memoryNextEnabled = false
+            memoryFacesIndexTask?.cancel()
+            memoryFacesIndexTask = nil
             return
         }
 
@@ -2768,6 +2906,8 @@ public final class AlbumModel: ObservableObject {
             memoryLabel = ""
             memoryPrevEnabled = false
             memoryNextEnabled = false
+            memoryFacesIndexTask?.cancel()
+            memoryFacesIndexTask = nil
             return
         }
 
@@ -2797,6 +2937,8 @@ public final class AlbumModel: ObservableObject {
             memoryLabel = ""
             memoryPrevEnabled = false
             memoryNextEnabled = false
+            memoryFacesIndexTask?.cancel()
+            memoryFacesIndexTask = nil
             AlbumLog.model.info("Memories: library index unavailable")
             return
         }
@@ -2811,6 +2953,8 @@ public final class AlbumModel: ObservableObject {
             memoryLabel = ""
             memoryPrevEnabled = false
             memoryNextEnabled = false
+            memoryFacesIndexTask?.cancel()
+            memoryFacesIndexTask = nil
             return
         }
 
@@ -2820,6 +2964,8 @@ public final class AlbumModel: ObservableObject {
             memoryLabel = ""
             memoryPrevEnabled = false
             memoryNextEnabled = false
+            memoryFacesIndexTask?.cancel()
+            memoryFacesIndexTask = nil
             return
         }
 
@@ -2879,6 +3025,41 @@ public final class AlbumModel: ObservableObject {
                 curvedWallPageWindows[placementID] = curvedWallPageIndex(for: idx, pageStarts: starts)
             } else {
                 curvedWallPageWindows[placementID] = 0
+            }
+        }
+
+        kickoffFacesIndexingForMemoryWindow(assetIDs: memoryWindowItems.map(\.id), source: .photos)
+    }
+
+    private func kickoffFacesIndexingForMemoryWindow(assetIDs rawAssetIDs: [String], source: AlbumSidecarSource) {
+        guard datasetSource == .photos else { return }
+
+        let assetIDs = rawAssetIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !hiddenIDs.contains($0) }
+
+        guard !assetIDs.isEmpty else { return }
+
+        memoryFacesIndexTask?.cancel()
+
+        let sidecarStore = self.sidecarStore
+        let assetProvider = self.assetProvider
+        let faceEngine = self.faceEngine
+
+        memoryFacesIndexTask = Task(priority: .utility) {
+            for assetID in assetIDs {
+                if Task.isCancelled { break }
+
+                let key = AlbumSidecarKey(source: source, id: assetID)
+                if let record = await sidecarStore.load(key) {
+                    if record.faces.state == .computed || record.faces.state == .failed {
+                        continue
+                    }
+                }
+
+                let data = await assetProvider.requestVisionThumbnailData(localIdentifier: assetID, maxDimension: 768)
+                guard let data else { continue }
+                _ = await faceEngine.ensureFacesComputed(assetID: assetID, thumbnailData: data, source: source)
             }
         }
     }

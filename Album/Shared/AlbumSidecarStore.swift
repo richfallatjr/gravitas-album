@@ -17,7 +17,7 @@ public struct AlbumSidecarKey: Codable, Hashable, Sendable {
 }
 
 public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
-    public static let currentSchemaVersion: Int = 3
+    public static let currentSchemaVersion: Int = 4
 
     public var schemaVersion: Int
     public var key: AlbumSidecarKey
@@ -82,6 +82,30 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
 
     public var vision: VisionInfo
 
+    public struct FacesInfo: Codable, Hashable, Sendable {
+        public var state: FaceProcessingState
+        public var detectedCount: Int
+        public var faceIDs: [String]
+        public var computedAt: Date?
+        public var lastError: String?
+
+        public init(
+            state: FaceProcessingState = .none,
+            detectedCount: Int = 0,
+            faceIDs: [String] = [],
+            computedAt: Date? = nil,
+            lastError: String? = nil
+        ) {
+            self.state = state
+            self.detectedCount = max(0, detectedCount)
+            self.faceIDs = faceIDs
+            self.computedAt = computedAt
+            self.lastError = lastError
+        }
+    }
+
+    public var faces: FacesInfo
+
     public init(
         schemaVersion: Int = AlbumSidecarRecord.currentSchemaVersion,
         key: AlbumSidecarKey,
@@ -89,7 +113,8 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         rating: Int = 0,
         preferenceScore: Float = 0,
         hidden: Bool = false,
-        vision: VisionInfo = VisionInfo()
+        vision: VisionInfo = VisionInfo(),
+        faces: FacesInfo = FacesInfo()
     ) {
         self.schemaVersion = schemaVersion
         self.key = key
@@ -98,6 +123,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         self.preferenceScore = preferenceScore.isFinite ? preferenceScore : 0
         self.hidden = hidden
         self.vision = vision
+        self.faces = faces
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -108,6 +134,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         case preferenceScore
         case hidden
         case vision
+        case faces
 
         // Legacy keys (v1)
         case visionSummary
@@ -134,6 +161,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
 
         if let vision = try container.decodeIfPresent(VisionInfo.self, forKey: .vision) {
             self.vision = vision
+            self.faces = try container.decodeIfPresent(FacesInfo.self, forKey: .faces) ?? FacesInfo()
             schemaVersion = AlbumSidecarRecord.currentSchemaVersion
             return
         }
@@ -178,6 +206,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
             lastAttemptAt: nil
         )
 
+        self.faces = try container.decodeIfPresent(FacesInfo.self, forKey: .faces) ?? FacesInfo()
         schemaVersion = AlbumSidecarRecord.currentSchemaVersion
     }
 
@@ -190,6 +219,7 @@ public struct AlbumSidecarRecord: Codable, Hashable, Sendable {
         try container.encode(preferenceScore, forKey: .preferenceScore)
         try container.encode(hidden, forKey: .hidden)
         try container.encode(vision, forKey: .vision)
+        try container.encode(faces, forKey: .faces)
     }
 }
 
@@ -466,7 +496,7 @@ public actor AlbumSidecarStore {
 	        }
 	    }
 
-	    public func setVisionFailed(
+    public func setVisionFailed(
 	        _ key: AlbumSidecarKey,
 	        error: String,
 	        attemptedAt: Date
@@ -491,6 +521,46 @@ public actor AlbumSidecarStore {
             record.vision.attemptCount = 0
             record.vision.lastAttemptAt = nil
             record.vision.lastError = nil
+        }
+    }
+
+    public func setFacesComputed(
+        _ key: AlbumSidecarKey,
+        detectedCount: Int,
+        faceIDs: [String],
+        computedAt: Date
+    ) async {
+        var seen: Set<String> = []
+        let normalizedFaceIDs = faceIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
+            .sorted()
+
+        await mutate(key) { record in
+            record.faces.state = .computed
+            record.faces.detectedCount = max(0, detectedCount)
+            record.faces.faceIDs = normalizedFaceIDs
+            record.faces.computedAt = computedAt
+            record.faces.lastError = nil
+        }
+    }
+
+    public func setFacesFailed(
+        _ key: AlbumSidecarKey,
+        error: String,
+        attemptedAt: Date
+    ) async {
+        let trimmedError = error.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedError.isEmpty else { return }
+
+        await mutate(key) { record in
+            guard record.faces.state != .computed else { return }
+            record.faces.state = .failed
+            record.faces.detectedCount = 0
+            record.faces.faceIDs = []
+            record.faces.computedAt = attemptedAt
+            record.faces.lastError = trimmedError
         }
     }
 

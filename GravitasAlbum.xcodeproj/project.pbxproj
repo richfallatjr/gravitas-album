@@ -35,18 +35,23 @@
 		75B7BA637068B4125CE285B3 /* PhotosAlbumAssetProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76ABF5D96E49C19E9D6A5F3D /* PhotosAlbumAssetProvider.swift */; };
 		77099B8881076CEB9712CB35 /* AlbumQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9AD807617B9A4E79390514 /* AlbumQuery.swift */; };
 		7871DA278BA1AF47D3F06DED /* UI_STYLE_GUIDE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A698BDF127E28CCD8F299BB6 /* UI_STYLE_GUIDE.txt */; };
+		793EA84F8F0BF6F11B922506 /* FaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD9A9A3F3F75463CD66B89D /* FaceModels.swift */; };
 		7989F720759F91875705BBBE /* AlbumSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8BF3109B530261DC6BCBBD5 /* AlbumSettingsSheet.swift */; };
 		7E7B916C39A61EA1E159E5A7 /* AlbumShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */; };
 		8072B94E05E7A29CA647D951 /* AlbumVisionQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9198ABFA084347F23636ADB /* AlbumVisionQueue.swift */; };
 		83FB3E619CC2A15588DF531E /* AlbumModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F09F8986CC8D7D9902B4D46 /* AlbumModel.swift */; };
 		85AD2239706475508703DC54 /* AlbumOracle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100E79AA29644F73D88D15F /* AlbumOracle.swift */; };
+		85E38C1D1F902A4D43F9ADCA /* FaceDebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1524EBF304E61716E10C28CB /* FaceDebugLog.swift */; };
 		86B2E07E81F4DC1F0DFFDECC /* AlbumCurvedLayoutMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F54DE5766F56EB2BD8C85EC /* AlbumCurvedLayoutMath.swift */; };
 		891B394A06F12C7204DE8E8E /* AlbumVisionSummaryUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E672C1B87A4196061A9713 /* AlbumVisionSummaryUtils.swift */; };
+		8966926D814EE88B4A02F073 /* AlbumFaceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 561208E32B98D94DBA32DE63 /* AlbumFaceEngine.swift */; };
 		8BEFBC9C537878FDB8236F16 /* NextProject_Context_UI_Styling_ImmersiveLayout.txt in Resources */ = {isa = PBXBuildFile; fileRef = 44EF10B20823DC910A53FA0A /* NextProject_Context_UI_Styling_ImmersiveLayout.txt */; };
+		8DEF9C730F932649EA03F943 /* AlbumFacesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16401AB3149F4C37497688B2 /* AlbumFacesSheet.swift */; };
 		8E29056EF33FBA1296FA2404 /* AlbumVisionSummarizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */; };
 		9155252344EA5E86EF11452B /* AlbumDemoLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33B7F74EF2E77045AF99FD1E /* AlbumDemoLibrary.swift */; };
 		930D8783BF4FD5DC52DBDA76 /* AlbumSceneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC238A13C94293D4E2E4E554 /* AlbumSceneStore.swift */; };
 		9D3462246924B65607F8DA0B /* AlbumCurvedLayoutTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EB40D022E06748D855CE15E /* AlbumCurvedLayoutTileView.swift */; };
+		ABC8D40BA4A27D1CCB131BC4 /* FaceIndexStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CF68F9EEABE1C41590CB1C7 /* FaceIndexStore.swift */; };
 		AFEBE85D7E01A25B40ECB911 /* CurvedLayoutMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915425326B1E24238D172416 /* CurvedLayoutMath.swift */; };
 		B5F148D1208183D4B04B2E44 /* AlbumCurvedLayoutOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DC476EC8AFECF4C56D0DAFA /* AlbumCurvedLayoutOverlayView.swift */; };
 		BD46F16577A899FFE021EA46 /* back.png in Resources */ = {isa = PBXBuildFile; fileRef = 147E1A88DEDA24A924D39C0C /* back.png */; };
@@ -63,6 +68,7 @@
 		EEB79E54D576CA4D10A090B0 /* CurvedLayoutKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 96D766C74CC40800A69E24C5 /* CurvedLayoutKit.framework */; };
 		F095A5D875F61342053A8868 /* GravitasThreads_NextUp_Absorption_History_Ordering.txt in Resources */ = {isa = PBXBuildFile; fileRef = BDC799549DBFE01D888F603E /* GravitasThreads_NextUp_Absorption_History_Ordering.txt */; };
 		F5A2436468AC76BF9D5847A0 /* GravitasThreads_Thumbs_Physics_Integration.txt in Resources */ = {isa = PBXBuildFile; fileRef = 63E1A4F5E5AA34985A57AEEF /* GravitasThreads_Thumbs_Physics_Integration.txt */; };
+		FBDAF64070564992D9BD0D2E /* FaceCropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E105B0365516CB23CC6D8B2 /* FaceCropper.swift */; };
 		FC5EA952DAB5557A9FB14626 /* AlbumHeuristicOracle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */; };
 /* End PBXBuildFile section */
 
@@ -95,8 +101,11 @@
 		066D0ED6CF1FE7551C12B648 /* GlassBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassBackground.swift; sourceTree = "<group>"; };
 		0F9AD807617B9A4E79390514 /* AlbumQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumQuery.swift; sourceTree = "<group>"; };
 		147E1A88DEDA24A924D39C0C /* back.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = back.png; sourceTree = "<group>"; };
+		1524EBF304E61716E10C28CB /* FaceDebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceDebugLog.swift; sourceTree = "<group>"; };
+		16401AB3149F4C37497688B2 /* AlbumFacesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumFacesSheet.swift; sourceTree = "<group>"; };
 		2DC476EC8AFECF4C56D0DAFA /* AlbumCurvedLayoutOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCurvedLayoutOverlayView.swift; sourceTree = "<group>"; };
 		33B7F74EF2E77045AF99FD1E /* AlbumDemoLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumDemoLibrary.swift; sourceTree = "<group>"; };
+		3E105B0365516CB23CC6D8B2 /* FaceCropper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceCropper.swift; sourceTree = "<group>"; };
 		3EB40D022E06748D855CE15E /* AlbumCurvedLayoutTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCurvedLayoutTileView.swift; sourceTree = "<group>"; };
 		42D23FC392308A361F50EC57 /* middle.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = middle.png; sourceTree = "<group>"; };
 		44EF10B20823DC910A53FA0A /* NextProject_Context_UI_Styling_ImmersiveLayout.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = NextProject_Context_UI_Styling_ImmersiveLayout.txt; sourceTree = "<group>"; };
@@ -104,6 +113,7 @@
 		4F54DE5766F56EB2BD8C85EC /* AlbumCurvedLayoutMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCurvedLayoutMath.swift; sourceTree = "<group>"; };
 		4FF417CEA854CAD66173ABC7 /* AlbumQueryPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumQueryPickerSheet.swift; sourceTree = "<group>"; };
 		50ED7BAAE001591EC877111D /* AlbumAssetProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumAssetProvider.swift; sourceTree = "<group>"; };
+		561208E32B98D94DBA32DE63 /* AlbumFaceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumFaceEngine.swift; sourceTree = "<group>"; };
 		5D25D4083156A208B42FFE97 /* AlbumMediaPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumMediaPane.swift; sourceTree = "<group>"; };
 		634E50DA5A91F7F52A2523CF /* AlbumImmersiveRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumImmersiveRootView.swift; sourceTree = "<group>"; };
 		63E1A4F5E5AA34985A57AEEF /* GravitasThreads_Thumbs_Physics_Integration.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = GravitasThreads_Thumbs_Physics_Integration.txt; sourceTree = "<group>"; };
@@ -121,6 +131,7 @@
 		96D766C74CC40800A69E24C5 /* CurvedLayoutKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = CurvedLayoutKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		97762980BB986006D03FE3C8 /* AlbumSidecarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSidecarStore.swift; sourceTree = "<group>"; };
 		9B15FBA4C9074577DEADB361 /* AlbumTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumTheme.swift; sourceTree = "<group>"; };
+		9CF68F9EEABE1C41590CB1C7 /* FaceIndexStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceIndexStore.swift; sourceTree = "<group>"; };
 		9F09F8986CC8D7D9902B4D46 /* AlbumModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumModel.swift; sourceTree = "<group>"; };
 		A1808E4CF5192D73265701F7 /* AlbumLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumLog.swift; sourceTree = "<group>"; };
 		A2DCB81984C845C556147591 /* AlbumHistoryList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumHistoryList.swift; sourceTree = "<group>"; };
@@ -129,6 +140,7 @@
 		A9198ABFA084347F23636ADB /* AlbumVisionQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionQueue.swift; sourceTree = "<group>"; };
 		B8BF3109B530261DC6BCBBD5 /* AlbumSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSettingsSheet.swift; sourceTree = "<group>"; };
 		B8C09B6B1C1E96DDD01700F5 /* AlbumTuningDelta.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumTuningDelta.swift; sourceTree = "<group>"; };
+		BBD9A9A3F3F75463CD66B89D /* FaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceModels.swift; sourceTree = "<group>"; };
 		BDC799549DBFE01D888F603E /* GravitasThreads_NextUp_Absorption_History_Ordering.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = GravitasThreads_NextUp_Absorption_History_Ordering.txt; sourceTree = "<group>"; };
 		D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumHeuristicOracle.swift; sourceTree = "<group>"; };
 		D4E3AD7B137BCC9EF20517DA /* GravitasAlbumApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GravitasAlbumApp.swift; sourceTree = "<group>"; };
@@ -176,6 +188,7 @@
 			isa = PBXGroup;
 			children = (
 				EFBDDE560B3260E37092A64A /* AlbumControlView.swift */,
+				16401AB3149F4C37497688B2 /* AlbumFacesSheet.swift */,
 				A2DCB81984C845C556147591 /* AlbumHistoryList.swift */,
 				64FC6A7451CA6F0F50453668 /* AlbumLayoutSheet.swift */,
 				5D25D4083156A208B42FFE97 /* AlbumMediaPane.swift */,
@@ -187,6 +200,18 @@
 				066D0ED6CF1FE7551C12B648 /* GlassBackground.swift */,
 			);
 			path = UI;
+			sourceTree = "<group>";
+		};
+		16020F605F168E8308C7459B /* Faces */ = {
+			isa = PBXGroup;
+			children = (
+				561208E32B98D94DBA32DE63 /* AlbumFaceEngine.swift */,
+				3E105B0365516CB23CC6D8B2 /* FaceCropper.swift */,
+				1524EBF304E61716E10C28CB /* FaceDebugLog.swift */,
+				9CF68F9EEABE1C41590CB1C7 /* FaceIndexStore.swift */,
+				BBD9A9A3F3F75463CD66B89D /* FaceModels.swift */,
+			);
+			path = Faces;
 			sourceTree = "<group>";
 		};
 		223736E49CE6BAAAC1743038 /* Album */ = {
@@ -202,6 +227,7 @@
 				6BF2122B71B8B4D1A039B0A2 /* NextProject_Context_PanelSpawning.txt */,
 				44EF10B20823DC910A53FA0A /* NextProject_Context_UI_Styling_ImmersiveLayout.txt */,
 				A698BDF127E28CCD8F299BB6 /* UI_STYLE_GUIDE.txt */,
+				3E88D026DCE59DB018596AF9 /* Backend */,
 				66F573E1DECAD2DC212C4204 /* CurvedLayout */,
 				001278AA395A83D989F22EEB /* Immersive */,
 				2CEA2AB91FE4C1137843C0AB /* Shared */,
@@ -241,6 +267,14 @@
 				76ABF5D96E49C19E9D6A5F3D /* PhotosAlbumAssetProvider.swift */,
 			);
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		3E88D026DCE59DB018596AF9 /* Backend */ = {
+			isa = PBXGroup;
+			children = (
+				16020F605F168E8308C7459B /* Faces */,
+			);
+			path = Backend;
 			sourceTree = "<group>";
 		};
 		47CC1FAA540BCA255817FA0F /* CurvedLayoutKit */ = {
@@ -409,6 +443,8 @@
 				9D3462246924B65607F8DA0B /* AlbumCurvedLayoutTileView.swift in Sources */,
 				44982C44D0FDA4186692D9CF /* AlbumCurvedLayoutView.swift in Sources */,
 				9155252344EA5E86EF11452B /* AlbumDemoLibrary.swift in Sources */,
+				8966926D814EE88B4A02F073 /* AlbumFaceEngine.swift in Sources */,
+				8DEF9C730F932649EA03F943 /* AlbumFacesSheet.swift in Sources */,
 				EBF06562A799EF67B001BD90 /* AlbumFoundationModelsOracle.swift in Sources */,
 				FC5EA952DAB5557A9FB14626 /* AlbumHeuristicOracle.swift in Sources */,
 				1F65F2837986B1A4ECCEE0C7 /* AlbumHistoryList.swift in Sources */,
@@ -438,6 +474,10 @@
 				8072B94E05E7A29CA647D951 /* AlbumVisionQueue.swift in Sources */,
 				8E29056EF33FBA1296FA2404 /* AlbumVisionSummarizer.swift in Sources */,
 				891B394A06F12C7204DE8E8E /* AlbumVisionSummaryUtils.swift in Sources */,
+				FBDAF64070564992D9BD0D2E /* FaceCropper.swift in Sources */,
+				85E38C1D1F902A4D43F9ADCA /* FaceDebugLog.swift in Sources */,
+				ABC8D40BA4A27D1CCB131BC4 /* FaceIndexStore.swift in Sources */,
+				793EA84F8F0BF6F11B922506 /* FaceModels.swift in Sources */,
 				27EBE5A26C16893B67DBEBA6 /* GlassBackground.swift in Sources */,
 				755491FFB50163CAFA8ED0ED /* GravitasAlbumApp.swift in Sources */,
 				75B7BA637068B4125CE285B3 /* PhotosAlbumAssetProvider.swift in Sources */,
@@ -601,7 +641,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
@@ -610,7 +650,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.6;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
@@ -622,7 +662,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
@@ -631,7 +671,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.6;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;

@@ -123,6 +123,7 @@ public struct AlbumOracleCandidate: Sendable, Hashable {
     public let promptID: String
     public let fileName: String
     public let visionSummary: String
+    public let faceIDs: [String]
     public let mediaType: AlbumMediaType
     public let createdYearMonth: String?
     public let locationBucket: String?
@@ -132,6 +133,7 @@ public struct AlbumOracleCandidate: Sendable, Hashable {
         promptID: String,
         fileName: String,
         visionSummary: String,
+        faceIDs: [String] = [],
         mediaType: AlbumMediaType,
         createdYearMonth: String?,
         locationBucket: String?
@@ -140,6 +142,7 @@ public struct AlbumOracleCandidate: Sendable, Hashable {
         self.promptID = promptID
         self.fileName = fileName
         self.visionSummary = visionSummary
+        self.faceIDs = faceIDs
         self.mediaType = mediaType
         self.createdYearMonth = createdYearMonth
         self.locationBucket = locationBucket
@@ -153,6 +156,7 @@ public struct AlbumOracleSnapshot: Sendable {
     public let thumbedCreatedYearMonth: String?
     public let thumbedLocationBucket: String?
     public let thumbedVisionSummary: String
+    public let thumbedFaceIDs: [String]
     public let candidates: [AlbumOracleCandidate]
     public let alreadySeenAssetIDs: Set<String>
 
@@ -163,6 +167,7 @@ public struct AlbumOracleSnapshot: Sendable {
         thumbedCreatedYearMonth: String?,
         thumbedLocationBucket: String?,
         thumbedVisionSummary: String,
+        thumbedFaceIDs: [String] = [],
         candidates: [AlbumOracleCandidate],
         alreadySeenAssetIDs: Set<String>
     ) {
@@ -172,6 +177,7 @@ public struct AlbumOracleSnapshot: Sendable {
         self.thumbedCreatedYearMonth = thumbedCreatedYearMonth
         self.thumbedLocationBucket = thumbedLocationBucket
         self.thumbedVisionSummary = thumbedVisionSummary
+        self.thumbedFaceIDs = thumbedFaceIDs
         self.candidates = candidates
         self.alreadySeenAssetIDs = alreadySeenAssetIDs
     }

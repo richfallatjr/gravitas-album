@@ -122,6 +122,7 @@ public actor AlbumBackfillManager {
     private let sidecarStore: AlbumSidecarStore
     private let libraryIndexStore: AlbumLibraryIndexStore
     private let assetProvider: any AlbumAssetProvider
+    private let faceEngine: AlbumFaceEngine?
 
     private let seedPlanURL: URL
     private let libraryScanURL: URL
@@ -156,6 +157,7 @@ public actor AlbumBackfillManager {
         sidecarStore: AlbumSidecarStore,
         libraryIndexStore: AlbumLibraryIndexStore,
         assetProvider: any AlbumAssetProvider,
+        faceEngine: AlbumFaceEngine? = nil,
         seedPlanFileName: String = "album_seed_plan_v2.json",
         libraryScanFileName: String = "album_library_scan_state_v2.json",
         legacyBackfillStateFileName: String = "album_backfill_state_v1.json"
@@ -163,6 +165,7 @@ public actor AlbumBackfillManager {
         self.sidecarStore = sidecarStore
         self.libraryIndexStore = libraryIndexStore
         self.assetProvider = assetProvider
+        self.faceEngine = faceEngine
 
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         self.seedPlanURL = appSupport.appendingPathComponent(seedPlanFileName, isDirectory: false)
@@ -436,8 +439,11 @@ public actor AlbumBackfillManager {
         if let record,
            record.vision.state == .computed,
            !AlbumVisionSummaryUtils.isPlaceholder(record.vision.summary) {
-            await publishVisionCompletionIfAvailable(assetID: id)
-            return false
+            let facesNeeded = (faceEngine != nil && record.faces.state == .none)
+            if !facesNeeded {
+                await publishVisionCompletionIfAvailable(assetID: id)
+                return false
+            }
         }
 
         var effectiveNotBefore: Date = notBefore
@@ -566,7 +572,12 @@ public actor AlbumBackfillManager {
         let rawState = beforeRecord?.vision.state ?? .none
         let beforeStateForCounts = Self.seedCountedState(state: rawState, summary: beforeRecord?.vision.summary)
 
-        if rawState == .computed, !AlbumVisionSummaryUtils.isPlaceholder(beforeRecord?.vision.summary) {
+        let visionAlreadyComputed = (rawState == .computed && !AlbumVisionSummaryUtils.isPlaceholder(beforeRecord?.vision.summary))
+        let facesState = beforeRecord?.faces.state ?? .none
+        let shouldComputeFaces = (faceEngine != nil && facesState != .computed && facesState != .failed)
+        let shouldComputeVision = !visionAlreadyComputed
+
+        if !shouldComputeVision && !shouldComputeFaces {
             lastProcessedID = id
             await publishVisionCompletionIfAvailable(assetID: id)
             return
@@ -574,7 +585,23 @@ public actor AlbumBackfillManager {
 
         let now = Date()
         guard let data = await assetProvider.requestVisionThumbnailData(localIdentifier: id, maxDimension: visionThumbnailMaxDimension) else {
-            await handleFailure(assetID: id, key: key, beforeState: beforeStateForCounts, error: "vision_thumbnail_data_missing", attemptedAt: now, retryPriority: job.priority, isSeed: job.isSeed)
+            if shouldComputeVision {
+                await handleFailure(assetID: id, key: key, beforeState: beforeStateForCounts, error: "vision_thumbnail_data_missing", attemptedAt: now, retryPriority: job.priority, isSeed: job.isSeed)
+            } else if shouldComputeFaces {
+                await sidecarStore.setFacesFailed(key, error: "face_thumbnail_data_missing", attemptedAt: now)
+                lastProcessedID = id
+                await publishVisionCompletionIfAvailable(assetID: id)
+            }
+            return
+        }
+
+        if shouldComputeFaces, let faceEngine {
+            _ = await faceEngine.ensureFacesComputed(assetID: id, thumbnailData: data, source: .photos)
+        }
+
+        if !shouldComputeVision {
+            lastProcessedID = id
+            await publishVisionCompletionIfAvailable(assetID: id)
             return
         }
 
@@ -746,7 +773,8 @@ public actor AlbumBackfillManager {
             if let record = await sidecarStore.load(key),
                record.vision.state == .computed,
                !AlbumVisionSummaryUtils.isPlaceholder(record.vision.summary) {
-                continue
+                guard let _ = faceEngine else { continue }
+                if record.faces.state == .computed || record.faces.state == .failed { continue }
             }
 
             _ = await ensureVisionScheduled(for: id, priority: .background, reason: "seed_backfill", isSeed: true, notBefore: now, shouldPublishStatus: false)

@@ -412,7 +412,8 @@ Rules:
 - The ONLY valid IDs are the LEFTMOST column in CANDIDATES (IDs look like c0,c1,c2...). Never output filenames as IDs.
 - Never output "..." or placeholder text.
 \(nextIDRule)
-- neighbors MUST contain the most conceptually related candidates to THUMBED_FILE and THUMBED_VISION.
+- neighbors MUST contain the most conceptually related candidates to THUMBED_FILE, THUMBED_VISION, and THUMBED_FACES.
+- If any candidate shares a FaceID with THUMBED_FACES, that is a strong similarity signal.
 - neighbors MUST be ranked best→worst.
 - Pick the top N neighbors (N ≤ 20) and rank them 1..N. Put that rank in similarity (1 = most similar).
 - neighbors MUST NOT include nextID and MUST NOT contain duplicate ids.
@@ -484,6 +485,20 @@ IMPORTANT:
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        func faceField(_ faceIDs: [String]) -> String {
+            let trimmed = faceIDs
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard !trimmed.isEmpty else { return "none" }
+            let maxShown = 4
+            let shown = Array(trimmed.prefix(maxShown))
+            let overflow = max(0, trimmed.count - shown.count)
+            if overflow > 0 {
+                return "faces:\(shown.joined(separator: ","))+\(overflow)"
+            }
+            return "faces:\(shown.joined(separator: ","))"
+        }
+
         let alreadySeenIDs: [String] = snapshot.candidates.compactMap { c in
             snapshot.alreadySeenAssetIDs.contains(c.assetID) ? c.promptID : nil
         }
@@ -495,14 +510,16 @@ IMPORTANT:
 
         lines.append("THUMBED_FILE: \(field(snapshot.thumbedFileName))")
         lines.append("THUMBED_VISION: \(field(snapshot.thumbedVisionSummary))")
+        lines.append("THUMBED_FACES: \(field(faceField(snapshot.thumbedFaceIDs)))")
         lines.append(alreadySeenLine)
-        lines.append("CANDIDATES (ID\\tFILE\\tVISION):")
+        lines.append("CANDIDATES (ID\\tFILE\\tVISION\\tFACES):")
 
         for c in snapshot.candidates {
             lines.append([
                 field(c.promptID),
                 field(c.fileName),
-                field(c.visionSummary)
+                field(c.visionSummary),
+                field(faceField(c.faceIDs))
             ].joined(separator: "\t"))
         }
 

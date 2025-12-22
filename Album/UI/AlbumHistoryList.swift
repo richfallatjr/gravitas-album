@@ -140,6 +140,7 @@ public struct AlbumHistoryList: View {
         let onSelect: () -> Void
 
         @EnvironmentObject private var model: AlbumModel
+        @State private var faceIDs: [String] = []
 
         private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
@@ -159,10 +160,7 @@ public struct AlbumHistoryList: View {
             let palette = model.palette
             Button(action: onSelect) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(model.semanticHandle(for: assetID))
-                        .font(.footnote)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(3)
+                    historyTitle
 
                     HStack(spacing: 10) {
                         if let asset = model.asset(for: assetID) {
@@ -210,6 +208,33 @@ public struct AlbumHistoryList: View {
                 }
             }
             .buttonStyle(.plain)
+            .task(id: assetID) {
+                faceIDs = await model.faceIDs(for: assetID)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .albumFaceIndexDidUpdate)) { _ in
+                Task { @MainActor in
+                    faceIDs = await model.faceIDs(for: assetID)
+                }
+            }
+        }
+
+        private var historyTitle: some View {
+            let summary = model.semanticHandle(for: assetID)
+            let title = faceIDs.isEmpty ? summary : "\(facePrefix(faceIDs)) | \(summary)"
+            return Text(title)
+                .font(.footnote)
+                .multilineTextAlignment(.leading)
+                .lineLimit(3)
+        }
+
+        private func facePrefix(_ faceIDs: [String]) -> String {
+            let maxShown = 4
+            let shown = Array(faceIDs.prefix(maxShown))
+            let overflow = max(0, faceIDs.count - shown.count)
+            if overflow > 0 {
+                return "faces:\(shown.joined(separator: ","))+\(overflow)"
+            }
+            return "faces:\(shown.joined(separator: ","))"
         }
     }
 }

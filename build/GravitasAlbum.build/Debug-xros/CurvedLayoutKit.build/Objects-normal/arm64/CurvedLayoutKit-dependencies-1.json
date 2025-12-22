@@ -1,0 +1,761 @@
+[
+  {
+    "isFramework" : false,
+    "moduleName" : "ARKit",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/ARKit.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "AVFAudio",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/AVFAudio.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "AVFoundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/AVFoundation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Accessibility",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Accessibility.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "AudioToolbox",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/AudioToolbox.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Combine",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Combine.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreAudio",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreAudio.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreData",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreData.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreFoundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreFoundation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreGraphics",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreGraphics.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreImage",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreImage.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreLocation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreLocation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreMIDI",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreMIDI.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreMedia",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreMedia.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreMotion",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreMotion.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreText",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreText.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreTransferable",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreTransferable.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreVideo",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreVideo.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Darwin",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Darwin.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "DataDetection",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/DataDetection.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "DeveloperToolsSupport",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/DeveloperToolsSupport.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Dispatch",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Dispatch.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Distributed",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Distributed.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "FileProvider",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/FileProvider.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Foundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Foundation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "GameController",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/GameController.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Metal",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Metal.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Network",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Network.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "OSLog",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/OSLog.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "ObjectiveC",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/ObjectiveC.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Observation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Observation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "QuartzCore",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/QuartzCore.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "RealityFoundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/RealityFoundation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Spatial",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Spatial.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Swift",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Swift.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "SwiftOnoneSupport",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/SwiftOnoneSupport.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "SwiftUI",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/SwiftUI.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "SwiftUICore",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/SwiftUICore.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Symbols",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Symbols.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Synchronization",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Synchronization.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "System",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/System.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "UIKit",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/UIKit.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "UniformTypeIdentifiers",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/UniformTypeIdentifiers.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_Builtin_float",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_Builtin_float.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_Concurrency",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_Concurrency.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation1",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_DarwinFoundation1.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation2",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_DarwinFoundation2.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation3",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_DarwinFoundation3.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_StringProcessing",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_StringProcessing.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "os",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/os.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "simd",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/simd.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/ARKit.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/ARKit-5HQJA8451G3237PQI6PHZPGOG.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ARKit"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/AVFAudio.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/AVFAudio-AH7FJGB7U1W6F0PCY495UGTIG.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "AVFAudio"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/AVFoundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/AVFoundation-78LCDQP50Q64YAM5JSA4F7DMD.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "AVFoundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/AVRouting.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/AVRouting-391Z9PDY4HGC5EOXPYR85GEDT.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "AVRouting"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Accessibility.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/Accessibility-83KDO5G4ZYCVEY6WYT2EVV3K7.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Accessibility"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/AudioToolbox.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/AudioToolbox-7VI9D92153BZLBR82CN2XZ85D.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "AudioToolbox"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CFNetwork.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CFNetwork-6239KAFB1G34B3ZMPBFTZ9E0C.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CFNetwork"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreAudio.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreAudio-7BD9F4JKMBSG5C2CVZHXTF1QA.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreAudio"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreAudioTypes.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreAudioTypes-8ZNTSGDV05OW8BB284PY0WUT9.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreAudioTypes"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreData.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreData-CG2JHSSSY1HTY9HHWN0DT2TG4.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreData"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreFoundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreFoundation-17IUYVM9CZ8C2LJRP2LAIJES7.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreFoundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreGraphics.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreGraphics-6L4O8EU4TSX18O7NHHDFQMUAN.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreGraphics"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreImage.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreImage-AVA4965CSMX0OVXAVFLCBNYIG.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreImage"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreLocation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreLocation-5XJMCJVF08ZDM4PCXDEPZEM7J.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreLocation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreMIDI.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreMIDI-4DU1O50PRR1X71FKC07OLIFN7.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreMIDI"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreMedia.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreMedia-9YFXI4AIO797TXS4VHRZBGJM3.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreMedia"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreMotion.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreMotion-G7WNH0NX5ABPNUA00TKH20UH.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreMotion"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreServices.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreServices-EQAC53SVZ44FO6XHC04PRH8LC.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreServices"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreText.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreText-3AWLW99OK839V5Z038TH6ZDOM.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreText"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreTransferable.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreTransferable-9B161EFKZYZLSVCFILDIXRGDW.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreTransferable"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreVideo.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/CoreVideo-KB48VKDN7A6PAGLE823YT83V.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreVideo"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/Darwin.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/Darwin-21LC35OQ8RREK0HLV3VQ7HNIK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Darwin"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/DataDetection.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/DataDetection-DKHHOVV6A23UGJXYV13KSN60Q.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "DataDetection"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/DeveloperToolsSupport.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/DeveloperToolsSupport-FWPZO79J7ER1F0ZHJ547YAN9.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "DeveloperToolsSupport"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/dispatch.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/Dispatch-1KZV1VYUDACNDTWFBC0G6UPL9.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Dispatch"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/FileProvider.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/FileProvider-3V687OKEPERRGDU7E36ZSREWI.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "FileProvider"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Foundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/Foundation-AOKH9P7T1D6M5RLALAMMOJLBT.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Foundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/GameController.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/GameController-38TGCA3MVPBQ3BAU5XVCION82.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "GameController"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/IOSurface.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/IOSurface-D1EJSCZ532MDG06MYVPYR29XW.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "IOSurface"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/ImageIO.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/ImageIO-E5J15XZJTV5VC2F4H83TQ16AF.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ImageIO"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinBasic.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/MachO-BY0BSCZZ7SEA1CBGCC0JVV7GZ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "MachO"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/MediaToolbox.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/MediaToolbox-E6BKKN1CEZBSIZNVHQOTIS2PD.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "MediaToolbox"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Metal.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/Metal-BL3XB1YMUC1BRVAYWSAS86FQ3.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Metal"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Network.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/Network-5EU5I0NK71Q36RLNDPJW06LNA.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Network"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/OSLog.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/OSLog-3JTBFJJ8P1C994WO326I77WTL.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "OSLog"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/ObjectiveC.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/ObjectiveC-9CLZRKWH4Z1K88ZGMYWYXRCJY.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ObjectiveC"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/OpenGLES.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/OpenGLES-PEDHU11P0NN56EFHFI1TOMZB.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "OpenGLES"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/QuartzCore.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/QuartzCore-AWGEHDV9D0AV1UATZYI8Y2MCI.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "QuartzCore"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Security.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/Security-7O0NKZZ9D8LG5FSQGFZPRY587.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Security"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/Spatial\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/Spatial-7OHVPURXI0SPLFSAZRE98IVII.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Spatial"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/lib\/swift\/shims\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/SwiftShims-ESQ28EVJ21BSPW843SONGFXGY.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "SwiftShims"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/SwiftUI.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/SwiftUI-1KOL443V2PUMZVF4BH4SY3QAK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "SwiftUI"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/SwiftUICore.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/SwiftUICore-B8SX1WW6VK50FGUW5CRMEKAYU.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "SwiftUICore"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Symbols.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/Symbols-A4S5O6Q01RKZHEZF3P9T32R9L.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Symbols"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/UIKit.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/UIKit-1VOKK8URKCJUDCIIRZWUISJTO.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "UIKit"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/SubFrameworks\/UIUtilities.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/UIUtilities-6QBG29FGUE3STPMOHKMA7YJ2W.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "UIUtilities"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/UniformTypeIdentifiers.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/UniformTypeIdentifiers-6OU4880PBCPH446W8MGQBK9O9.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "UniformTypeIdentifiers"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/UserNotifications.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/UserNotifications-10PLTQZA7QOIM4ZZT67VQLXPK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "UserNotifications"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation1.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_AvailabilityInternal-5X4JCDRTJ2LR4IJ2K68SMYQVV.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_AvailabilityInternal"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_float-9RN2D036IXU0OG4USVTJDAW3F.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_float"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_intrinsics-A10O9FVFHECW1BBHUPUT4BMPW.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_intrinsics"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_inttypes-3HDSD1QX61EBG6OK02LZFHJF1.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_inttypes"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_limits-45VS5FSRBE8Z4M6YKHW2VLPMW.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_limits"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_stdarg-MQGKKISXA6PLFQ99D8V49P85.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdarg"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_stdatomic-5QZ9R3BTAC3JK85P3GQF0APV5.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdatomic"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_stdbool-4S8DKXWLW1JALR2KXNRLKQJ49.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdbool"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_stddef-9US0W01UD7GJUPY9L80FB7S5L.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stddef"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_stdint-3JEK5PUHYKCD6GE16YCG4O2NT.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdint"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_Builtin_tgmath-B5SOK1IMTJXDNS5O5578XUSVU.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_tgmath"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation1.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_DarwinFoundation1-C3ER7700VLWSHVEYUGN4N3AZK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation1"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation2.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_DarwinFoundation2-NI7GVLS7VHJF4Z2ZQSPJKH64.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation2"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation3.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_DarwinFoundation3-2B3KIPS82FHDVUAU1PYYMH3OX.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation3"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/_LocationEssentials.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_LocationEssentials-4KPVHYPJT9GIS5LOF1LM7ZQX6.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_LocationEssentials"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/lib\/swift\/shims\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/_SwiftConcurrencyShims-50VQEM0E6EDU3K0QRFORX8I39.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_SwiftConcurrencyShims"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/dnssd.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/dnssd-4L9XRU1LEJQK56H1YI6JM0WYM.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "dnssd"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/os-AEUM3EWBL9SHWK9LSV2NT2PZ8.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/os_object-EUYVSR522EPE4ORLOTAX0BJ07.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os_object"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/os_workgroup-5A6BZJLOMGLE5RFCYLDYPD16B.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os_workgroup"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/ptrauth-3D5ZXSTNTJ5BNUUN8IQHQ0T1.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ptrauth"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/ptrcheck-1WCBH5K2NR1RE77W24GX9QP7B.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ptrcheck"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/simd\/module.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/simd-58RA79F5ZFIQLA828BQZCPIDD.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "simd"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation2.modulemap",
+    "clangModulePath" : "\/Users\/richardfallat\/Projects\/dev\/gravitas-album\/build\/SwiftExplicitPrecompiledModules\/sys_types-4WF7CJ1ROVI6R1OHUHD1USEVS.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "sys_types"
+  }
+]
