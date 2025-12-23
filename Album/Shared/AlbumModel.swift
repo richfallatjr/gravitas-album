@@ -43,6 +43,7 @@ public final class AlbumModel: ObservableObject {
     private let libraryIndexStore: AlbumLibraryIndexStore
     private let backfillManager: AlbumBackfillManager
     private let faceIndexStore: FaceIndexStore
+    private let faceHierarchyStore: FaceHierarchyStore
     private let faceEngine: AlbumFaceEngine
     public let oracle: AlbumOracle
 
@@ -183,19 +184,81 @@ public final class AlbumModel: ObservableObject {
     @Published public private(set) var visionCoverage: AlbumVisionCoverage = AlbumVisionCoverage()
     @Published public private(set) var visionCoverageIsRefreshing: Bool = false
 
-		    public struct Settings: Sendable, Hashable {
+		    public struct Settings: Sendable, Hashable, Codable {
 		        public var autofillOnThumbUp: Bool
 		        public var thumbUpAutofillCount: Int
 		        public var showFacesDebugUI: Bool
+                public var faceClusterT1: Float
+                public var faceClusterT2: Float
+                public var faceClusterT3: Float
+                public var faceHierarchyRepCap: Int
 
-		        public init(autofillOnThumbUp: Bool = false, thumbUpAutofillCount: Int = 5, showFacesDebugUI: Bool = false) {
+		        public init(
+                    autofillOnThumbUp: Bool = true,
+                    thumbUpAutofillCount: Int = 5,
+                    showFacesDebugUI: Bool = true,
+                    faceClusterT1: Float = 0.42,
+                    faceClusterT2: Float = 0.50,
+                    faceClusterT3: Float = 0.60,
+                    faceHierarchyRepCap: Int = 8
+                ) {
 		            self.autofillOnThumbUp = autofillOnThumbUp
 		            self.thumbUpAutofillCount = max(0, thumbUpAutofillCount)
 		            self.showFacesDebugUI = showFacesDebugUI
+                    self.faceClusterT1 = faceClusterT1
+                    self.faceClusterT2 = faceClusterT2
+                    self.faceClusterT3 = faceClusterT3
+                    self.faceHierarchyRepCap = max(1, faceHierarchyRepCap)
 		        }
+
+                private enum CodingKeys: String, CodingKey {
+                    case autofillOnThumbUp
+                    case thumbUpAutofillCount
+                    case showFacesDebugUI
+                    case faceClusterT1
+                    case faceClusterT2
+                    case faceClusterT3
+                    case faceHierarchyRepCap
+                }
+
+                public init(from decoder: any Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+
+                    autofillOnThumbUp = try container.decodeIfPresent(Bool.self, forKey: .autofillOnThumbUp) ?? true
+                    thumbUpAutofillCount = max(0, try container.decodeIfPresent(Int.self, forKey: .thumbUpAutofillCount) ?? 5)
+                    showFacesDebugUI = try container.decodeIfPresent(Bool.self, forKey: .showFacesDebugUI) ?? true
+
+                    func clamp(_ value: Float) -> Float {
+                        guard value.isFinite else { return 0 }
+                        return max(0, min(0.95, value))
+                    }
+
+                    faceClusterT1 = clamp(try container.decodeIfPresent(Float.self, forKey: .faceClusterT1) ?? 0.42)
+                    let rawT2 = clamp(try container.decodeIfPresent(Float.self, forKey: .faceClusterT2) ?? 0.50)
+                    let rawT3 = clamp(try container.decodeIfPresent(Float.self, forKey: .faceClusterT3) ?? 0.60)
+                    faceClusterT2 = max(faceClusterT1, rawT2)
+                    faceClusterT3 = max(faceClusterT2, rawT3)
+
+                    faceHierarchyRepCap = max(1, try container.decodeIfPresent(Int.self, forKey: .faceHierarchyRepCap) ?? 8)
+                }
+
+                public func encode(to encoder: any Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encode(autofillOnThumbUp, forKey: .autofillOnThumbUp)
+                    try container.encode(thumbUpAutofillCount, forKey: .thumbUpAutofillCount)
+                    try container.encode(showFacesDebugUI, forKey: .showFacesDebugUI)
+                    try container.encode(faceClusterT1, forKey: .faceClusterT1)
+                    try container.encode(faceClusterT2, forKey: .faceClusterT2)
+                    try container.encode(faceClusterT3, forKey: .faceClusterT3)
+                    try container.encode(faceHierarchyRepCap, forKey: .faceHierarchyRepCap)
+                }
 		    }
 
-    @Published public var settings: Settings = Settings()
+    @Published public var settings: Settings = Settings() {
+        didSet {
+            scheduleSettingsSave()
+        }
+    }
 
     @Published public var curvedCanvasEnabled: Bool = false {
         didSet {
@@ -222,6 +285,7 @@ public final class AlbumModel: ObservableObject {
     private var memoryFacesIndexTask: Task<Void, Never>? = nil
     private var visionCoverageRefreshTask: Task<Void, Never>? = nil
     private var pinnedAssetLoadsInFlight: Set<String> = []
+    private var settingsSaveTask: Task<Void, Never>? = nil
 
     public struct CurvedWallDumpPage: Identifiable, Sendable, Equatable {
         public let id: UUID
@@ -265,6 +329,7 @@ public final class AlbumModel: ObservableObject {
         let provider = assetProvider ?? PhotosAlbumAssetProvider()
         let indexStore = AlbumLibraryIndexStore()
         let faceIndexStore = FaceIndexStore()
+        let faceHierarchyStore = FaceHierarchyStore(faceIndexStore: faceIndexStore)
         let faceEngine = AlbumFaceEngine(sidecarStore: sidecarStore, indexStore: faceIndexStore)
         let backfillManager = AlbumBackfillManager(sidecarStore: sidecarStore, libraryIndexStore: indexStore, assetProvider: provider, faceEngine: faceEngine)
 
@@ -273,10 +338,14 @@ public final class AlbumModel: ObservableObject {
         self.libraryIndexStore = indexStore
         self.backfillManager = backfillManager
         self.faceIndexStore = faceIndexStore
+        self.faceHierarchyStore = faceHierarchyStore
         self.faceEngine = faceEngine
         self.oracle = oracle
         self.scenes = AlbumSceneStore.load()
         self.libraryAuthorization = self.assetProvider.authorizationStatus()
+        if let saved = AlbumSettingsStore.load() {
+            self.settings = saved
+        }
         AlbumLog.model.info("AlbumModel init oracle: \(String(describing: type(of: self.oracle)), privacy: .public)")
 
         Task(priority: .utility) { [sidecarStore] in
@@ -570,6 +639,30 @@ public final class AlbumModel: ObservableObject {
         guard !id.isEmpty else { return [] }
         guard datasetSource == .photos else { return [] }
         return await faceIndexStore.faceIDs(for: id)
+    }
+
+    public func faceClusterTokens(for assetID: String) async -> [String] {
+        let leafIDs = await faceIDs(for: assetID)
+        guard !leafIDs.isEmpty else { return [] }
+
+        let tokenByLeafID = await faceHierarchyStore.clusterTokenPreferredByLeafID(for: leafIDs)
+
+        var out: [String] = []
+        out.reserveCapacity(min(8, leafIDs.count))
+
+        var seen = Set<String>()
+        seen.reserveCapacity(min(8, leafIDs.count))
+
+        for raw in leafIDs {
+            let leafID = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !leafID.isEmpty else { continue }
+            let token = (tokenByLeafID[leafID] ?? leafID).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.isEmpty else { continue }
+            guard seen.insert(token).inserted else { continue }
+            out.append(token)
+        }
+
+        return out
     }
 
     public func loadAssetsIfNeeded(limit: Int = 600, mode: AlbumSamplingMode = .recent) async {
@@ -1042,6 +1135,127 @@ public final class AlbumModel: ObservableObject {
         await faceIndexStore.bucketSummaries()
     }
 
+    public func faceDirectoryEntries() async -> [FaceClusterDirectoryEntry] {
+        await faceIndexStore.directoryEntries()
+    }
+
+    public func faceIndexConfiguration() async -> FaceIndexStore.Configuration {
+        await faceIndexStore.configuration()
+    }
+
+    public func faceGroups(faceIDs: [String], distanceThreshold: Float) async -> [[String]] {
+        await faceIndexStore.faceGroups(faceIDs: faceIDs, distanceThreshold: distanceThreshold)
+    }
+
+    public func faceGroupings(faceIDs: [String], distanceThresholds: [Float]) async -> [[[String]]] {
+        await faceIndexStore.faceGroupings(faceIDs: faceIDs, distanceThresholds: distanceThresholds)
+    }
+
+    public func faceHierarchyNeedsRebuild() async -> Bool {
+        let (thresholds, repCap) = faceHierarchyBuildSettings()
+        return await faceHierarchyStore.needsRebuild(levelThresholds: thresholds, repCap: repCap)
+    }
+
+    public func rebuildFaceHierarchy(
+        force: Bool = false,
+        progress: (@MainActor (FaceHierarchyBuildProgress) -> Void)? = nil
+    ) async {
+        let (thresholds, repCap) = faceHierarchyBuildSettings()
+
+        if !force {
+            let needs = await faceHierarchyStore.needsRebuild(levelThresholds: thresholds, repCap: repCap)
+            if !needs { return }
+        }
+
+        await faceHierarchyStore.rebuildHierarchy(levelThresholds: thresholds, repCap: repCap, progress: progress)
+    }
+
+    public func faceHierarchySnapshot() async -> FaceHierarchySnapshot {
+        await faceHierarchyStore.snapshot()
+    }
+
+    public func faceHierarchyLeafDescendants(nodeID: String) async -> [String] {
+        await faceHierarchyStore.leafDescendants(of: nodeID)
+    }
+
+    public func setManualFaceHierarchyLabel(nodeID: String, name: String?) async {
+        await faceHierarchyStore.setManualLabel(nodeID: nodeID, name: name)
+
+        if let node = await faceHierarchyStore.node(nodeID: nodeID), node.level == 0 {
+            let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if trimmed.isEmpty {
+                await faceIndexStore.clearLabel(faceID: node.id)
+            } else {
+                await faceIndexStore.setManualLabel(faceID: node.id, displayName: trimmed)
+            }
+        }
+    }
+
+    public func setContactFaceHierarchyLabel(nodeID: String, contactID: String, name: String) async {
+        await faceHierarchyStore.setContactLabel(nodeID: nodeID, contactID: contactID, name: name)
+
+        if let node = await faceHierarchyStore.node(nodeID: nodeID), node.level == 0 {
+            _ = await faceIndexStore.setClusterLabelFromContact(
+                faceID: node.id,
+                contactID: contactID,
+                displayName: name,
+                renameOnlyIfUnlabeled: false
+            )
+        }
+    }
+
+    public func setManualFaceLabel(faceID: String, name: String) async {
+        let id = faceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty, !trimmed.isEmpty else { return }
+        await faceIndexStore.setManualLabel(faceID: id, displayName: trimmed)
+    }
+
+    public func clearFaceLabel(faceID: String) async {
+        let id = faceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        await faceIndexStore.clearLabel(faceID: id)
+    }
+
+    private func scheduleSettingsSave() {
+        settingsSaveTask?.cancel()
+        settingsSaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            AlbumSettingsStore.save(settings)
+        }
+    }
+
+    private func faceHierarchyBuildSettings() -> (thresholds: [Float], repCap: Int) {
+        func clamp(_ value: Float) -> Float {
+            guard value.isFinite else { return 0 }
+            return max(0, min(0.95, value))
+        }
+
+        let t1 = clamp(settings.faceClusterT1)
+        let t2 = max(t1, clamp(settings.faceClusterT2))
+        let t3 = max(t2, clamp(settings.faceClusterT3))
+        let repCap = max(1, min(32, settings.faceHierarchyRepCap))
+
+        return (thresholds: [0, t1, t2, t3], repCap: repCap)
+    }
+
+    public func labelClustersFromContacts(
+        maxContacts: Int = 200,
+        matchThreshold: Float,
+        renameOnlyIfUnlabeled: Bool = true
+    ) async -> ContactLabelReport {
+        guard datasetSource == .photos else {
+            return ContactLabelReport(errorDescription: "Contacts labeling requires Photos dataset source.")
+        }
+
+        let labeler = ContactClusterLabeler(faceIndexStore: faceIndexStore)
+        return await labeler.labelClustersFromContacts(
+            maxContacts: maxContacts,
+            matchThreshold: matchThreshold,
+            renameOnlyIfUnlabeled: renameOnlyIfUnlabeled
+        )
+    }
+
     public func openFaceBucket(faceID: String) async {
         let normalizedFaceID = faceID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedFaceID.isEmpty else { return }
@@ -1079,7 +1293,55 @@ public final class AlbumModel: ObservableObject {
             return a < b
         }
 
-        curvedWallOverride = CurvedWallOverride(title: normalizedFaceID, assetIDs: orderedIDs)
+        let title = await faceIndexStore.displayName(for: normalizedFaceID)
+        curvedWallOverride = CurvedWallOverride(title: title.isEmpty ? normalizedFaceID : title, assetIDs: orderedIDs)
+        curvedWallPageWindows[Self.curvedWallOverridePlacementID] = 0
+        curvedCanvasEnabled = true
+    }
+
+    public func openFaceGroup(faceIDs: [String], title: String) async {
+        let normalizedFaceIDs = faceIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !normalizedFaceIDs.isEmpty else { return }
+        guard datasetSource == .photos else { return }
+
+        let titleTrimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = titleTrimmed.isEmpty ? "People" : titleTrimmed
+
+        let bucketAssetIDsRaw = await faceIndexStore.assets(forFaceIDs: normalizedFaceIDs)
+        let bucketAssetIDs = bucketAssetIDsRaw
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !hiddenIDs.contains($0) }
+
+        guard !bucketAssetIDs.isEmpty else { return }
+
+        let fetched: [AlbumAsset]
+        do {
+            fetched = try await assetProvider.fetchAssets(localIdentifiers: bucketAssetIDs)
+        } catch {
+            AlbumLog.photos.error("Face group fetchAssets error faces=\(normalizedFaceIDs.count, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            return
+        }
+
+        var byID: [String: AlbumAsset] = [:]
+        byID.reserveCapacity(fetched.count)
+        for asset in fetched {
+            byID[asset.id] = asset
+            pinnedAssetsByID[asset.id] = asset
+        }
+
+        let availableIDs = bucketAssetIDs.filter { byID[$0] != nil }
+        guard !availableIDs.isEmpty else { return }
+
+        let orderedIDs = availableIDs.sorted { a, b in
+            let da = byID[a]?.creationDate ?? .distantPast
+            let db = byID[b]?.creationDate ?? .distantPast
+            if da != db { return da < db }
+            return a < b
+        }
+
+        curvedWallOverride = CurvedWallOverride(title: resolvedTitle, assetIDs: orderedIDs)
         curvedWallPageWindows[Self.curvedWallOverridePlacementID] = 0
         curvedCanvasEnabled = true
     }
@@ -2589,6 +2851,17 @@ public final class AlbumModel: ObservableObject {
             }
         }
 
+        var allFaceIDs: [String] = []
+        allFaceIDs.reserveCapacity(min(2048, allIDs.count * 2))
+        for (_, faceIDs) in faceIDsByAssetID {
+            allFaceIDs.append(contentsOf: faceIDs)
+        }
+        for record in records {
+            allFaceIDs.append(contentsOf: record.faces.faceIDs)
+        }
+        let hierarchyTokensByLeafID = await faceHierarchyStore.clusterTokenPreferredByLeafID(for: allFaceIDs)
+        let faceTokenInfoByID = await faceIndexStore.promptTokenInfoByFaceID(for: allFaceIDs)
+
 	        func oracleVisionSummary(assetID: String, mediaType: AlbumMediaType) -> String {
 	            let trimmedID = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
 	            if let summary = visionSummaryByAssetID[trimmedID]?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -2607,13 +2880,53 @@ public final class AlbumModel: ObservableObject {
 
 	        func oracleFaceIDs(assetID: String) -> [String] {
 	            let trimmedID = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
-	            if let faceIDs = faceIDsByAssetID[trimmedID], !faceIDs.isEmpty {
-	                return faceIDs
-	            }
-	            if let record = recordByID[trimmedID] {
-	                return record.faces.faceIDs
-	            }
-	            return []
+            let faceIDs: [String] = {
+                if let faceIDs = faceIDsByAssetID[trimmedID], !faceIDs.isEmpty {
+                    return faceIDs
+                }
+                if let record = recordByID[trimmedID] {
+                    return record.faces.faceIDs
+                }
+                return []
+            }()
+
+            let normalized = faceIDs
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard !normalized.isEmpty else { return [] }
+
+            var tokens: [String] = []
+            tokens.reserveCapacity(min(8, normalized.count))
+
+            for id in normalized {
+                if let preferred = hierarchyTokensByLeafID[id]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !preferred.isEmpty {
+                    tokens.append(preferred)
+                    continue
+                }
+
+                if let info = faceTokenInfoByID[id], info.isLabeled {
+                    tokens.append(info.token)
+                    continue
+                }
+
+                tokens.append(id)
+            }
+
+            var out: [String] = []
+            out.reserveCapacity(tokens.count)
+
+            var seen = Set<String>()
+            seen.reserveCapacity(tokens.count)
+
+            for raw in tokens {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                guard seen.insert(trimmed).inserted else { continue }
+                out.append(trimmed)
+            }
+
+            return out
 	        }
 
         func normalizeVisionSummary(_ summary: String) -> String {

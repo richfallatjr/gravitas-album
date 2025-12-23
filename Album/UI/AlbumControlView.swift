@@ -615,12 +615,12 @@ public struct AlbumControlView: View {
 	                Button {
 	                    presentedSheet = .faces
 	                } label: {
-	                    Label("Faces", systemImage: "person.2.square.stack")
+	                    Label("People", systemImage: "person.2.square.stack")
 	                        .labelStyle(.titleAndIcon)
 	                        .padding(.horizontal, 14)
 	                }
 	                .buttonStyle(.borderedProminent)
-	                .tint(palette.historyButtonColor)
+	                .tint(palette.copyButtonFill)
 	                .foregroundStyle(palette.buttonLabelOnColor)
 	                .disabled(!launched)
 	            }

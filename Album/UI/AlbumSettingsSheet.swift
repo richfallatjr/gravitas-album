@@ -206,6 +206,68 @@ public struct AlbumSettingsSheet: View {
 	                    Text("Uses 5 neighbors and only overwrites autofilled items.")
 	                        .font(.caption2)
 	                        .foregroundStyle(palette.panelSecondaryText)
+
+                        Divider()
+
+                        Text("Face Hierarchy")
+                            .font(.headline)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("T1")
+                                Spacer(minLength: 0)
+                                Text("\(Double(model.settings.faceClusterT1), specifier: "%.2f")")
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(palette.panelSecondaryText)
+                            }
+                            Slider(
+                                value: Binding(
+                                    get: { Double(model.settings.faceClusterT1) },
+                                    set: { model.settings.faceClusterT1 = Float($0) }
+                                ),
+                                in: 0...0.95,
+                                step: 0.01
+                            )
+
+                            HStack {
+                                Text("T2")
+                                Spacer(minLength: 0)
+                                Text("\(Double(model.settings.faceClusterT2), specifier: "%.2f")")
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(palette.panelSecondaryText)
+                            }
+                            Slider(
+                                value: Binding(
+                                    get: { Double(model.settings.faceClusterT2) },
+                                    set: { model.settings.faceClusterT2 = Float($0) }
+                                ),
+                                in: 0...0.95,
+                                step: 0.01
+                            )
+
+                            HStack {
+                                Text("T3")
+                                Spacer(minLength: 0)
+                                Text("\(Double(model.settings.faceClusterT3), specifier: "%.2f")")
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(palette.panelSecondaryText)
+                            }
+                            Slider(
+                                value: Binding(
+                                    get: { Double(model.settings.faceClusterT3) },
+                                    set: { model.settings.faceClusterT3 = Float($0) }
+                                ),
+                                in: 0...0.95,
+                                step: 0.01
+                            )
+
+                            Stepper(
+                                "Rep Cap: \(model.settings.faceHierarchyRepCap)",
+                                value: $model.settings.faceHierarchyRepCap,
+                                in: 1...16
+                            )
+                            .font(.subheadline)
+                        }
 	                }
 	                .padding(8)
 	            }

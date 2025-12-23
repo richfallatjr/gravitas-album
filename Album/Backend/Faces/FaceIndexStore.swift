@@ -24,6 +24,16 @@ public actor FaceIndexStore {
         }
     }
 
+    public struct LeafClusterSignature: Codable, Sendable, Hashable {
+        public var clusterCount: Int
+        public var usedReferencePrints: Int
+
+        public init(clusterCount: Int, usedReferencePrints: Int) {
+            self.clusterCount = max(0, clusterCount)
+            self.usedReferencePrints = max(0, usedReferencePrints)
+        }
+    }
+
     private struct PersistedStore: Codable {
         var schemaVersion: Int
         var nextFaceNumber: Int
@@ -64,6 +74,40 @@ public actor FaceIndexStore {
     }
 
     // MARK: Public API
+
+    public func configuration() -> Configuration {
+        config
+    }
+
+    public func leafClusterSignature(repCap: Int) async -> LeafClusterSignature {
+        await ensureLoaded()
+
+        let cap = max(1, repCap)
+        let used = store.clusters.reduce(into: 0) { partial, cluster in
+            partial += min(cap, cluster.referencePrints.count)
+        }
+        return LeafClusterSignature(clusterCount: store.clusters.count, usedReferencePrints: used)
+    }
+
+    public func leafClusters(repCap: Int) async -> [FaceCluster] {
+        await ensureLoaded()
+
+        let cap = max(1, repCap)
+
+        var out: [FaceCluster] = []
+        out.reserveCapacity(store.clusters.count)
+
+        for existing in store.clusters {
+            var cluster = existing
+            if cluster.referencePrints.count > cap {
+                cluster.referencePrints = Array(cluster.referencePrints.prefix(cap))
+            }
+            out.append(cluster)
+        }
+
+        out.sort { $0.faceID < $1.faceID }
+        return out
+    }
 
     public func matchOrCreateFaceID(for featurePrintData: Data) async -> (faceID: String, distance: Float?) {
         await ensureLoaded()
@@ -193,6 +237,52 @@ public actor FaceIndexStore {
         return (faceID: newFaceID, distance: nil)
     }
 
+    public func nearestFaceMatch(for featurePrintData: Data) async -> FaceMatchResult? {
+        await ensureLoaded()
+
+        guard !featurePrintData.isEmpty else { return nil }
+
+        let incomingPrint: VNFeaturePrintObservation
+        do {
+            incomingPrint = try unarchiveFeaturePrint(featurePrintData)
+        } catch {
+            AlbumLog.faces.error("FaceIndexStore unarchive nearest feature print failed: \(String(describing: error), privacy: .public)")
+            return nil
+        }
+
+        var best: FaceMatchResult? = nil
+
+        for cluster in store.clusters {
+            var bestDistance: Float? = nil
+            for refData in cluster.referencePrints {
+                guard !refData.isEmpty else { continue }
+                do {
+                    let refPrint = try unarchiveFeaturePrint(refData)
+                    var distance: Float = 0
+                    try incomingPrint.computeDistance(&distance, to: refPrint)
+                    if let current = bestDistance {
+                        if distance < current { bestDistance = distance }
+                    } else {
+                        bestDistance = distance
+                    }
+                } catch {
+                    AlbumLog.faces.debug("FaceIndexStore nearest computeDistance skipped: \(String(describing: error), privacy: .public)")
+                }
+            }
+
+            guard let bestDistance else { continue }
+            if let currentBest = best {
+                if bestDistance < currentBest.distance {
+                    best = FaceMatchResult(faceID: cluster.faceID, distance: bestDistance)
+                }
+            } else {
+                best = FaceMatchResult(faceID: cluster.faceID, distance: bestDistance)
+            }
+        }
+
+        return best
+    }
+
     public func record(assetID: String, faceIDs: [String]) async {
         await ensureLoaded()
 
@@ -254,6 +344,30 @@ public actor FaceIndexStore {
         return out
     }
 
+    public func assets(forFaceIDs faceIDs: [String]) async -> [String] {
+        await ensureLoaded()
+
+        let trimmed = faceIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !trimmed.isEmpty else { return [] }
+
+        let targets = Set(trimmed)
+        guard !targets.isEmpty else { return [] }
+
+        var out: [String] = []
+        out.reserveCapacity(64)
+
+        for (assetID, assetFaceIDs) in store.assetToFaceIDs {
+            if assetFaceIDs.contains(where: { targets.contains($0) }) {
+                out.append(assetID)
+            }
+        }
+
+        out.sort()
+        return out
+    }
+
     public func bucketSummaries() async -> [FaceBucketSummary] {
         await ensureLoaded()
 
@@ -279,6 +393,367 @@ public actor FaceIndexStore {
         }
 
         return out
+    }
+
+    public func faceGroups(faceIDs: [String], distanceThreshold: Float) async -> [[String]] {
+        let groupings = await faceGroupings(faceIDs: faceIDs, distanceThresholds: [distanceThreshold])
+        return groupings.first ?? []
+    }
+
+    public func faceGroupings(faceIDs: [String], distanceThresholds: [Float]) async -> [[[String]]] {
+        await ensureLoaded()
+
+        let thresholds = distanceThresholds.map { max(0, $0) }
+        guard !thresholds.isEmpty else { return [] }
+
+        let uniqueFaceIDs = normalizeFaceIDs(faceIDs)
+        if uniqueFaceIDs.isEmpty {
+            return Array(repeating: [], count: thresholds.count)
+        }
+        if uniqueFaceIDs.count == 1 {
+            return Array(repeating: [uniqueFaceIDs], count: thresholds.count)
+        }
+
+        let maxThreshold = thresholds.max() ?? 0
+
+        var clusterByID: [String: FaceCluster] = [:]
+        clusterByID.reserveCapacity(store.clusters.count)
+        for cluster in store.clusters {
+            clusterByID[cluster.faceID] = cluster
+        }
+
+        struct ClusterPrintPack {
+            let faceID: String
+            let prints: [VNFeaturePrintObservation]
+        }
+
+        var packs: [ClusterPrintPack] = []
+        packs.reserveCapacity(uniqueFaceIDs.count)
+
+        for faceID in uniqueFaceIDs {
+            guard let cluster = clusterByID[faceID] else {
+                packs.append(ClusterPrintPack(faceID: faceID, prints: []))
+                continue
+            }
+
+            var prints: [VNFeaturePrintObservation] = []
+            prints.reserveCapacity(min(8, cluster.referencePrints.count))
+
+            for refData in cluster.referencePrints {
+                guard !refData.isEmpty else { continue }
+                if let obs = try? unarchiveFeaturePrint(refData) {
+                    prints.append(obs)
+                }
+            }
+
+            packs.append(ClusterPrintPack(faceID: faceID, prints: prints))
+        }
+
+        struct Edge {
+            let i: Int
+            let j: Int
+            let distance: Float
+        }
+
+        var edges: [Edge] = []
+        edges.reserveCapacity(min(50_000, (packs.count * (packs.count - 1)) / 2))
+
+        var pairCount = 0
+
+        for i in 0..<packs.count {
+            if Task.isCancelled { break }
+            let lhs = packs[i].prints
+            guard !lhs.isEmpty else { continue }
+
+            for j in (i + 1)..<packs.count {
+                if Task.isCancelled { break }
+                let rhs = packs[j].prints
+                guard !rhs.isEmpty else { continue }
+
+                pairCount += 1
+
+                var best: Float = .greatestFiniteMagnitude
+
+                for l in lhs {
+                    for r in rhs {
+                        do {
+                            var distance: Float = 0
+                            try l.computeDistance(&distance, to: r)
+                            if distance < best { best = distance }
+                        } catch {
+                            continue
+                        }
+                    }
+                }
+
+                if best.isFinite, best <= maxThreshold {
+                    edges.append(Edge(i: i, j: j, distance: best))
+                }
+
+                if pairCount.isMultiple(of: 192) {
+                    await Task.yield()
+                }
+            }
+        }
+
+        edges.sort { $0.distance < $1.distance }
+
+        let indexedThresholds: [(value: Float, originalIndex: Int)] = thresholds.enumerated()
+            .map { (value: $0.element, originalIndex: $0.offset) }
+            .sorted { $0.value < $1.value }
+
+        var parent = Array(0..<packs.count)
+        var rank = Array(repeating: 0, count: packs.count)
+
+        func find(_ x: Int) -> Int {
+            var i = x
+            while parent[i] != i {
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            }
+            return i
+        }
+
+        func union(_ x: Int, _ y: Int) {
+            let rx = find(x)
+            let ry = find(y)
+            guard rx != ry else { return }
+
+            if rank[rx] < rank[ry] {
+                parent[rx] = ry
+            } else if rank[rx] > rank[ry] {
+                parent[ry] = rx
+            } else {
+                parent[ry] = rx
+                rank[rx] += 1
+            }
+        }
+
+        func snapshotGroups() -> [[String]] {
+            var groupsByRoot: [Int: [String]] = [:]
+            groupsByRoot.reserveCapacity(packs.count)
+
+            for (idx, pack) in packs.enumerated() {
+                let root = find(idx)
+                groupsByRoot[root, default: []].append(pack.faceID)
+            }
+
+            var out: [[String]] = []
+            out.reserveCapacity(groupsByRoot.count)
+
+            for (_, ids) in groupsByRoot {
+                let normalized = normalizeFaceIDs(ids)
+                guard !normalized.isEmpty else { continue }
+                out.append(normalized)
+            }
+
+            out.sort { lhs, rhs in
+                if lhs.count != rhs.count { return lhs.count > rhs.count }
+                let a = lhs.first ?? ""
+                let b = rhs.first ?? ""
+                return a < b
+            }
+
+            return out
+        }
+
+        var results = Array(repeating: [[String]](), count: thresholds.count)
+        var edgeIndex = 0
+
+        for threshold in indexedThresholds {
+            while edgeIndex < edges.count && edges[edgeIndex].distance <= threshold.value {
+                let edge = edges[edgeIndex]
+                union(edge.i, edge.j)
+                edgeIndex += 1
+            }
+
+            results[threshold.originalIndex] = snapshotGroups()
+        }
+
+        return results
+    }
+
+    public func directoryEntries() async -> [FaceClusterDirectoryEntry] {
+        await ensureLoaded()
+
+        var counts: [String: Int] = [:]
+        counts.reserveCapacity(store.clusters.count)
+
+        for (_, faceIDs) in store.assetToFaceIDs {
+            for faceID in faceIDs {
+                counts[faceID, default: 0] += 1
+            }
+        }
+
+        var clustersByID: [String: FaceCluster] = [:]
+        clustersByID.reserveCapacity(store.clusters.count)
+        for c in store.clusters {
+            clustersByID[c.faceID] = c
+        }
+
+        var out: [FaceClusterDirectoryEntry] = []
+        out.reserveCapacity(counts.count)
+
+        for (faceID, count) in counts {
+            guard count > 0 else { continue }
+            if let cluster = clustersByID[faceID] {
+                out.append(
+                    FaceClusterDirectoryEntry(
+                        faceID: cluster.faceID,
+                        displayName: cluster.preferredDisplayName,
+                        rawDisplayName: cluster.displayName,
+                        labelSource: cluster.labelSource,
+                        linkedContactID: cluster.linkedContactID,
+                        assetCount: count
+                    )
+                )
+            } else {
+                let trimmed = faceID.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                out.append(
+                    FaceClusterDirectoryEntry(
+                        faceID: trimmed,
+                        displayName: trimmed,
+                        rawDisplayName: nil,
+                        labelSource: .none,
+                        linkedContactID: nil,
+                        assetCount: count
+                    )
+                )
+            }
+        }
+
+        out.sort { lhs, rhs in
+            if lhs.assetCount == rhs.assetCount {
+                if lhs.displayName == rhs.displayName { return lhs.faceID < rhs.faceID }
+                return lhs.displayName < rhs.displayName
+            }
+            return lhs.assetCount > rhs.assetCount
+        }
+
+        return out
+    }
+
+    public func displayName(for faceID: String) async -> String {
+        await ensureLoaded()
+        let trimmed = faceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        guard let cluster = store.clusters.first(where: { $0.faceID == trimmed }) else { return trimmed }
+        return cluster.preferredDisplayName
+    }
+
+    public func promptTokenInfoByFaceID(for faceIDs: [String]) async -> [String: FacePromptTokenInfo] {
+        await ensureLoaded()
+
+        guard !faceIDs.isEmpty else { return [:] }
+
+        var clustersByID: [String: FaceCluster] = [:]
+        clustersByID.reserveCapacity(store.clusters.count)
+        for c in store.clusters {
+            clustersByID[c.faceID] = c
+        }
+
+        var out: [String: FacePromptTokenInfo] = [:]
+        out.reserveCapacity(min(256, faceIDs.count))
+
+        for raw in faceIDs {
+            let id = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else { continue }
+            if out[id] != nil { continue }
+
+            if let cluster = clustersByID[id] {
+                out[id] = FacePromptTokenInfo(token: cluster.preferredDisplayName, isLabeled: cluster.hasUserVisibleLabel)
+            } else {
+                out[id] = FacePromptTokenInfo(token: id, isLabeled: false)
+            }
+        }
+
+        return out
+    }
+
+    public func setManualLabel(faceID: String, displayName: String) async {
+        await ensureLoaded()
+
+        let id = faceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        guard !name.isEmpty else { return }
+        guard let idx = store.clusters.firstIndex(where: { $0.faceID == id }) else { return }
+
+        let now = Date()
+        var cluster = store.clusters[idx]
+
+        cluster.displayName = name
+        cluster.labelSource = .manual
+        cluster.updatedAt = now
+
+        store.clusters[idx] = cluster
+        store.updatedAt = now
+        markDirty()
+        await saveIfDirty()
+    }
+
+    public func clearLabel(faceID: String) async {
+        await ensureLoaded()
+
+        let id = faceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        guard let idx = store.clusters.firstIndex(where: { $0.faceID == id }) else { return }
+
+        let now = Date()
+        var cluster = store.clusters[idx]
+        cluster.displayName = nil
+        cluster.labelSource = .none
+        cluster.linkedContactID = nil
+        cluster.updatedAt = now
+
+        store.clusters[idx] = cluster
+        store.updatedAt = now
+        markDirty()
+        await saveIfDirty()
+    }
+
+    public func setClusterLabelFromContact(
+        faceID: String,
+        contactID: String,
+        displayName: String,
+        renameOnlyIfUnlabeled: Bool = true
+    ) async -> Bool {
+        await ensureLoaded()
+
+        let id = faceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cid = contactID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty, !cid.isEmpty, !name.isEmpty else { return false }
+        guard let idx = store.clusters.firstIndex(where: { $0.faceID == id }) else { return false }
+
+        var cluster = store.clusters[idx]
+
+        let existingName = cluster.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasManual = (cluster.labelSource == .manual && (existingName?.isEmpty == false))
+        if hasManual { return false }
+
+        if renameOnlyIfUnlabeled {
+            if cluster.labelSource == .contact {
+                if cluster.linkedContactID == cid {
+                    // Same contact; allow refreshing the name.
+                } else {
+                    return false
+                }
+            }
+        }
+
+        let now = Date()
+        cluster.displayName = name
+        cluster.labelSource = .contact
+        cluster.linkedContactID = cid
+        cluster.updatedAt = now
+
+        store.clusters[idx] = cluster
+        store.updatedAt = now
+        markDirty()
+        await saveIfDirty()
+        return true
     }
 
     // MARK: Internal
@@ -406,6 +881,30 @@ public actor FaceIndexStore {
 
         var targetCluster = store.clusters[targetIndex]
         let sourceCluster = store.clusters[sourceIndex]
+
+        func hasManualLabel(_ cluster: FaceCluster) -> Bool {
+            guard cluster.labelSource == .manual else { return false }
+            let trimmed = cluster.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed?.isEmpty == false
+        }
+
+        func hasContactLabel(_ cluster: FaceCluster) -> Bool {
+            guard cluster.labelSource == .contact else { return false }
+            let trimmed = cluster.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed?.isEmpty == false
+        }
+
+        if !hasManualLabel(targetCluster) {
+            if hasManualLabel(sourceCluster) {
+                targetCluster.displayName = sourceCluster.displayName
+                targetCluster.labelSource = .manual
+                targetCluster.linkedContactID = sourceCluster.linkedContactID
+            } else if !hasContactLabel(targetCluster), hasContactLabel(sourceCluster) {
+                targetCluster.displayName = sourceCluster.displayName
+                targetCluster.labelSource = .contact
+                targetCluster.linkedContactID = sourceCluster.linkedContactID
+            }
+        }
 
         if targetCluster.referencePrints.count < config.maxReferencePrintsPerFace {
             var mergedRefs = targetCluster.referencePrints

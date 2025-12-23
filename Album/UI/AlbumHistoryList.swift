@@ -140,7 +140,7 @@ public struct AlbumHistoryList: View {
         let onSelect: () -> Void
 
         @EnvironmentObject private var model: AlbumModel
-        @State private var faceIDs: [String] = []
+        @State private var faceTokens: [String] = []
 
         private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
@@ -209,18 +209,23 @@ public struct AlbumHistoryList: View {
             }
             .buttonStyle(.plain)
             .task(id: assetID) {
-                faceIDs = await model.faceIDs(for: assetID)
+                faceTokens = await model.faceClusterTokens(for: assetID)
             }
-            .onReceive(NotificationCenter.default.publisher(for: .albumFaceIndexDidUpdate)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .albumFaceIndexDidUpdate).receive(on: RunLoop.main)) { _ in
                 Task { @MainActor in
-                    faceIDs = await model.faceIDs(for: assetID)
+                    faceTokens = await model.faceClusterTokens(for: assetID)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .albumFaceHierarchyDidUpdate).receive(on: RunLoop.main)) { _ in
+                Task { @MainActor in
+                    faceTokens = await model.faceClusterTokens(for: assetID)
                 }
             }
         }
 
         private var historyTitle: some View {
             let summary = model.semanticHandle(for: assetID)
-            let title = faceIDs.isEmpty ? summary : "\(facePrefix(faceIDs)) | \(summary)"
+            let title = faceTokens.isEmpty ? summary : "\(facePrefix(faceTokens)) | \(summary)"
             return Text(title)
                 .font(.footnote)
                 .multilineTextAlignment(.leading)

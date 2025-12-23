@@ -1,0 +1,65 @@
+import Contacts
+import Foundation
+
+public enum ContactsAuthError: LocalizedError, Sendable {
+    case missingUsageDescription
+    case denied
+    case restricted
+    case unknown
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingUsageDescription:
+            return "Missing Info.plist key NSContactsUsageDescription (required before requesting Contacts permission)."
+        case .denied:
+            return "Contacts access denied. Enable Contacts access in Settings to use this feature."
+        case .restricted:
+            return "Contacts access is restricted on this device."
+        case .unknown:
+            return "Contacts access status is unknown."
+        }
+    }
+}
+
+public enum ContactsAuth {
+    public static let usageDescriptionKey = "NSContactsUsageDescription"
+
+    public static func isUsageDescriptionConfigured(bundle: Bundle = .main) -> Bool {
+        bundle.object(forInfoDictionaryKey: usageDescriptionKey) != nil
+    }
+
+    public static func requestAccessIfNeeded() async throws {
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+        switch status {
+        case .authorized:
+            return
+        case .notDetermined:
+            guard isUsageDescriptionConfigured() else {
+                throw ContactsAuthError.missingUsageDescription
+            }
+
+            let store = CNContactStore()
+            let granted = try await requestAccess(store: store)
+            guard granted else { throw ContactsAuthError.denied }
+        case .denied:
+            throw ContactsAuthError.denied
+        case .restricted:
+            throw ContactsAuthError.restricted
+        @unknown default:
+            throw ContactsAuthError.unknown
+        }
+    }
+
+    private static func requestAccess(store: CNContactStore) async throws -> Bool {
+        try await withCheckedThrowingContinuation { continuation in
+            store.requestAccess(for: .contacts) { granted, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+}
+

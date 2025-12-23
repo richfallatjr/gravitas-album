@@ -25,6 +25,7 @@
 	</dict>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Gravitas Album needs access to your photo library to display and curate your memories.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Gravitas Album uses contact photos to label face clusters when you tap "Label from Contacts" (on-device).</string>
 </dict>
 </plist>
-
