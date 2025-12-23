@@ -867,11 +867,18 @@ public final class AlbumModel: ObservableObject {
         return fetched.filter { !hidden.contains($0.id) }
     }
 
-    public func requestThumbnail(assetID: String, targetSize: CGSize, displayScale: CGFloat = 1) async -> AlbumImage? {
+    public func requestThumbnail(
+        assetID: String,
+        targetSize: CGSize,
+        displayScale: CGFloat = 1,
+        triggerVision: Bool = true
+    ) async -> AlbumImage? {
         let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }
 
-        ensureVisionSummary(for: id, reason: "thumbnail", priority: .userInitiated)
+        if triggerVision {
+            ensureVisionSummary(for: id, reason: "thumbnail", priority: .userInitiated)
+        }
 
         if datasetSource == .demo || AlbumDemoLibrary.isDemoID(id) {
             let mediaType = asset(for: id)?.mediaType
@@ -1133,6 +1140,10 @@ public final class AlbumModel: ObservableObject {
 
     public func faceBucketSummaries() async -> [FaceBucketSummary] {
         await faceIndexStore.bucketSummaries()
+    }
+
+    public func faceBucketPreviewSummaries(sampleAssetLimit: Int) async -> [FaceBucketPreviewSummary] {
+        await faceIndexStore.bucketPreviewSummaries(sampleAssetLimit: sampleAssetLimit)
     }
 
     public func faceDirectoryEntries() async -> [FaceClusterDirectoryEntry] {

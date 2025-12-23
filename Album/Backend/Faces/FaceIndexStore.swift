@@ -395,6 +395,60 @@ public actor FaceIndexStore {
         return out
     }
 
+    public func bucketPreviewSummaries(sampleAssetLimit: Int) async -> [FaceBucketPreviewSummary] {
+        await ensureLoaded()
+
+        let limit = max(0, min(12, sampleAssetLimit))
+
+        var counts: [String: Int] = [:]
+        counts.reserveCapacity(store.clusters.count)
+
+        var samples: [String: [String]] = [:]
+        if limit > 0 {
+            samples.reserveCapacity(store.clusters.count)
+        }
+
+        for (assetID, faceIDs) in store.assetToFaceIDs {
+            let trimmedAssetID = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedAssetID.isEmpty else { continue }
+
+            for faceID in faceIDs {
+                counts[faceID, default: 0] += 1
+
+                guard limit > 0 else { continue }
+                guard var existing = samples[faceID] else {
+                    samples[faceID] = [trimmedAssetID]
+                    continue
+                }
+                if existing.count >= limit { continue }
+                if existing.contains(trimmedAssetID) { continue }
+                existing.append(trimmedAssetID)
+                samples[faceID] = existing
+            }
+        }
+
+        var out: [FaceBucketPreviewSummary] = []
+        out.reserveCapacity(counts.count)
+
+        for (faceID, count) in counts {
+            guard count > 0 else { continue }
+            out.append(
+                FaceBucketPreviewSummary(
+                    faceID: faceID,
+                    assetCount: count,
+                    sampleAssetIDs: samples[faceID] ?? []
+                )
+            )
+        }
+
+        out.sort { lhs, rhs in
+            if lhs.assetCount == rhs.assetCount { return lhs.faceID < rhs.faceID }
+            return lhs.assetCount > rhs.assetCount
+        }
+
+        return out
+    }
+
     public func faceGroups(faceIDs: [String], distanceThreshold: Float) async -> [[String]] {
         let groupings = await faceGroupings(faceIDs: faceIDs, distanceThresholds: [distanceThreshold])
         return groupings.first ?? []

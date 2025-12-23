@@ -208,17 +208,30 @@ public struct PeopleTreeView: View {
         )
 
         let summaryStart = Date()
-        let summaries = await model.faceBucketSummaries()
+        let summaries = await model.faceBucketPreviewSummaries(sampleAssetLimit: 3)
         if Task.isCancelled { return }
         AlbumLog.faces.info("PeopleTreeView bucket summaries count=\(summaries.count, privacy: .public) elapsed=\(Date().timeIntervalSince(summaryStart), privacy: .public)s")
 
         var assetCountByLeafID: [String: Int] = [:]
         assetCountByLeafID.reserveCapacity(summaries.count)
+        var sampleAssetIDsByLeafID: [String: [String]] = [:]
+        sampleAssetIDsByLeafID.reserveCapacity(min(512, summaries.count))
         for s in summaries {
             assetCountByLeafID[s.faceID] = s.assetCount
+
+            let samples = s.sampleAssetIDs
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && !model.hiddenIDs.contains($0) }
+            if !samples.isEmpty {
+                sampleAssetIDsByLeafID[s.faceID] = samples
+            }
         }
 
-        let built = PeopleTreeNode.buildRoot(snapshot: snapshot, assetCountByLeafID: assetCountByLeafID)
+        let built = PeopleTreeNode.buildRoot(
+            snapshot: snapshot,
+            assetCountByLeafID: assetCountByLeafID,
+            sampleAssetIDsByLeafID: sampleAssetIDsByLeafID
+        )
         if let built, built.leafCount > 0 {
             rootNode = built
         } else {
@@ -244,37 +257,20 @@ public struct PeopleTreeView: View {
     }
 
     private func nodeRow(node: PeopleTreeNode) -> some View {
-        ZStack(alignment: .trailing) {
-            Button {
-                Task { @MainActor in
-                    await openNode(node)
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if node.isLabeled, let name = node.rawDisplayName, !name.isEmpty {
-                            Text(name)
-                                .font(.body.weight(.semibold))
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                if node.isLabeled, let name = node.rawDisplayName, !name.isEmpty {
+                    Text(name)
+                        .font(.body.weight(.semibold))
 
-                            Text(node.subtitle)
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text(node.title)
-                                .font(node.isLeaf ? .body.monospaced() : .body.weight(.semibold))
-                        }
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Text(node.countLabel)
-                        .font(.callout.weight(.semibold))
+                    Text(node.subtitle)
+                        .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
-                        .padding(.trailing, 30)
+                } else {
+                    Text(node.title)
+                        .font(node.isLeaf ? .body.monospaced() : .body.weight(.semibold))
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
 
             Button {
                 editTarget = node
@@ -287,6 +283,24 @@ public struct PeopleTreeView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .accessibilityLabel("Edit label")
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 10) {
+                if !node.sampleAssetIDs.isEmpty {
+                    PeopleRowThumbnailStack(assetIDs: node.sampleAssetIDs, size: 28)
+                }
+
+                Text(node.countLabel)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            Task { @MainActor in
+                await openNode(node)
+            }
         }
         .contextMenu {
             Button("Open") {
@@ -402,6 +416,7 @@ private struct PeopleTreeNode: Identifiable, Hashable {
     let isLeaf: Bool
     let leafCount: Int
     let leafAssetCount: Int
+    let sampleAssetIDs: [String]
     var children: [PeopleTreeNode]?
 
     var id: String { nodeID }
@@ -436,7 +451,11 @@ private struct PeopleTreeNode: Identifiable, Hashable {
         return "\(leafCount)"
     }
 
-    static func buildRoot(snapshot: FaceHierarchySnapshot, assetCountByLeafID: [String: Int]) -> PeopleTreeNode? {
+    static func buildRoot(
+        snapshot: FaceHierarchySnapshot,
+        assetCountByLeafID: [String: Int],
+        sampleAssetIDsByLeafID: [String: [String]]
+    ) -> PeopleTreeNode? {
         let rootID = snapshot.rootID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rootID.isEmpty else { return nil }
         guard let root = snapshot.nodesByID[rootID] else { return nil }
@@ -444,12 +463,14 @@ private struct PeopleTreeNode: Identifiable, Hashable {
         let children = buildChildren(
             childIDs: root.childIDs,
             snapshot: snapshot,
-            assetCountByLeafID: assetCountByLeafID
+            assetCountByLeafID: assetCountByLeafID,
+            sampleAssetIDsByLeafID: sampleAssetIDsByLeafID
         )
 
         let leafCount = children.reduce(0) { $0 + $1.leafCount }
         let rootTitle = root.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayName = (rootTitle?.isEmpty == false) ? rootTitle : "People"
+        let sampleAssetIDs = sampleAssetIDs(from: children, limit: 3)
 
         return PeopleTreeNode(
             nodeID: rootID,
@@ -459,6 +480,7 @@ private struct PeopleTreeNode: Identifiable, Hashable {
             isLeaf: false,
             leafCount: leafCount,
             leafAssetCount: 0,
+            sampleAssetIDs: sampleAssetIDs,
             children: children
         )
     }
@@ -466,7 +488,8 @@ private struct PeopleTreeNode: Identifiable, Hashable {
     private static func buildChildren(
         childIDs: [String],
         snapshot: FaceHierarchySnapshot,
-        assetCountByLeafID: [String: Int]
+        assetCountByLeafID: [String: Int],
+        sampleAssetIDsByLeafID: [String: [String]]
     ) -> [PeopleTreeNode] {
         var out: [PeopleTreeNode] = []
         out.reserveCapacity(childIDs.count)
@@ -479,6 +502,7 @@ private struct PeopleTreeNode: Identifiable, Hashable {
             if node.level == 0 {
                 let count = assetCountByLeafID[id] ?? 0
                 guard count > 0 else { continue }
+                let samples = Array((sampleAssetIDsByLeafID[id] ?? []).prefix(3))
                 out.append(
                     PeopleTreeNode(
                         nodeID: id,
@@ -488,6 +512,7 @@ private struct PeopleTreeNode: Identifiable, Hashable {
                         isLeaf: true,
                         leafCount: 1,
                         leafAssetCount: count,
+                        sampleAssetIDs: samples,
                         children: nil
                     )
                 )
@@ -497,11 +522,13 @@ private struct PeopleTreeNode: Identifiable, Hashable {
             let children = buildChildren(
                 childIDs: node.childIDs,
                 snapshot: snapshot,
-                assetCountByLeafID: assetCountByLeafID
+                assetCountByLeafID: assetCountByLeafID,
+                sampleAssetIDsByLeafID: sampleAssetIDsByLeafID
             )
             guard !children.isEmpty else { continue }
 
             let leafCount = children.reduce(0) { $0 + $1.leafCount }
+            let sampleAssetIDs = sampleAssetIDs(from: children, limit: 3)
             out.append(
                 PeopleTreeNode(
                     nodeID: id,
@@ -511,6 +538,7 @@ private struct PeopleTreeNode: Identifiable, Hashable {
                     isLeaf: false,
                     leafCount: leafCount,
                     leafAssetCount: 0,
+                    sampleAssetIDs: sampleAssetIDs,
                     children: children
                 )
             )
@@ -525,6 +553,28 @@ private struct PeopleTreeNode: Identifiable, Hashable {
         return out
     }
 
+    private static func sampleAssetIDs(from children: [PeopleTreeNode], limit: Int) -> [String] {
+        let limit = max(0, limit)
+        guard limit > 0 else { return [] }
+
+        var out: [String] = []
+        out.reserveCapacity(limit)
+        var seen = Set<String>()
+        seen.reserveCapacity(limit)
+
+        for child in children {
+            for raw in child.sampleAssetIDs {
+                let id = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty else { continue }
+                guard seen.insert(id).inserted else { continue }
+                out.append(id)
+                if out.count >= limit { return out }
+            }
+        }
+
+        return out
+    }
+
     private static func baseLeafID(from nodeID: String) -> String {
         let trimmed = nodeID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("h") else { return trimmed }
@@ -532,6 +582,77 @@ private struct PeopleTreeNode: Identifiable, Hashable {
         let after = trimmed.index(after: underscore)
         let base = String(trimmed[after...])
         return base.isEmpty ? trimmed : base
+    }
+}
+
+private struct PeopleRowThumbnailStack: View {
+    let assetIDs: [String]
+    let size: CGFloat
+
+    var body: some View {
+        let ids = Array(assetIDs.prefix(3))
+        HStack(spacing: -10) {
+            ForEach(Array(ids.enumerated()), id: \.element) { index, assetID in
+                PeopleRowThumbnail(assetID: assetID, size: size)
+                    .zIndex(Double(ids.count - index))
+            }
+        }
+    }
+}
+
+private struct PeopleRowThumbnail: View {
+    let assetID: String
+    let size: CGFloat
+
+    @EnvironmentObject private var model: AlbumModel
+    @Environment(\.displayScale) private var displayScale
+
+    @State private var image: AlbumImage? = nil
+    @State private var isLoading: Bool = true
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: max(6, size * 0.22), style: .continuous)
+    }
+
+    var body: some View {
+        ZStack {
+            if let image {
+#if canImport(UIKit)
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+#elseif canImport(AppKit)
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+#endif
+            } else {
+                shape.fill(model.palette.navBackground)
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(model.palette.copyButtonFill)
+                } else {
+                    Image(systemName: "photo")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(model.palette.navBorder.opacity(0.65), lineWidth: 1))
+        .task(id: assetID) {
+            isLoading = true
+            image = nil
+            image = await model.requestThumbnail(
+                assetID: assetID,
+                targetSize: CGSize(width: size, height: size),
+                displayScale: displayScale,
+                triggerVision: false
+            )
+            isLoading = false
+        }
     }
 }
 

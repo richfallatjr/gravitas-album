@@ -115,6 +115,22 @@ public struct FaceBucketSummary: Hashable, Sendable, Identifiable {
     }
 }
 
+public struct FaceBucketPreviewSummary: Hashable, Sendable, Identifiable {
+    public let faceID: String
+    public let assetCount: Int
+    public let sampleAssetIDs: [String]
+
+    public var id: String { faceID }
+
+    public init(faceID: String, assetCount: Int, sampleAssetIDs: [String]) {
+        self.faceID = faceID
+        self.assetCount = assetCount
+        self.sampleAssetIDs = sampleAssetIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+}
+
 public struct FaceClusterDirectoryEntry: Hashable, Sendable, Identifiable {
     public let faceID: String
     public let displayName: String
