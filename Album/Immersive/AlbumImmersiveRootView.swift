@@ -2,6 +2,7 @@ import SwiftUI
 import RealityKit
 import simd
 import UIKit
+import Photos
 
 private enum AlbumSlot: CaseIterable {
     case recent
@@ -32,6 +33,13 @@ private enum AlbumCurvedWallAttachmentID {
     static let close = "album-curved-wall-close"
     static let prev = "album-curved-wall-prev"
     static let next = "album-curved-wall-next"
+}
+
+private enum BubbleThumbSourceError: Error {
+    case invalidID
+    case assetNotFound
+    case imageRequestFailed
+    case videoURLRequestFailed
 }
 
 public struct AlbumImmersiveRootView: View {
@@ -314,17 +322,6 @@ private final class AlbumImmersiveSceneState {
                !assetID.isEmpty {
                 AlbumLog.immersive.info("Tap select assetID=\(assetID, privacy: .public)")
                 model.currentAssetID = assetID
-
-                if let modelEntity = current as? ModelEntity, balls.contains(where: { $0 == modelEntity }) {
-                    let tint = palette.randomElement() ?? .white
-                    modelEntity.model?.materials = [UnlitMaterial(color: tint)]
-
-                    if let halo = modelEntity.children.first(where: { $0.name == "halo" }) as? ModelEntity {
-                        halo.model?.materials = [makeHaloMaterial(tint)]
-                    } else {
-                        modelEntity.addChild(makeHalo(tint))
-                    }
-                }
 
                 return
             }
@@ -821,6 +818,10 @@ private final class AlbumImmersiveSceneState {
 
         accum += dt
         physicsStep(dt: dt, root: root)
+        if let head = headAnchor {
+            DiscBillboardSystem.update(root: root, head: head, dt: dt)
+        }
+        BubbleFlipbookSystem.update(root: root, dt: dt)
 
         if accum >= Float(model.absorbInterval) {
             accum = 0
@@ -955,8 +956,7 @@ private final class AlbumImmersiveSceneState {
     }
 
     private func spawn(_ asset: AlbumAsset, basePosition: SIMD3<Float>, recency: Float, root: Entity, model: AlbumModel) {
-        let isVideo = asset.mediaType == .video
-        let mats: [RealityKit.Material] = isVideo ? [videoGlowMat] : [steelMat]
+        let mats: [RealityKit.Material] = [BubbleMaterials.makeBubbleMaterial()]
 
         let ball = ModelEntity(mesh: .generateSphere(radius: baseDnRadius), materials: mats)
         let jitter = SIMD3<Float>(
@@ -992,7 +992,92 @@ private final class AlbumImmersiveSceneState {
         balls.append(ball)
         root.addChild(ball)
 
-        if isVideo { ball.addChild(makeHalo(videoHaloTint)) }
+        Task { @MainActor in
+            let media: BubbleMediaSource
+            if asset.mediaType == .video {
+                media = .video {
+                    let id = asset.id.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !id.isEmpty else { throw BubbleThumbSourceError.invalidID }
+                    guard let url = await model.requestVideoURL(assetID: id) else {
+                        throw BubbleThumbSourceError.videoURLRequestFailed
+                    }
+                    return url
+                }
+            } else {
+                media = .photo {
+                    let id = asset.id.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !id.isEmpty else { throw BubbleThumbSourceError.invalidID }
+
+                    let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+                    guard let phAsset = assets.firstObject else { throw BubbleThumbSourceError.assetNotFound }
+
+                    let targetSize = CGSize(width: 512, height: 512)
+
+                    let options = PHImageRequestOptions()
+                    options.isNetworkAccessAllowed = true
+                    options.deliveryMode = .highQualityFormat
+                    options.resizeMode = .exact
+                    options.version = .current
+                    options.isSynchronous = false
+
+                    return try await withCheckedThrowingContinuation { continuation in
+                        var didResume = false
+                        PHImageManager.default().requestImage(
+                            for: phAsset,
+                            targetSize: targetSize,
+                            contentMode: .aspectFill,
+                            options: options
+                        ) { image, info in
+                            guard !didResume else { return }
+
+                            let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
+                            let error = info?[PHImageErrorKey] as? NSError
+                            if cancelled || error != nil {
+                                didResume = true
+                                continuation.resume(throwing: BubbleThumbSourceError.imageRequestFailed)
+                                return
+                            }
+
+                            let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                            if isDegraded { return }
+
+                            guard let image else {
+                                didResume = true
+                                continuation.resume(throwing: BubbleThumbSourceError.imageRequestFailed)
+                                return
+                            }
+
+                            if let cg = image.cgImage {
+                                didResume = true
+                                continuation.resume(returning: cg)
+                                return
+                            }
+
+                            let renderer = UIGraphicsImageRenderer(size: image.size)
+                            let rendered = renderer.image { _ in
+                                image.draw(in: CGRect(origin: .zero, size: image.size))
+                            }
+
+                            guard let cg = rendered.cgImage else {
+                                didResume = true
+                                continuation.resume(throwing: BubbleThumbSourceError.imageRequestFailed)
+                                return
+                            }
+
+                            didResume = true
+                            continuation.resume(returning: cg)
+                        }
+                    }
+                }
+            }
+
+            await BubbleThumbFactory.upgradeBall(
+                ball: ball,
+                itemID: asset.id,
+                sphereRadiusMeters: baseDnRadius,
+                media: media
+            )
+        }
     }
 
     private func makeHaloMaterial(_ tint: UIColor) -> UnlitMaterial {
