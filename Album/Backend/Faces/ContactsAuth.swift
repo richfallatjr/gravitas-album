@@ -30,16 +30,20 @@ public enum ContactsAuth {
 
     public static func requestAccessIfNeeded() async throws {
         let status = CNContactStore.authorizationStatus(for: .contacts)
+        AlbumLog.privacy.info("ContactsAuth status=\(String(describing: status), privacy: .public)")
         switch status {
         case .authorized:
             return
         case .notDetermined:
             guard isUsageDescriptionConfigured() else {
+                AlbumLog.privacy.error("ContactsAuth missing \(Self.usageDescriptionKey, privacy: .public)")
                 throw ContactsAuthError.missingUsageDescription
             }
 
             let store = CNContactStore()
+            AlbumLog.privacy.info("ContactsAuth requesting access")
             let granted = try await requestAccess(store: store)
+            AlbumLog.privacy.info("ContactsAuth request result granted=\(granted, privacy: .public)")
             guard granted else { throw ContactsAuthError.denied }
         case .denied:
             throw ContactsAuthError.denied
@@ -62,4 +66,3 @@ public enum ContactsAuth {
         }
     }
 }
-

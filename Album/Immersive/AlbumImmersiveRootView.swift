@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import RealityKit
 import simd
 import UIKit
@@ -55,8 +56,10 @@ public struct AlbumImmersiveRootView: View {
             scene.ensureBuilt(in: content, model: sim, anchorOffset: anchorOffset)
             scene.syncCurvedWall(in: content, using: attachments, model: sim, panels: curvedWallVisiblePanels)
         } update: { content, attachments in
+            scene.ensureFrameUpdatesRunning(model: sim)
             scene.updateHeadTransformCache(model: sim)
             scene.syncCurvedWall(in: content, using: attachments, model: sim, panels: curvedWallVisiblePanels)
+            scene.updateDiscBillboardsNow()
         } attachments: {
             if sim.curvedCanvasEnabled {
                 ForEach(curvedWallVisiblePanels, id: \.id) { panel in
@@ -149,12 +152,20 @@ private final class AlbumImmersiveSceneState {
     private var pmns: [ModelEntity] = []
     private var balls: [ModelEntity] = []
     private var frameTask: Task<Void, Never>?
+    private var updateSub: (any Cancellable)?
+    private var sceneUpdateRetryTask: Task<Void, Never>?
+    private var billboardPrimeTask: Task<Void, Never>?
+    private var bubbleLoadCompletionTask: Task<Void, Never>?
     private var lastCurvedWallLogSignature: String?
     private var lastCurvedWallAttachmentLogSignature: String?
 
     private var lastTs: Date = Date()
     private var accum: Float = 0
     private var nextPMN: Int = 0
+    private var lastBillboardDebugLogAt: Date = .distantPast
+    private var lastBillboardDebugHeadPos: SIMD3<Float>? = nil
+    private var bubbleMediaLoadToken: UUID = UUID()
+    private var bubbleMediaLoadPrimedToken: UUID? = nil
 
     private let G: Float = 1
     private let soft: Float = 0.05
@@ -188,11 +199,23 @@ private final class AlbumImmersiveSceneState {
 
     deinit {
         frameTask?.cancel()
+        updateSub?.cancel()
+        sceneUpdateRetryTask?.cancel()
+        billboardPrimeTask?.cancel()
+        bubbleLoadCompletionTask?.cancel()
     }
 
     func stop() {
         frameTask?.cancel()
         frameTask = nil
+        updateSub?.cancel()
+        updateSub = nil
+        sceneUpdateRetryTask?.cancel()
+        sceneUpdateRetryTask = nil
+        billboardPrimeTask?.cancel()
+        billboardPrimeTask = nil
+        bubbleLoadCompletionTask?.cancel()
+        bubbleLoadCompletionTask = nil
         anchor = nil
         headAnchor = nil
         latestHeadTransform = nil
@@ -228,7 +251,7 @@ private final class AlbumImmersiveSceneState {
 
         if let existingAnchor = anchor {
             if existingAnchor.parent != nil {
-                startFrameLoopIfNeeded(model: model)
+                ensureFrameUpdatesRunning(model: model)
                 return
             }
             AlbumLog.immersive.info("World anchor stale; rebuilding from head pose")
@@ -248,7 +271,7 @@ private final class AlbumImmersiveSceneState {
         pmns = makePMNs(parent: world)
         lastTs = Date()
         respawnFromCurrentAssets(model: model)
-        startFrameLoopIfNeeded(model: model)
+        ensureFrameUpdatesRunning(model: model)
     }
 
     func updateHeadTransformCache(model: AlbumModel) {
@@ -258,6 +281,55 @@ private final class AlbumImmersiveSceneState {
         model.updateHeadWorldTransform(matrix)
         if initialHeadTransform == nil {
             initialHeadTransform = latestHeadTransform
+        }
+    }
+
+    func updateDiscBillboardsNow() {
+        guard let root = anchor, let head = headAnchor else { return }
+        _ = DiscBillboardSystem.update(root: root, head: head, dt: 0)
+    }
+
+    func ensureFrameUpdatesRunning(model: AlbumModel) {
+        guard updateSub == nil else { return }
+        guard let root = anchor else { return }
+
+        if let scene = root.scene {
+            AlbumLog.immersive.info("Installing SceneEvents.Update tick")
+            updateSub = scene.subscribe(to: SceneEvents.Update.self) { [weak self] event in
+                let dt = Float(event.deltaTime)
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.frameStep(model: model, dt: dt)
+                }
+            }
+
+            frameTask?.cancel()
+            frameTask = nil
+            sceneUpdateRetryTask?.cancel()
+            sceneUpdateRetryTask = nil
+            return
+        }
+
+        guard sceneUpdateRetryTask == nil else { return }
+        sceneUpdateRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let start = Date()
+            while !Task.isCancelled, self.updateSub == nil {
+                guard let root = self.anchor else { return }
+                if root.scene != nil {
+                    self.sceneUpdateRetryTask = nil
+                    self.ensureFrameUpdatesRunning(model: model)
+                    return
+                }
+
+                if Date().timeIntervalSince(start) > 1.0 {
+                    AlbumLog.immersive.error("SceneEvents.Update scene unavailable; falling back to timer loop")
+                    self.sceneUpdateRetryTask = nil
+                    self.startFrameLoopIfNeeded(model: model)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 16_666_667)
+            }
         }
     }
 
@@ -283,6 +355,14 @@ private final class AlbumImmersiveSceneState {
     func respawnFromCurrentAssets(model: AlbumModel) {
         guard let root = anchor else { return }
 
+        billboardPrimeTask?.cancel()
+        billboardPrimeTask = nil
+        bubbleLoadCompletionTask?.cancel()
+        bubbleLoadCompletionTask = nil
+
+        bubbleMediaLoadToken = UUID()
+        bubbleMediaLoadPrimedToken = nil
+
         for ball in balls {
             ball.removeFromParent()
         }
@@ -290,6 +370,7 @@ private final class AlbumImmersiveSceneState {
 
         let assets = model.assets
         AlbumLog.immersive.info("Respawn requested. assets=\(assets.count)")
+        model.beginBubbleMediaLoad(total: assets.count)
         guard !assets.isEmpty else { return }
 
         let dates = assets.compactMap(\.creationDate).sorted()
@@ -309,7 +390,7 @@ private final class AlbumImmersiveSceneState {
                 t = 0.5
             }
             let normalized = Float(max(0, min(1, t)))
-            spawn(asset, basePosition: slot.basePosition, recency: normalized, root: root, model: model)
+            spawn(asset, basePosition: slot.basePosition, recency: normalized, root: root, model: model, loadToken: bubbleMediaLoadToken)
         }
 
         AlbumLog.immersive.info("Respawn complete. entities=\(self.balls.count)")
@@ -802,31 +883,42 @@ private final class AlbumImmersiveSceneState {
 
         frameTask = Task { @MainActor [weak self] in
             while let self, !Task.isCancelled {
-                self.frameStep(model: model)
+                var dt = Float(Date().timeIntervalSince(self.lastTs))
+                if dt <= 0 { dt = 1 / 60 }
+                dt = min(dt, 1 / 30)
+                self.lastTs = Date()
+
+                self.frameStep(model: model, dt: dt)
                 try? await Task.sleep(nanoseconds: 16_666_667)
             }
         }
     }
 
-    private func frameStep(model: AlbumModel) {
+    private func frameStep(model: AlbumModel, dt rawDt: Float) {
         guard let root = anchor else { return }
-        var dt = Float(Date().timeIntervalSince(lastTs))
+        ensureFrameUpdatesRunning(model: model)
+        updateHeadTransformCache(model: model)
+        var dt = rawDt
         if dt <= 0 { dt = 1 / 60 }
         dt = min(dt, 1 / 30)
-        lastTs = Date()
-        guard !model.isPaused else { return }
 
-        accum += dt
-        physicsStep(dt: dt, root: root)
+        // Billboards/flipbooks should track head pose even while the sim is paused.
+        if !model.isPaused {
+            accum += dt
+            physicsStep(dt: dt, root: root)
+
+            if accum >= Float(model.absorbInterval) {
+                accum = 0
+                absorbOne(model: model)
+            }
+        }
+
         if let head = headAnchor {
-            DiscBillboardSystem.update(root: root, head: head, dt: dt)
+            let updated = DiscBillboardSystem.update(root: root, head: head, dt: dt)
+            maybeLogBillboardTick(root: root, head: head, dt: dt, updatedCount: updated, model: model)
         }
         BubbleFlipbookSystem.update(root: root, dt: dt)
 
-        if accum >= Float(model.absorbInterval) {
-            accum = 0
-            absorbOne(model: model)
-        }
     }
 
     private func physicsStep(dt: Float, root: Entity) {
@@ -955,7 +1047,14 @@ private final class AlbumImmersiveSceneState {
         }
     }
 
-    private func spawn(_ asset: AlbumAsset, basePosition: SIMD3<Float>, recency: Float, root: Entity, model: AlbumModel) {
+    private func spawn(
+        _ asset: AlbumAsset,
+        basePosition: SIMD3<Float>,
+        recency: Float,
+        root: Entity,
+        model: AlbumModel,
+        loadToken: UUID
+    ) {
         let mats: [RealityKit.Material] = [BubbleMaterials.makeBubbleMaterial()]
 
         let ball = ModelEntity(mesh: .generateSphere(radius: baseDnRadius), materials: mats)
@@ -992,7 +1091,7 @@ private final class AlbumImmersiveSceneState {
         balls.append(ball)
         root.addChild(ball)
 
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
             let media: BubbleMediaSource
             if asset.mediaType == .video {
                 media = .video {
@@ -1071,12 +1170,18 @@ private final class AlbumImmersiveSceneState {
                 }
             }
 
+            guard let self else { return }
             await BubbleThumbFactory.upgradeBall(
                 ball: ball,
                 itemID: asset.id,
                 sphereRadiusMeters: baseDnRadius,
                 media: media
             )
+
+            if self.bubbleMediaLoadToken == loadToken {
+                model.markBubbleMediaLoadedOne()
+                self.maybePrimeAfterBubbleLoadComplete(model: model, loadToken: loadToken)
+            }
         }
     }
 
@@ -1090,5 +1195,74 @@ private final class AlbumImmersiveSceneState {
         let e = ModelEntity(mesh: .generateSphere(radius: 0.027), materials: [makeHaloMaterial(tint)])
         e.name = "halo"
         return e
+    }
+
+    private func primeBillboardsAndSelection(model: AlbumModel, root: Entity) {
+        billboardPrimeTask?.cancel()
+
+        if let head = headAnchor {
+            _ = DiscBillboardSystem.update(root: root, head: head, dt: 0)
+        }
+
+        if model.currentAssetID == nil, let ball = balls.randomElement() {
+            AlbumLog.immersive.info("Priming via handleTap(on:) (gesture-equivalent)")
+            handleTap(on: ball, model: model)
+        }
+
+        billboardPrimeTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            let delaysMs: [UInt64] = [120, 350, 700]
+            for delay in delaysMs {
+                try? await Task.sleep(nanoseconds: delay * 1_000_000)
+                guard !Task.isCancelled else { return }
+                guard let root = self.anchor, let head = self.headAnchor else { continue }
+
+                _ = DiscBillboardSystem.update(root: root, head: head, dt: 0)
+            }
+        }
+    }
+
+    private func maybePrimeAfterBubbleLoadComplete(model: AlbumModel, loadToken: UUID) {
+        guard bubbleMediaLoadToken == loadToken else { return }
+        guard bubbleMediaLoadPrimedToken != loadToken else { return }
+        guard let progress = model.bubbleMediaLoadProgress, progress.total > 0 else { return }
+        guard progress.completed >= progress.total else { return }
+
+        bubbleMediaLoadPrimedToken = loadToken
+        bubbleLoadCompletionTask?.cancel()
+
+        bubbleLoadCompletionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            guard let root = self.anchor else { return }
+            AlbumLog.immersive.info("Bubble media load complete; priming selection + billboards")
+            self.primeBillboardsAndSelection(model: model, root: root)
+        }
+    }
+
+    private func maybeLogBillboardTick(root: Entity, head: Entity, dt: Float, updatedCount: Int, model: AlbumModel) {
+        let now = Date()
+        let logInterval: TimeInterval = 1.0
+        if now.timeIntervalSince(lastBillboardDebugLogAt) < logInterval { return }
+        lastBillboardDebugLogAt = now
+
+        let headMatrix = head.transformMatrix(relativeTo: nil)
+        let pos = SIMD3<Float>(headMatrix.columns.3.x, headMatrix.columns.3.y, headMatrix.columns.3.z)
+        let fcol = headMatrix.columns.2
+        let forward = normalize(-SIMD3<Float>(fcol.x, fcol.y, fcol.z))
+
+        let delta: SIMD3<Float>
+        if let last = lastBillboardDebugHeadPos {
+            delta = pos - last
+        } else {
+            delta = .zero
+        }
+        lastBillboardDebugHeadPos = pos
+
+        AlbumLog.immersive.info(
+            "Billboard tick dt=\(dt, format: .fixed(precision: 3)) updated=\(updatedCount) paused=\(model.isPaused, privacy: .public) head=(\(pos.x, format: .fixed(precision: 3)),\(pos.y, format: .fixed(precision: 3)),\(pos.z, format: .fixed(precision: 3))) d=(\(delta.x, format: .fixed(precision: 3)),\(delta.y, format: .fixed(precision: 3)),\(delta.z, format: .fixed(precision: 3))) f=(\(forward.x, format: .fixed(precision: 3)),\(forward.y, format: .fixed(precision: 3)),\(forward.z, format: .fixed(precision: 3)))"
+        )
     }
 }

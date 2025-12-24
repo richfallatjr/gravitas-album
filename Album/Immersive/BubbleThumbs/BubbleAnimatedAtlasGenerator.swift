@@ -33,8 +33,10 @@ public enum BubbleAnimatedAtlasGenerator {
         let extracted = try await generateFrames(generator: generator, requestedTimes: times)
         let frames = try fillFrames(extracted: extracted)
 
-        let atlas = try renderAtlas(frames: frames)
-        try writePNG(atlas, to: destinationURL)
+        try await Task.detached(priority: .utility) {
+            let atlas = try renderAtlas(frames: frames)
+            try writePNG(atlas, to: destinationURL)
+        }.value
         return destinationURL
     }
 

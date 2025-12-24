@@ -22,17 +22,20 @@ public struct DiscBillboard: Component {
     public var diameterMeters: Float
     public var zBiasTowardHead: Float
     public var flipFacing: Bool
+    public var lockRoll: Bool
 
     public init(
         follow: WeakEntityRef,
         diameterMeters: Float,
         zBiasTowardHead: Float = 0,
-        flipFacing: Bool = false
+        flipFacing: Bool = false,
+        lockRoll: Bool = false
     ) {
         self.follow = follow
         self.diameterMeters = diameterMeters
         self.zBiasTowardHead = zBiasTowardHead
         self.flipFacing = flipFacing
+        self.lockRoll = lockRoll
     }
 }
 
@@ -41,17 +44,40 @@ public enum DiscBillboardSystem {
     /// - Call AFTER the simulation updates positions.
     /// - Call BEFORE any mesh swap/flipbook (optional).
     @MainActor
-    public static func update(root: Entity, head: Entity, dt: Float) {
-        // Use world space for head + targets to avoid anchor-space mismatches.
-        let headPos = head.position(relativeTo: nil)
+    public static func update(root: Entity, head: Entity, dt: Float) -> Int {
+        let headPos = head.position(relativeTo: root)
+        let headQ = head.orientation(relativeTo: root)
+
+        let noRollQ: simd_quatf = {
+            let worldUp = SIMD3<Float>(0, 1, 0)
+
+            // Camera forward is local -Z.
+            var fwd = headQ.act(SIMD3<Float>(0, 0, -1))
+            if simd_length_squared(fwd) < 1e-8 { fwd = SIMD3<Float>(0, 0, -1) }
+            fwd = simd_normalize(fwd)
+
+            var right = simd_cross(worldUp, fwd)
+            if simd_length_squared(right) < 1e-8 {
+                right = simd_cross(SIMD3<Float>(1, 0, 0), fwd)
+            }
+            right = simd_normalize(right)
+            let up = simd_normalize(simd_cross(fwd, right))
+
+            // Ensure local -Z points forward by making local +Z point backward.
+            let back = -fwd
+            let m = simd_float3x3(columns: (right, up, back))
+            return simd_quatf(m)
+        }()
 
         var stack: [Entity] = [root]
         stack.reserveCapacity(512)
+        var updatedCount = 0
 
         while let e = stack.popLast() {
             if var bb = e.components[DiscBillboard.self],
                let target = bb.follow.entity {
-                let pinPos = target.position(relativeTo: nil)
+                updatedCount += 1
+                let pinPos = target.position(relativeTo: root)
 
                 var toHead = headPos - pinPos
                 let l2 = simd_length_squared(toHead)
@@ -59,32 +85,29 @@ public enum DiscBillboardSystem {
                     toHead = simd_normalize(toHead)
 
                     let biasedPos = pinPos + (toHead * bb.zBiasTowardHead)
-                    e.setPosition(biasedPos, relativeTo: nil)
+                    e.setPosition(biasedPos, relativeTo: root)
 
-                    let forward = toHead
-                    let worldUp = SIMD3<Float>(0, 1, 0)
-
-                    var right = simd_cross(worldUp, forward)
-                    if simd_length_squared(right) < 1e-8 {
-                        right = simd_cross(SIMD3<Float>(1, 0, 0), forward)
-                    }
-                    right = simd_normalize(right)
-                    let up = simd_normalize(simd_cross(forward, right))
-
-                    let rot = simd_float3x3(columns: (right, up, forward))
-                    var q = simd_quatf(rot)
-
+                    var q = bb.lockRoll ? noRollQ : headQ
                     if bb.flipFacing {
                         let fix = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
                         q = q * fix
                     }
-
-                    e.setOrientation(q, relativeTo: nil)
+                    e.setOrientation(q, relativeTo: root)
 
                     let d = max(0.0001, bb.diameterMeters)
                     e.scale = SIMD3<Float>(d, d, 1)
                 } else {
-                    e.setPosition(pinPos, relativeTo: nil)
+                    e.setPosition(pinPos, relativeTo: root)
+
+                    var q = bb.lockRoll ? noRollQ : headQ
+                    if bb.flipFacing {
+                        let fix = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 1, 0))
+                        q = q * fix
+                    }
+                    e.setOrientation(q, relativeTo: root)
+
+                    let d = max(0.0001, bb.diameterMeters)
+                    e.scale = SIMD3<Float>(d, d, 1)
                 }
 
                 e.components.set(bb)
@@ -94,5 +117,7 @@ public enum DiscBillboardSystem {
                 stack.append(contentsOf: e.children)
             }
         }
+
+        return updatedCount
     }
 }

@@ -2,6 +2,7 @@ import RealityKit
 
 public enum BubbleThumbFactory {
     private static let discName: String = "BubbleThumbDisc"
+    private static let revealDelayNs: UInt64 = 100_000_000
 
     @MainActor
     public static func upgradeBall(
@@ -29,7 +30,8 @@ public enum BubbleThumbFactory {
                 }
             }()
 
-            let placeholder = UnlitMaterial(color: .white)
+            var placeholder = UnlitMaterial(color: .white)
+            placeholder.blending = .transparent(opacity: 0.0)
             let entity = ModelEntity(mesh: mesh, materials: [placeholder])
             entity.name = discName
             entity.position = .zero
@@ -55,7 +57,8 @@ public enum BubbleThumbFactory {
                 let texture = try await BubbleMediaCache.getOrCreateStaticThumbTexture(itemID: itemID, photoSource: source)
                 guard ball.parent != nil, disc.parent != nil else { return }
 
-                let mat = BubbleMaterials.makeThumbMaterial(texture: texture)
+                var mat = BubbleMaterials.makeThumbMaterial(texture: texture)
+                mat.blending = .transparent(opacity: 0.0)
                 if var model = disc.model {
                     model.materials = [mat]
                     if let full = try? BubbleThumbDiscMesh.unitDisc(segments: 64) {
@@ -64,6 +67,15 @@ public enum BubbleThumbFactory {
                     disc.model = model
                 }
                 disc.components[BubbleFlipbook.self] = nil
+
+                Task { @MainActor [weak disc] in
+                    try? await Task.sleep(nanoseconds: revealDelayNs)
+                    guard let disc, disc.parent != nil else { return }
+                    if var model = disc.model {
+                        model.materials = [BubbleMaterials.makeThumbMaterial(texture: texture)]
+                        disc.model = model
+                    }
+                }
             } catch {
                 AlbumLog.immersive.error(
                     "BubbleThumbFactory static thumb failed itemID=\(itemID, privacy: .public) error=\(String(describing: error), privacy: .public)"
@@ -75,7 +87,8 @@ public enum BubbleThumbFactory {
                 let result = try await BubbleMediaCache.getOrCreateAnimatedAtlasTexture(itemID: itemID, videoSource: source)
                 guard ball.parent != nil, disc.parent != nil else { return }
 
-                let mat = BubbleMaterials.makeThumbMaterial(texture: result.texture)
+                var mat = BubbleMaterials.makeThumbMaterial(texture: result.texture)
+                mat.blending = .transparent(opacity: 0.0)
 
                 if var model = disc.model {
                     model.materials = [mat]
@@ -87,6 +100,15 @@ public enum BubbleThumbFactory {
                 }
 
                 disc.components.set(BubbleFlipbook(fps: result.cfg.fps, frameCount: result.cfg.frameCount))
+
+                Task { @MainActor [weak disc] in
+                    try? await Task.sleep(nanoseconds: revealDelayNs)
+                    guard let disc, disc.parent != nil else { return }
+                    if var model = disc.model {
+                        model.materials = [BubbleMaterials.makeThumbMaterial(texture: result.texture)]
+                        disc.model = model
+                    }
+                }
             } catch {
                 AlbumLog.immersive.error(
                     "BubbleThumbFactory animated atlas failed itemID=\(itemID, privacy: .public) error=\(String(describing: error), privacy: .public)"

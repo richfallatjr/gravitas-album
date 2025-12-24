@@ -138,6 +138,32 @@ public struct AlbumControlView: View {
                     .lineLimit(2)
             }
 
+            if let progress = model.bubbleMediaLoadProgress,
+               progress.total > 0,
+               progress.completed < progress.total {
+                TimelineView(.periodic(from: .now, by: 1.0)) { context in
+                    let elapsed = context.date.timeIntervalSince(progress.startedAt)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text("Loading bubbles… \(progress.completed)/\(progress.total)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(palette.panelSecondaryText)
+
+                            Spacer(minLength: 0)
+
+                            Text(formatElapsed(elapsed))
+                                .font(.caption2)
+                                .foregroundStyle(palette.panelSecondaryText)
+                        }
+
+                        ProgressView(value: progress.fraction)
+                            .tint(palette.readButtonColor)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 12) {
                     Button {
@@ -729,5 +755,12 @@ public struct AlbumControlView: View {
         case .memories:
             return model.currentAssetID != nil
         }
+    }
+
+    private func formatElapsed(_ interval: TimeInterval) -> String {
+        let totalSeconds = max(0, Int(interval.rounded()))
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }

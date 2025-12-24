@@ -274,6 +274,7 @@ public final class AlbumModel: ObservableObject {
     @Published private var curvedWallOverride: CurvedWallOverride? = nil
 
     @Published public private(set) var isLoadingItems: Bool = false
+    @Published public private(set) var bubbleMediaLoadProgress: BubbleMediaLoadProgress? = nil
 
     private var thumbTask: Task<Void, Never>? = nil
     private var latestThumbRequestID: UUID? = nil
@@ -286,6 +287,37 @@ public final class AlbumModel: ObservableObject {
     private var visionCoverageRefreshTask: Task<Void, Never>? = nil
     private var pinnedAssetLoadsInFlight: Set<String> = []
     private var settingsSaveTask: Task<Void, Never>? = nil
+
+    public struct BubbleMediaLoadProgress: Sendable, Equatable {
+        public var total: Int
+        public var completed: Int
+        public var startedAt: Date
+        public var lastUpdatedAt: Date
+
+        public init(total: Int, completed: Int = 0, startedAt: Date = Date(), lastUpdatedAt: Date = Date()) {
+            self.total = total
+            self.completed = completed
+            self.startedAt = startedAt
+            self.lastUpdatedAt = lastUpdatedAt
+        }
+
+        public var fraction: Double {
+            guard total > 0 else { return 0 }
+            return Double(completed) / Double(total)
+        }
+    }
+
+    public func beginBubbleMediaLoad(total: Int) {
+        let clamped = max(0, total)
+        bubbleMediaLoadProgress = BubbleMediaLoadProgress(total: clamped, completed: 0, startedAt: Date(), lastUpdatedAt: Date())
+    }
+
+    public func markBubbleMediaLoadedOne() {
+        guard var progress = bubbleMediaLoadProgress else { return }
+        progress.completed = min(progress.total, progress.completed + 1)
+        progress.lastUpdatedAt = Date()
+        bubbleMediaLoadProgress = progress
+    }
 
     public struct CurvedWallDumpPage: Identifiable, Sendable, Equatable {
         public let id: UUID

@@ -16,11 +16,14 @@ public final class PhotosAlbumAssetProvider: AlbumAssetProvider {
     }
 
     public func requestAuthorization() async -> AlbumLibraryAuthorizationStatus {
+        let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        AlbumLog.privacy.info("PhotosAuth requesting authorization current=\(String(describing: current), privacy: .public)")
         let status = await withCheckedContinuation { continuation in
             PHPhotoLibrary.requestAuthorization(for: .readWrite) { newStatus in
                 continuation.resume(returning: newStatus)
             }
         }
+        AlbumLog.privacy.info("PhotosAuth request result new=\(String(describing: status), privacy: .public)")
         return mapAuthorizationStatus(status)
     }
 

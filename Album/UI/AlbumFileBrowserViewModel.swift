@@ -122,10 +122,12 @@ final class AlbumFileBrowserViewModel: ObservableObject {
 
     private func requestPhotosAccessIfNeeded() async -> Bool {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        AlbumLog.privacy.info("AlbumFileBrowser photos auth status=\(String(describing: status), privacy: .public)")
         if status == .authorized || status == .limited { return true }
 
+        AlbumLog.privacy.info("AlbumFileBrowser requesting photos auth")
         let newStatus = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        AlbumLog.privacy.info("AlbumFileBrowser photos auth result=\(String(describing: newStatus), privacy: .public)")
         return newStatus == .authorized || newStatus == .limited
     }
 }
-
