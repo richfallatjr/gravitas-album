@@ -26,7 +26,6 @@ public struct AlbumControlView: View {
     }
 
     @State private var launched = false
-    @State private var assetLimit: Int = 300
     @State private var presentedSheet: PresentedSheet? = nil
     @State private var immersiveOpenStatus: String? = nil
     @State private var showQuitConfirmation: Bool = false
@@ -78,13 +77,14 @@ public struct AlbumControlView: View {
             }
         }
         .task {
-            AlbumLog.ui.info("AlbumControlView task: loadItemsIfNeeded(limit: \(self.assetLimit))")
-            await model.loadItemsIfNeeded(limit: assetLimit)
+            let limit = model.settings.assetLoadLimit
+            AlbumLog.ui.info("AlbumControlView task: loadItemsIfNeeded(limit: \(limit))")
+            await model.loadItemsIfNeeded(limit: limit)
         }
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
             case .queryPicker:
-                AlbumQueryPickerSheet(limit: $assetLimit)
+                AlbumQueryPickerSheet(limit: assetLimitBinding)
                     .environmentObject(model)
             case .settings:
                 AlbumSettingsSheet()
@@ -97,6 +97,15 @@ public struct AlbumControlView: View {
                     .environmentObject(model)
             }
         }
+    }
+
+    private var assetLimitBinding: Binding<Int> {
+        Binding(
+            get: { model.settings.assetLoadLimit },
+            set: { newValue in
+                model.settings.assetLoadLimit = max(1, min(300, newValue))
+            }
+        )
     }
 
     private var header: some View {
@@ -173,16 +182,17 @@ public struct AlbumControlView: View {
                             .labelStyle(.titleAndIcon)
                     }
                     .buttonStyle(.bordered)
-                    .tint(palette.historyButtonColor)
-                    .foregroundStyle(palette.buttonLabelOnColor)
+	                    .tint(palette.historyButtonColor)
+	                    .foregroundStyle(palette.buttonLabelOnColor)
 
-                    Button("Reload") {
-                        AlbumLog.ui.info("Reload pressed; loadItems(limit: \(self.assetLimit), query: \(self.model.selectedQuery.id, privacy: .public))")
-                        Task { await model.loadItems(limit: assetLimit, query: model.selectedQuery) }
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(palette.copyButtonFill)
-                    .foregroundStyle(palette.buttonLabelOnColor)
+	                    Button("Reload") {
+	                        let limit = model.settings.assetLoadLimit
+	                        AlbumLog.ui.info("Reload pressed; loadItems(limit: \(limit), query: \(self.model.selectedQuery.id, privacy: .public))")
+	                        Task { await model.loadItems(limit: limit, query: model.selectedQuery) }
+	                    }
+	                    .buttonStyle(.bordered)
+	                    .tint(palette.copyButtonFill)
+	                    .foregroundStyle(palette.buttonLabelOnColor)
 
                     Button {
                         presentedSheet = .fileBrowser
@@ -216,9 +226,10 @@ public struct AlbumControlView: View {
                     Text("Load Limit")
                         .foregroundStyle(palette.panelSecondaryText)
 
+                    let assetLimit = model.settings.assetLoadLimit
                     HStack(spacing: 10) {
                         Button {
-                            assetLimit = max(50, assetLimit - 50)
+                            model.settings.assetLoadLimit = max(50, assetLimit - 50)
                         } label: {
                             Image(systemName: "minus")
                                 .font(.footnote.weight(.semibold))
@@ -241,7 +252,7 @@ public struct AlbumControlView: View {
                             .accessibilityLabel("Load limit")
 
                         Button {
-                            assetLimit = min(300, assetLimit + 50)
+                            model.settings.assetLoadLimit = min(300, assetLimit + 50)
                         } label: {
                             Image(systemName: "plus")
                                 .font(.footnote.weight(.semibold))
@@ -268,6 +279,7 @@ public struct AlbumControlView: View {
     @ViewBuilder
     private var authorizationStatus: some View {
         let palette = model.palette
+        let assetLimit = model.settings.assetLoadLimit
 
         let status = model.libraryAuthorization
         let accessLabel: String = {

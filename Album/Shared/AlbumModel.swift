@@ -187,6 +187,7 @@ public final class AlbumModel: ObservableObject {
 		    public struct Settings: Sendable, Hashable, Codable {
 		        public var autofillOnThumbUp: Bool
 		        public var thumbUpAutofillCount: Int
+                public var assetLoadLimit: Int
 		        public var showFacesDebugUI: Bool
                 public var faceClusterT1: Float
                 public var faceClusterT2: Float
@@ -196,6 +197,7 @@ public final class AlbumModel: ObservableObject {
 		        public init(
                     autofillOnThumbUp: Bool = true,
                     thumbUpAutofillCount: Int = 5,
+                    assetLoadLimit: Int = 250,
                     showFacesDebugUI: Bool = true,
                     faceClusterT1: Float = 0.42,
                     faceClusterT2: Float = 0.50,
@@ -204,6 +206,7 @@ public final class AlbumModel: ObservableObject {
                 ) {
 		            self.autofillOnThumbUp = autofillOnThumbUp
 		            self.thumbUpAutofillCount = max(0, thumbUpAutofillCount)
+                    self.assetLoadLimit = max(1, min(300, assetLoadLimit))
 		            self.showFacesDebugUI = showFacesDebugUI
                     self.faceClusterT1 = faceClusterT1
                     self.faceClusterT2 = faceClusterT2
@@ -214,6 +217,7 @@ public final class AlbumModel: ObservableObject {
                 private enum CodingKeys: String, CodingKey {
                     case autofillOnThumbUp
                     case thumbUpAutofillCount
+                    case assetLoadLimit
                     case showFacesDebugUI
                     case faceClusterT1
                     case faceClusterT2
@@ -226,6 +230,7 @@ public final class AlbumModel: ObservableObject {
 
                     autofillOnThumbUp = try container.decodeIfPresent(Bool.self, forKey: .autofillOnThumbUp) ?? true
                     thumbUpAutofillCount = max(0, try container.decodeIfPresent(Int.self, forKey: .thumbUpAutofillCount) ?? 5)
+                    assetLoadLimit = max(1, min(300, try container.decodeIfPresent(Int.self, forKey: .assetLoadLimit) ?? 250))
                     showFacesDebugUI = try container.decodeIfPresent(Bool.self, forKey: .showFacesDebugUI) ?? true
 
                     func clamp(_ value: Float) -> Float {
@@ -246,6 +251,7 @@ public final class AlbumModel: ObservableObject {
                     var container = encoder.container(keyedBy: CodingKeys.self)
                     try container.encode(autofillOnThumbUp, forKey: .autofillOnThumbUp)
                     try container.encode(thumbUpAutofillCount, forKey: .thumbUpAutofillCount)
+                    try container.encode(assetLoadLimit, forKey: .assetLoadLimit)
                     try container.encode(showFacesDebugUI, forKey: .showFacesDebugUI)
                     try container.encode(faceClusterT1, forKey: .faceClusterT1)
                     try container.encode(faceClusterT2, forKey: .faceClusterT2)
@@ -764,7 +770,7 @@ public final class AlbumModel: ObservableObject {
         let auth = assetProvider.authorizationStatus()
         libraryAuthorization = auth
         let q = query ?? selectedQuery
-        let rawLimit = limit ?? 300
+        let rawLimit = limit ?? settings.assetLoadLimit
         let cappedLimit = min(max(1, rawLimit), 300)
         AlbumLog.photos.info("loadItems(query: \(q.id, privacy: .public), limit: \(cappedLimit)) auth: \(String(describing: auth), privacy: .public)")
 
@@ -2530,7 +2536,7 @@ public final class AlbumModel: ObservableObject {
             return changed
         }
 
-        let limit = max(1, lastAssetFetchCount > 0 ? lastAssetFetchCount : 300)
+        let limit = max(1, lastAssetFetchCount > 0 ? lastAssetFetchCount : settings.assetLoadLimit)
         await loadItems(limit: limit, query: selectedQuery)
         return changed
     }
