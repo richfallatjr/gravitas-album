@@ -12,6 +12,7 @@ public enum BubbleThumbFactory {
         media: BubbleMediaSource
     ) async {
         if var model = ball.model {
+            model.mesh = BubblePlanarUVSphereMesh.sphere(radius: sphereRadiusMeters)
             model.materials = [BubbleMaterials.makeBubbleMaterial()]
             ball.model = model
         }

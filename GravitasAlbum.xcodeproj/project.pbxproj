@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -51,6 +51,7 @@
 		7871DA278BA1AF47D3F06DED /* UI_STYLE_GUIDE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A698BDF127E28CCD8F299BB6 /* UI_STYLE_GUIDE.txt */; };
 		793EA84F8F0BF6F11B922506 /* FaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD9A9A3F3F75463CD66B89D /* FaceModels.swift */; };
 		7989F720759F91875705BBBE /* AlbumSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8BF3109B530261DC6BCBBD5 /* AlbumSettingsSheet.swift */; };
+		79FD86F13B9A4DFEE52E64E3 /* RadialFeatherMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2B6B9F4CC0F9DDD532AAC5D /* RadialFeatherMask.swift */; };
 		7C4402D693505367DFCF60BF /* AlbumSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DF758D4AB021318D7D4F8DD /* AlbumSettingsStore.swift */; };
 		7E7B916C39A61EA1E159E5A7 /* AlbumShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */; };
 		8072B94E05E7A29CA647D951 /* AlbumVisionQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9198ABFA084347F23636ADB /* AlbumVisionQueue.swift */; };
@@ -60,6 +61,7 @@
 		86B2E07E81F4DC1F0DFFDECC /* AlbumCurvedLayoutMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F54DE5766F56EB2BD8C85EC /* AlbumCurvedLayoutMath.swift */; };
 		891B394A06F12C7204DE8E8E /* AlbumVisionSummaryUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E672C1B87A4196061A9713 /* AlbumVisionSummaryUtils.swift */; };
 		8966926D814EE88B4A02F073 /* AlbumFaceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 561208E32B98D94DBA32DE63 /* AlbumFaceEngine.swift */; };
+		8973479420E819E3B8E8FCF8 /* BubblePlanarUVSphereMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5207A2D975CEB72F2DC58C /* BubblePlanarUVSphereMesh.swift */; };
 		89DD23894CD14C327F96ACC0 /* AlbumFileBrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42B6CF2596F2512166D6C1FF /* AlbumFileBrowserViewModel.swift */; };
 		8BEFBC9C537878FDB8236F16 /* NextProject_Context_UI_Styling_ImmersiveLayout.txt in Resources */ = {isa = PBXBuildFile; fileRef = 44EF10B20823DC910A53FA0A /* NextProject_Context_UI_Styling_ImmersiveLayout.txt */; };
 		8DEF9C730F932649EA03F943 /* AlbumFacesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16401AB3149F4C37497688B2 /* AlbumFacesSheet.swift */; };
@@ -68,7 +70,6 @@
 		930D8783BF4FD5DC52DBDA76 /* AlbumSceneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC238A13C94293D4E2E4E554 /* AlbumSceneStore.swift */; };
 		980A1E8D97D170B10EB7CA15 /* BubbleThumbDiscMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443D3A9F2E1525B58B85619C /* BubbleThumbDiscMesh.swift */; };
 		985C75DD9B6C8ECCB33467A2 /* BubbleMediaCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC79FE73CBEDE0CBEF173C99 /* BubbleMediaCache.swift */; };
-		9A7B6C5D4E3F2A1B0C9D8E7F /* RadialFeatherMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A9E8B7C6D5E4F3A2B1C0D9 /* RadialFeatherMask.swift */; };
 		9C1E1B12EDF097EFCACDF917 /* BubbleThumbFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A3E1E87BAF964AEA7AC0878 /* BubbleThumbFactory.swift */; };
 		9D3462246924B65607F8DA0B /* AlbumCurvedLayoutTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EB40D022E06748D855CE15E /* AlbumCurvedLayoutTileView.swift */; };
 		AA24102E2175705E723A37C3 /* BubbleMaterials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C9CCDC4D01EDD01C994ECD9 /* BubbleMaterials.swift */; };
@@ -91,6 +92,7 @@
 		F5A2436468AC76BF9D5847A0 /* GravitasThreads_Thumbs_Physics_Integration.txt in Resources */ = {isa = PBXBuildFile; fileRef = 63E1A4F5E5AA34985A57AEEF /* GravitasThreads_Thumbs_Physics_Integration.txt */; };
 		FBDAF64070564992D9BD0D2E /* FaceCropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E105B0365516CB23CC6D8B2 /* FaceCropper.swift */; };
 		FC5EA952DAB5557A9FB14626 /* AlbumHeuristicOracle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */; };
+		FC89C0849925F49B0E6A4FF2 /* BubbleFresnelMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC42F7648D254E7284D953AE /* BubbleFresnelMask.swift */; };
 		FF73A14CE5AAFD0AE471F883 /* BubbleAnimatedAtlasGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B04DFC0A91C890CE2C57D05E /* BubbleAnimatedAtlasGenerator.swift */; };
 /* End PBXBuildFile section */
 
@@ -174,15 +176,17 @@
 		A8D541EFEDD9CD2FA916ED24 /* ContactClusterLabeler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactClusterLabeler.swift; sourceTree = "<group>"; };
 		A9198ABFA084347F23636ADB /* AlbumVisionQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionQueue.swift; sourceTree = "<group>"; };
 		B04DFC0A91C890CE2C57D05E /* BubbleAnimatedAtlasGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleAnimatedAtlasGenerator.swift; sourceTree = "<group>"; };
+		B2B6B9F4CC0F9DDD532AAC5D /* RadialFeatherMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialFeatherMask.swift; sourceTree = "<group>"; };
 		B8BF3109B530261DC6BCBBD5 /* AlbumSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSettingsSheet.swift; sourceTree = "<group>"; };
 		B8C09B6B1C1E96DDD01700F5 /* AlbumTuningDelta.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumTuningDelta.swift; sourceTree = "<group>"; };
+		BA5207A2D975CEB72F2DC58C /* BubblePlanarUVSphereMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubblePlanarUVSphereMesh.swift; sourceTree = "<group>"; };
 		BBD9A9A3F3F75463CD66B89D /* FaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceModels.swift; sourceTree = "<group>"; };
 		BC79FE73CBEDE0CBEF173C99 /* BubbleMediaCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleMediaCache.swift; sourceTree = "<group>"; };
 		BCF69ECDDDDF6D6FE518CDEC /* AlbumFileBrowserSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumFileBrowserSheet.swift; sourceTree = "<group>"; };
 		BDC799549DBFE01D888F603E /* GravitasThreads_NextUp_Absorption_History_Ordering.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = GravitasThreads_NextUp_Absorption_History_Ordering.txt; sourceTree = "<group>"; };
 		D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumHeuristicOracle.swift; sourceTree = "<group>"; };
 		D4E3AD7B137BCC9EF20517DA /* GravitasAlbumApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GravitasAlbumApp.swift; sourceTree = "<group>"; };
-		D5964FEA3D836A0C1BC0863D /* GravitasAlbum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GravitasAlbum.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D5964FEA3D836A0C1BC0863D /* GravitasAlbum.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GravitasAlbum.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC238A13C94293D4E2E4E554 /* AlbumSceneStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSceneStore.swift; sourceTree = "<group>"; };
 		E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionSummarizer.swift; sourceTree = "<group>"; };
 		E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumShareSheet.swift; sourceTree = "<group>"; };
@@ -191,6 +195,7 @@
 		E9E672C1B87A4196061A9713 /* AlbumVisionSummaryUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionSummaryUtils.swift; sourceTree = "<group>"; };
 		EB91B0A8E5FA94F7381B1917 /* AlbumItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumItem.swift; sourceTree = "<group>"; };
 		EC183209D3F2099BDAB32FC2 /* AlbumPopOutPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumPopOutPayload.swift; sourceTree = "<group>"; };
+		EC42F7648D254E7284D953AE /* BubbleFresnelMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleFresnelMask.swift; sourceTree = "<group>"; };
 		EC505166E6E86AE193870785 /* AlbumPopOutAssetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumPopOutAssetView.swift; sourceTree = "<group>"; };
 		ED357F7814566660C2FFF2DC /* AlbumBackfillManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumBackfillManager.swift; sourceTree = "<group>"; };
 		EFBDDE560B3260E37092A64A /* AlbumControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumControlView.swift; sourceTree = "<group>"; };
@@ -198,7 +203,6 @@
 		F0A244A510D0168E38C25572 /* FaceHierarchyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceHierarchyModels.swift; sourceTree = "<group>"; };
 		F100E79AA29644F73D88D15F /* AlbumOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumOracle.swift; sourceTree = "<group>"; };
 		F2EF09018DCF233ED773F6AC /* ClusterNodeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClusterNodeModels.swift; sourceTree = "<group>"; };
-		F7A9E8B7C6D5E4F3A2B1C0D9 /* RadialFeatherMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialFeatherMask.swift; sourceTree = "<group>"; };
 		F92F099F62B2B58785026FFF /* AlbumAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumAsset.swift; sourceTree = "<group>"; };
 		F935288EC8317A8F02667E4C /* BubbleThumbCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleThumbCache.swift; sourceTree = "<group>"; };
 		FBE9C43CA4AA5A85ED2DBE28 /* AlbumFoundationModelsOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumFoundationModelsOracle.swift; sourceTree = "<group>"; };
@@ -256,7 +260,7 @@
 			isa = PBXGroup;
 			children = (
 				FCE9136C7A52A58439977950 /* DiscBillboardSystem.swift */,
-				F7A9E8B7C6D5E4F3A2B1C0D9 /* RadialFeatherMask.swift */,
+				B2B6B9F4CC0F9DDD532AAC5D /* RadialFeatherMask.swift */,
 			);
 			path = DiscCloud;
 			sourceTree = "<group>";
@@ -347,8 +351,10 @@
 				B04DFC0A91C890CE2C57D05E /* BubbleAnimatedAtlasGenerator.swift */,
 				74F51D848557F9C1E8F0B696 /* BubbleBillboardSystem.swift */,
 				609DFEF94D468E0F7B5727F2 /* BubbleFlipbookSystem.swift */,
+				EC42F7648D254E7284D953AE /* BubbleFresnelMask.swift */,
 				4C9CCDC4D01EDD01C994ECD9 /* BubbleMaterials.swift */,
 				BC79FE73CBEDE0CBEF173C99 /* BubbleMediaCache.swift */,
+				BA5207A2D975CEB72F2DC58C /* BubblePlanarUVSphereMesh.swift */,
 				F935288EC8317A8F02667E4C /* BubbleThumbCache.swift */,
 				443D3A9F2E1525B58B85619C /* BubbleThumbDiscMesh.swift */,
 				8A3E1E87BAF964AEA7AC0878 /* BubbleThumbFactory.swift */,
@@ -479,6 +485,7 @@
 			);
 			mainGroup = 8A3B24C699FF996B172228CE;
 			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -571,8 +578,10 @@
 				FF73A14CE5AAFD0AE471F883 /* BubbleAnimatedAtlasGenerator.swift in Sources */,
 				10FC6103EBD85EA0B9200808 /* BubbleBillboardSystem.swift in Sources */,
 				69F7ACDFC200252DDDA57C8C /* BubbleFlipbookSystem.swift in Sources */,
+				FC89C0849925F49B0E6A4FF2 /* BubbleFresnelMask.swift in Sources */,
 				AA24102E2175705E723A37C3 /* BubbleMaterials.swift in Sources */,
 				985C75DD9B6C8ECCB33467A2 /* BubbleMediaCache.swift in Sources */,
+				8973479420E819E3B8E8FCF8 /* BubblePlanarUVSphereMesh.swift in Sources */,
 				0447740D87600588477DEEA3 /* BubbleThumbCache.swift in Sources */,
 				980A1E8D97D170B10EB7CA15 /* BubbleThumbDiscMesh.swift in Sources */,
 				9C1E1B12EDF097EFCACDF917 /* BubbleThumbFactory.swift in Sources */,
@@ -581,7 +590,6 @@
 				5EAAF21849503827F7AA8F11 /* ContactClusterLabeler.swift in Sources */,
 				20A0CD06A3364A289D5D4CAC /* ContactsAuth.swift in Sources */,
 				2D215B10E65B994D75BCB453 /* DiscBillboardSystem.swift in Sources */,
-				9A7B6C5D4E3F2A1B0C9D8E7F /* RadialFeatherMask.swift in Sources */,
 				FBDAF64070564992D9BD0D2E /* FaceCropper.swift in Sources */,
 				85E38C1D1F902A4D43F9ADCA /* FaceDebugLog.swift in Sources */,
 				0FF22874E71A8866A54CE4B3 /* FaceHierarchyModels.swift in Sources */,
@@ -593,6 +601,7 @@
 				3D948B0D502B424AF2537F5D /* PeopleDirectoryView.swift in Sources */,
 				0E722713BCCF71DF803EC3D0 /* PeopleTreeView.swift in Sources */,
 				75B7BA637068B4125CE285B3 /* PhotosAlbumAssetProvider.swift in Sources */,
+				79FD86F13B9A4DFEE52E64E3 /* RadialFeatherMask.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -753,16 +762,15 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
@@ -774,16 +782,15 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;

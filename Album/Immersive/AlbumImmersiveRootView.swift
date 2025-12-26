@@ -945,6 +945,12 @@ private final class AlbumImmersiveSceneState {
         }
 
         if let head = headAnchor {
+            let headPos = head.position(relativeTo: root)
+            for ball in balls {
+                let p = ball.position(relativeTo: root)
+                ball.look(at: headPos, from: p, relativeTo: root)
+            }
+
             let updated = DiscBillboardSystem.update(root: root, head: head, dt: dt)
             maybeLogBillboardTick(root: root, head: head, dt: dt, updatedCount: updated, model: model)
         }
@@ -1088,7 +1094,7 @@ private final class AlbumImmersiveSceneState {
     ) {
         let mats: [RealityKit.Material] = [BubbleMaterials.makeBubbleMaterial()]
 
-        let ball = ModelEntity(mesh: .generateSphere(radius: baseDnRadius), materials: mats)
+        let ball = ModelEntity(mesh: BubblePlanarUVSphereMesh.sphere(radius: baseDnRadius), materials: mats)
         let jitter = SIMD3<Float>(
             .random(in: -0.15...0.15),
             .random(in: -0.15...0.15),
