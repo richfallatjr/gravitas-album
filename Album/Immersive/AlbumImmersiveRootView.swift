@@ -110,9 +110,25 @@ public struct AlbumImmersiveRootView: View {
                 scene.applyTuningDeltas(req.deltas)
             }
         }
-        .onChange(of: sim.assets) {
+        .onChange(of: sim.assets) { oldAssets, newAssets in
             Task { @MainActor in
-                AlbumLog.immersive.info("Assets changed; respawning entities. assets=\(self.sim.assets.count)")
+                let oldIDs = Set(oldAssets.map(\.id))
+                let newIDs = Set(newAssets.map(\.id))
+                let removed = oldIDs.subtracting(newIDs)
+                let added = newIDs.subtracting(oldIDs)
+
+                // Hiding/removing a single item should not reset the simulation. Remove its ball in-place.
+                if added.isEmpty, !removed.isEmpty {
+                    AlbumLog.immersive.info(
+                        "Assets removed; removing balls without respawn removed=\(removed.count) remaining=\(newAssets.count)"
+                    )
+                    scene.removeBalls(assetIDs: removed)
+                    return
+                }
+
+                AlbumLog.immersive.info(
+                    "Assets changed; respawning entities. assets=\(newAssets.count) added=\(added.count) removed=\(removed.count)"
+                )
                 scene.respawnFromCurrentAssets(model: sim)
             }
         }
@@ -287,6 +303,21 @@ private final class AlbumImmersiveSceneState {
     func updateDiscBillboardsNow() {
         guard let root = anchor, let head = headAnchor else { return }
         _ = DiscBillboardSystem.update(root: root, head: head, dt: 0)
+    }
+
+    func removeBalls(assetIDs: Set<String>) {
+        guard !assetIDs.isEmpty else { return }
+        var removed = 0
+        balls.removeAll { ball in
+            guard let id = ball.components[AlbumAssetIDComponent.self]?.assetID else { return false }
+            guard assetIDs.contains(id) else { return false }
+            removed += 1
+            ball.removeFromParent()
+            return true
+        }
+        if removed > 0 {
+            AlbumLog.immersive.info("Removed balls without respawn removed=\(removed)")
+        }
     }
 
     func ensureFrameUpdatesRunning(model: AlbumModel) {

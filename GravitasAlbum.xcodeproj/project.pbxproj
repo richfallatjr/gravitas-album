@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -68,6 +68,7 @@
 		930D8783BF4FD5DC52DBDA76 /* AlbumSceneStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC238A13C94293D4E2E4E554 /* AlbumSceneStore.swift */; };
 		980A1E8D97D170B10EB7CA15 /* BubbleThumbDiscMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443D3A9F2E1525B58B85619C /* BubbleThumbDiscMesh.swift */; };
 		985C75DD9B6C8ECCB33467A2 /* BubbleMediaCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC79FE73CBEDE0CBEF173C99 /* BubbleMediaCache.swift */; };
+		9A7B6C5D4E3F2A1B0C9D8E7F /* RadialFeatherMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A9E8B7C6D5E4F3A2B1C0D9 /* RadialFeatherMask.swift */; };
 		9C1E1B12EDF097EFCACDF917 /* BubbleThumbFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A3E1E87BAF964AEA7AC0878 /* BubbleThumbFactory.swift */; };
 		9D3462246924B65607F8DA0B /* AlbumCurvedLayoutTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EB40D022E06748D855CE15E /* AlbumCurvedLayoutTileView.swift */; };
 		AA24102E2175705E723A37C3 /* BubbleMaterials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C9CCDC4D01EDD01C994ECD9 /* BubbleMaterials.swift */; };
@@ -181,7 +182,7 @@
 		BDC799549DBFE01D888F603E /* GravitasThreads_NextUp_Absorption_History_Ordering.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = GravitasThreads_NextUp_Absorption_History_Ordering.txt; sourceTree = "<group>"; };
 		D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumHeuristicOracle.swift; sourceTree = "<group>"; };
 		D4E3AD7B137BCC9EF20517DA /* GravitasAlbumApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GravitasAlbumApp.swift; sourceTree = "<group>"; };
-		D5964FEA3D836A0C1BC0863D /* GravitasAlbum.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GravitasAlbum.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D5964FEA3D836A0C1BC0863D /* GravitasAlbum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GravitasAlbum.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC238A13C94293D4E2E4E554 /* AlbumSceneStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSceneStore.swift; sourceTree = "<group>"; };
 		E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionSummarizer.swift; sourceTree = "<group>"; };
 		E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumShareSheet.swift; sourceTree = "<group>"; };
@@ -197,6 +198,7 @@
 		F0A244A510D0168E38C25572 /* FaceHierarchyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceHierarchyModels.swift; sourceTree = "<group>"; };
 		F100E79AA29644F73D88D15F /* AlbumOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumOracle.swift; sourceTree = "<group>"; };
 		F2EF09018DCF233ED773F6AC /* ClusterNodeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClusterNodeModels.swift; sourceTree = "<group>"; };
+		F7A9E8B7C6D5E4F3A2B1C0D9 /* RadialFeatherMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialFeatherMask.swift; sourceTree = "<group>"; };
 		F92F099F62B2B58785026FFF /* AlbumAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumAsset.swift; sourceTree = "<group>"; };
 		F935288EC8317A8F02667E4C /* BubbleThumbCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleThumbCache.swift; sourceTree = "<group>"; };
 		FBE9C43CA4AA5A85ED2DBE28 /* AlbumFoundationModelsOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumFoundationModelsOracle.swift; sourceTree = "<group>"; };
@@ -254,6 +256,7 @@
 			isa = PBXGroup;
 			children = (
 				FCE9136C7A52A58439977950 /* DiscBillboardSystem.swift */,
+				F7A9E8B7C6D5E4F3A2B1C0D9 /* RadialFeatherMask.swift */,
 			);
 			path = DiscCloud;
 			sourceTree = "<group>";
@@ -476,7 +479,6 @@
 			);
 			mainGroup = 8A3B24C699FF996B172228CE;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -579,6 +581,7 @@
 				5EAAF21849503827F7AA8F11 /* ContactClusterLabeler.swift in Sources */,
 				20A0CD06A3364A289D5D4CAC /* ContactsAuth.swift in Sources */,
 				2D215B10E65B994D75BCB453 /* DiscBillboardSystem.swift in Sources */,
+				9A7B6C5D4E3F2A1B0C9D8E7F /* RadialFeatherMask.swift in Sources */,
 				FBDAF64070564992D9BD0D2E /* FaceCropper.swift in Sources */,
 				85E38C1D1F902A4D43F9ADCA /* FaceDebugLog.swift in Sources */,
 				0FF22874E71A8866A54CE4B3 /* FaceHierarchyModels.swift in Sources */,
@@ -750,15 +753,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 15;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
@@ -770,15 +774,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 15;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
