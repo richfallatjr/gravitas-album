@@ -50,7 +50,7 @@ public actor AlbumBackfillCoordinator {
         public var targetSeedCount: Int
         public var chunkSize: Int
 
-        public init(targetSeedCount: Int = 1000, chunkSize: Int = 40) {
+        public init(targetSeedCount: Int = 50, chunkSize: Int = 40) {
             self.targetSeedCount = max(0, targetSeedCount)
             self.chunkSize = max(1, chunkSize)
         }

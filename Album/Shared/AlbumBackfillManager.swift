@@ -743,7 +743,7 @@ public actor AlbumBackfillManager {
         }
 
         guard let index = await libraryIndexStore.loadIndex() else { return }
-        let desiredTarget = 1000
+        let desiredTarget = 50
         let target = min(desiredTarget, index.idsByCreationDateAscending.count)
         let selected = index
             .stratifiedSample(targetCount: target)

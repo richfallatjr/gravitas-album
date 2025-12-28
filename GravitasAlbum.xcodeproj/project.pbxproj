@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -186,7 +186,7 @@
 		BDC799549DBFE01D888F603E /* GravitasThreads_NextUp_Absorption_History_Ordering.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = GravitasThreads_NextUp_Absorption_History_Ordering.txt; sourceTree = "<group>"; };
 		D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumHeuristicOracle.swift; sourceTree = "<group>"; };
 		D4E3AD7B137BCC9EF20517DA /* GravitasAlbumApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GravitasAlbumApp.swift; sourceTree = "<group>"; };
-		D5964FEA3D836A0C1BC0863D /* GravitasAlbum.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GravitasAlbum.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D5964FEA3D836A0C1BC0863D /* GravitasAlbum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GravitasAlbum.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC238A13C94293D4E2E4E554 /* AlbumSceneStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSceneStore.swift; sourceTree = "<group>"; };
 		E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionSummarizer.swift; sourceTree = "<group>"; };
 		E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumShareSheet.swift; sourceTree = "<group>"; };
@@ -485,7 +485,6 @@
 			);
 			mainGroup = 8A3B24C699FF996B172228CE;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -762,7 +761,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 17;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
@@ -770,7 +769,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
@@ -782,7 +781,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 17;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
@@ -790,7 +789,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
