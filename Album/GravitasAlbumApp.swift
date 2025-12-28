@@ -3,12 +3,16 @@ import SwiftUI
 import Spatial
 #endif
 import simd
+import Darwin
 #if canImport(UIKit)
 import UIKit
 #endif
 
 @main
 struct GravitasAlbumApp: App {
+#if canImport(UIKit)
+    @UIApplicationDelegateAdaptor(AlbumAppDelegate.self) private var appDelegate
+#endif
     @StateObject private var model = AlbumModel()
 
     var body: some Scene {
@@ -97,7 +101,7 @@ private struct AlbumPopOutWindowRootView: View {
         .background {
             ZStack {
                 AlbumWindowAttachmentObserver(
-                    onAttach: { syncPoppedItem(with: itemID) },
+                    onAttach: { _ in syncPoppedItem(with: itemID) },
                     onDetach: { syncPoppedItem(with: nil) },
                     onMidXChange: { midX in
                         guard let activeItemID else { return }
@@ -248,8 +252,8 @@ private struct AlbumShareWindowRootView: View {
     }
 }
 
-private struct AlbumWindowAttachmentObserver: View {
-    let onAttach: () -> Void
+struct AlbumWindowAttachmentObserver: View {
+    let onAttach: (UIWindow?) -> Void
     let onDetach: () -> Void
     let onMidXChange: (Double?) -> Void
 
@@ -265,7 +269,7 @@ private struct AlbumWindowAttachmentObserver: View {
 
 #if canImport(UIKit)
 private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
-    let onAttach: () -> Void
+    let onAttach: (UIWindow?) -> Void
     let onDetach: () -> Void
     let onMidXChange: (Double?) -> Void
 
@@ -280,16 +284,23 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
     }
 
     final class ObserverView: UIView {
-        var onAttach: () -> Void
+        var onAttach: (UIWindow?) -> Void
         var onDetach: () -> Void
         var onMidXChange: (Double?) -> Void
         private var hasAttachedOnce: Bool = false
+        private var didDetach: Bool = false
+        private weak var observedWindow: UIWindow?
         private weak var observedScene: UIScene?
         private var disconnectObserver: NSObjectProtocol? = nil
+        private var windowHiddenObserver: NSObjectProtocol? = nil
         private var framePollTimer: Timer? = nil
         private var lastMidX: Double? = nil
 
-        init(onAttach: @escaping () -> Void, onDetach: @escaping () -> Void, onMidXChange: @escaping (Double?) -> Void) {
+        init(
+            onAttach: @escaping (UIWindow?) -> Void,
+            onDetach: @escaping () -> Void,
+            onMidXChange: @escaping (Double?) -> Void
+        ) {
             self.onAttach = onAttach
             self.onDetach = onDetach
             self.onMidXChange = onMidXChange
@@ -307,22 +318,50 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
             super.didMoveToWindow()
             if window != nil {
                 hasAttachedOnce = true
+                didDetach = false
+                registerWindowHiddenObserverIfNeeded()
                 registerSceneDisconnectObserverIfNeeded()
                 startFramePoll()
-                onAttach()
+                onAttach(window)
                 return
             }
 
             guard hasAttachedOnce else { return }
-            stopFramePoll()
-            onMidXChange(nil)
-            unregisterSceneDisconnectObserver()
-            onDetach()
+            emitDetach()
         }
 
         deinit {
-            stopFramePoll()
-            unregisterSceneDisconnectObserver()
+            guard hasAttachedOnce else {
+                stopFramePoll()
+                unregisterSceneDisconnectObserver()
+                unregisterWindowHiddenObserver()
+                return
+            }
+            emitDetach()
+        }
+
+        private func registerWindowHiddenObserverIfNeeded() {
+            guard let window else { return }
+            guard observedWindow !== window else { return }
+
+            unregisterWindowHiddenObserver()
+            observedWindow = window
+
+            windowHiddenObserver = NotificationCenter.default.addObserver(
+                forName: UIWindow.didBecomeHiddenNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.emitDetach()
+            }
+        }
+
+        private func unregisterWindowHiddenObserver() {
+            if let token = windowHiddenObserver {
+                NotificationCenter.default.removeObserver(token)
+                windowHiddenObserver = nil
+            }
+            observedWindow = nil
         }
 
         private func registerSceneDisconnectObserverIfNeeded() {
@@ -338,10 +377,7 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 guard let self else { return }
-                self.stopFramePoll()
-                self.onMidXChange(nil)
-                self.unregisterSceneDisconnectObserver()
-                self.onDetach()
+                self.emitDetach()
             }
         }
 
@@ -368,6 +404,16 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
             framePollTimer?.invalidate()
             framePollTimer = nil
             lastMidX = nil
+        }
+
+        private func emitDetach() {
+            if didDetach { return }
+            didDetach = true
+            stopFramePoll()
+            onMidXChange(nil)
+            unregisterSceneDisconnectObserver()
+            unregisterWindowHiddenObserver()
+            onDetach()
         }
 
         private func emitMidXIfChanged(force: Bool) {
@@ -399,6 +445,82 @@ private struct AlbumWindowAttachmentObserverRepresentable: UIViewRepresentable {
                 onMidXChange(midX)
             }
         }
+    }
+}
+#endif
+
+#if canImport(UIKit)
+final class AlbumControlWindowKillSwitch {
+    static let shared = AlbumControlWindowKillSwitch()
+
+    private var controlWindowSessionIDs: Set<String> = []
+    private var hasTriggeredTermination: Bool = false
+
+    private init() {}
+
+    func registerControlWindow(window: UIWindow?) {
+        guard let sessionID = window?.windowScene?.session.persistentIdentifier else { return }
+        let (inserted, _) = controlWindowSessionIDs.insert(sessionID)
+        if inserted {
+            AlbumLog.ui.info("Registered control window scene session id: \(sessionID, privacy: .public)")
+        }
+    }
+
+    func handleDiscardedSceneSessions(_ sceneSessions: Set<UISceneSession>, reason: String) {
+        guard !hasTriggeredTermination else { return }
+
+        if let match = sceneSessions.first(where: { controlWindowSessionIDs.contains($0.persistentIdentifier) }) {
+            terminateNow(reason: "control_window_discarded(\(match.persistentIdentifier)):\(reason)")
+        }
+    }
+
+    func handleSceneDidDisconnect(_ scene: UIScene, reason: String) {
+        guard !hasTriggeredTermination else { return }
+
+        let sessionID = scene.session.persistentIdentifier
+        guard controlWindowSessionIDs.contains(sessionID) else { return }
+
+        terminateNow(reason: "control_window_disconnected(\(sessionID)):\(reason)")
+    }
+
+    private func terminateNow(reason: String) {
+        guard !hasTriggeredTermination else { return }
+        hasTriggeredTermination = true
+        AlbumLog.ui.info("Kill switch terminating app (\(reason, privacy: .public))")
+        exit(0)
+    }
+}
+#endif
+
+#if canImport(UIKit)
+private final class AlbumAppDelegate: NSObject, UIApplicationDelegate {
+    private var sceneDisconnectObserver: NSObjectProtocol? = nil
+
+    override init() {
+        super.init()
+        sceneDisconnectObserver = NotificationCenter.default.addObserver(
+            forName: UIScene.didDisconnectNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let scene = notification.object as? UIScene else { return }
+            AlbumControlWindowKillSwitch.shared.handleSceneDidDisconnect(scene, reason: "notification")
+        }
+    }
+
+    deinit {
+        if let token = sceneDisconnectObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
+        sceneDisconnectObserver = nil
+    }
+
+    func application(_ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>) {
+        AlbumControlWindowKillSwitch.shared.handleDiscardedSceneSessions(sceneSessions, reason: "didDiscardSceneSessions")
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: UIApplication) -> Bool {
+        true
     }
 }
 #endif

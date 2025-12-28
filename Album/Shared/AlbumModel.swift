@@ -114,6 +114,8 @@ public final class AlbumModel: ObservableObject {
     // Immersive tuning requests (model decides; immersive applies)
     @Published public var tuningDeltaRequest: AlbumTuningDeltaRequest? = nil
 
+    @Published public private(set) var isQuitting: Bool = false
+
     @Published public var isPaused: Bool = false {
         didSet {
             guard isPaused != oldValue else { return }
@@ -506,7 +508,9 @@ public final class AlbumModel: ObservableObject {
 	    }
 
     public func shutdownForQuit() {
-        AlbumLog.model.info("Shutdown requested (quit button)")
+        if isQuitting { return }
+        isQuitting = true
+        AlbumLog.model.info("Shutdown requested (quit)")
         isPaused = true
         curvedCanvasEnabled = false
 

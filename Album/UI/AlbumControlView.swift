@@ -46,6 +46,7 @@ struct AlbumSubtleChromeButtonStyle: ButtonStyle {
 
 public struct AlbumControlView: View {
     @EnvironmentObject private var model: AlbumModel
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
@@ -104,19 +105,26 @@ public struct AlbumControlView: View {
         )
         .preferredColorScheme(model.theme == .dark ? .dark : .light)
         .foregroundStyle(palette.panelPrimaryText)
+        .background {
+            AlbumWindowAttachmentObserver(
+                onAttach: { window in
+                    AlbumControlWindowKillSwitch.shared.registerControlWindow(window: window)
+                },
+                onDetach: {
+                    guard !model.isQuitting else { return }
+                    performImmediateQuit(reason: "control_window_detached")
+                },
+                onMidXChange: { _ in }
+            )
+        }
         .onDisappear {
-            AlbumLog.ui.info("AlbumControlView disappeared (main control panel closed); closing all scenes")
-            let popoutItemIDs = model.poppedItems.map(\.id)
-            Task { @MainActor in
-                let result = await dismissImmersiveSpace()
-                AlbumLog.immersive.info("dismissImmersiveSpace result: \(String(describing: result), privacy: .public)")
-
-                dismissWindow(id: "album-scene-manager")
-
-                for itemID in popoutItemIDs {
-                    dismissWindow(value: AlbumPopOutPayload(itemID: itemID))
-                }
-            }
+            guard !model.isQuitting else { return }
+            performImmediateQuit(reason: "control_window_closed")
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard !model.isQuitting else { return }
+            guard newPhase == .background else { return }
+            performImmediateQuit(reason: "control_window_scene_backgrounded")
         }
         .task {
             let limit = model.settings.assetLoadLimit
@@ -753,29 +761,7 @@ public struct AlbumControlView: View {
 				titleVisibility: .visible
             ) {
                 Button("Quit", role: .destructive) {
-                    AlbumLog.ui.info("Quit pressed; tearing down immersive + windows then exiting")
-                    let popoutItemIDs = model.poppedItems.map(\.id)
-                    model.shutdownForQuit()
-
-                    Task.detached(priority: .userInitiated) {
-                        try? await Task.sleep(nanoseconds: 350_000_000)
-                        exit(0)
-                    }
-
-                    UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
-                    Task { @MainActor in
-                        let result = await dismissImmersiveSpace()
-                        AlbumLog.immersive.info("dismissImmersiveSpace result: \(String(describing: result), privacy: .public)")
-
-                        dismissWindow(id: "album-scene-manager")
-                        for itemID in popoutItemIDs {
-                            dismissWindow(value: AlbumPopOutPayload(itemID: itemID))
-                        }
-                        dismissWindow(id: "album-control")
-
-                        try? await Task.sleep(nanoseconds: 250_000_000)
-                        exit(0)
-                    }
+                    performImmediateQuit(reason: "quit_button_confirmed")
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -793,6 +779,48 @@ public struct AlbumControlView: View {
             return model.recommendAnchorID == current && !model.recommendItems.isEmpty
         case .memories:
             return model.currentAssetID != nil
+        }
+    }
+
+    @MainActor
+    private func performImmediateQuit(reason: String) {
+        if model.isQuitting {
+            AlbumLog.ui.info("Immediate quit requested while already quitting (\(reason, privacy: .public)); forcing exit")
+            exit(0)
+        }
+
+        AlbumLog.ui.info("Immediate quit requested (\(reason, privacy: .public)); exiting now")
+        let popoutItemIDs = model.poppedItems.map(\.id)
+        model.shutdownForQuit()
+
+        dismissWindow(id: "album-scene-manager")
+        for itemID in popoutItemIDs {
+            dismissWindow(value: AlbumPopOutPayload(itemID: itemID))
+        }
+        dismissWindow(id: "album-control")
+
+        Task { @MainActor in
+            let outcome = await dismissImmersiveSpaceForQuit(timeoutNanoseconds: 750_000_000)
+            AlbumLog.immersive.info("dismissImmersiveSpace (quit) outcome: \(outcome, privacy: .public)")
+            exit(0)
+        }
+    }
+
+    @MainActor
+    private func dismissImmersiveSpaceForQuit(timeoutNanoseconds: UInt64) async -> String {
+        await withTaskGroup(of: String.self) { group in
+            group.addTask { @MainActor in
+                let result = await dismissImmersiveSpace()
+                return "result=\(String(describing: result))"
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                return "timeout"
+            }
+
+            let first = await group.next() ?? "timeout"
+            group.cancelAll()
+            return first
         }
     }
 
