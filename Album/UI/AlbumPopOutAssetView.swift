@@ -25,7 +25,8 @@ public struct AlbumPopOutAssetView: View {
                 assetID: assetID,
                 showsFocusButton: true,
                 sceneItemID: itemID,
-                showsSceneEditorButtons: true
+                showsSceneEditorButtons: true,
+                usesSubtleButtons: true
             )
 
             HStack(spacing: 12) {
@@ -35,9 +36,7 @@ public struct AlbumPopOutAssetView: View {
                     Label(isPreparingShare ? "Preparing…" : "Share", systemImage: "square.and.arrow.up")
                         .labelStyle(.titleAndIcon)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(palette.copyButtonFill)
-                .foregroundStyle(palette.copyIconColor)
+                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
                 .disabled(isPreparingShare)
 
                 if let shareStatus, !shareStatus.isEmpty {
@@ -222,9 +221,7 @@ public struct AlbumMovieDraftView: View {
                     Label(isPreparingShare ? "Preparing…" : "Share Movie", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(palette.copyButtonFill)
-                .foregroundStyle(palette.copyIconColor)
+                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
                 .disabled(isPreparingShare)
 
                 if let shareStatus, !shareStatus.isEmpty {
@@ -301,9 +298,7 @@ public struct AlbumMovieDraftView: View {
                 Label("Generate Movie", systemImage: "sparkles.tv")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(palette.historyButtonColor)
-            .foregroundStyle(palette.buttonLabelOnColor)
+            .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
             .disabled(generateDisabled)
         }
     }

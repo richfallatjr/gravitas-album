@@ -192,12 +192,15 @@ private struct AlbumPopOutWindowRootView: View {
 private struct AlbumShareWindowRootView: View {
     @Binding var payload: AlbumSharePayload?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     init(payload: Binding<AlbumSharePayload?>) {
         self._payload = payload
     }
 
     var body: some View {
+        let isDark = (colorScheme == .dark)
+
         VStack(spacing: 0) {
             HStack {
                 Text(titleText)
@@ -206,7 +209,7 @@ private struct AlbumShareWindowRootView: View {
                 Spacer(minLength: 0)
 
                 Button("Close") { dismiss() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: isDark))
             }
             .padding(16)
 
@@ -219,7 +222,7 @@ private struct AlbumShareWindowRootView: View {
                             Label("Share", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: isDark))
 
                         Text(payload.url.lastPathComponent)
                             .font(.caption2)

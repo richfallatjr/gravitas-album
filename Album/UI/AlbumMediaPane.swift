@@ -6,6 +6,7 @@ public struct AlbumMediaPane: View {
     public let showsFocusButton: Bool
     public let sceneItemID: UUID?
     public let showsSceneEditorButtons: Bool
+    public let usesSubtleButtons: Bool
 
     @EnvironmentObject private var model: AlbumModel
     @Environment(\.displayScale) private var displayScale
@@ -21,12 +22,14 @@ public struct AlbumMediaPane: View {
         assetID: String?,
         showsFocusButton: Bool = false,
         sceneItemID: UUID? = nil,
-        showsSceneEditorButtons: Bool = false
+        showsSceneEditorButtons: Bool = false,
+        usesSubtleButtons: Bool = false
     ) {
         self.assetID = assetID
         self.showsFocusButton = showsFocusButton
         self.sceneItemID = sceneItemID
         self.showsSceneEditorButtons = showsSceneEditorButtons
+        self.usesSubtleButtons = usesSubtleButtons
     }
 
     public var body: some View {
@@ -174,35 +177,60 @@ public struct AlbumMediaPane: View {
            !nextID.isEmpty,
            nextID != currentAssetID,
            model.asset(for: nextID) != nil {
-            Button {
-                model.currentAssetID = nextID
-            } label: {
-                HStack(spacing: 10) {
-                    Text("Next Up")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(palette.panelSecondaryText)
+            if usesSubtleButtons {
+                Button {
+                    model.currentAssetID = nextID
+                } label: {
+                    HStack(spacing: 10) {
+                        Text("Next Up")
+                            .font(.caption.weight(.semibold))
 
-                    Text(model.semanticHandle(for: nextID))
-                        .font(.caption)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        Text(model.semanticHandle(for: nextID))
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
 
-                    Spacer(minLength: 0)
+                        Spacer(minLength: 0)
 
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(palette.panelSecondaryText)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.navBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(palette.navBorder.opacity(0.7), lineWidth: 1)
-                )
+                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 10))
+            } else {
+                Button {
+                    model.currentAssetID = nextID
+                } label: {
+                    HStack(spacing: 10) {
+                        Text("Next Up")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(palette.panelSecondaryText)
+
+                        Text(model.semanticHandle(for: nextID))
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        Spacer(minLength: 0)
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(palette.panelSecondaryText)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(palette.navBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(palette.navBorder.opacity(0.7), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -228,31 +256,54 @@ public struct AlbumMediaPane: View {
         }
     }
 
+    @ViewBuilder
     private func thumbButtons(assetID: String) -> some View {
         let palette = model.palette
 
-        return HStack(alignment: .center, spacing: 10) {
-            Button {
-                model.sendThumb(.up, assetID: assetID)
-            } label: {
-                Image(systemName: "hand.thumbsup")
-                    .font(.title3)
-                    .foregroundStyle(palette.buttonLabelOnColor)
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .background(palette.readButtonColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        if usesSubtleButtons {
+            HStack(alignment: .center, spacing: 10) {
+                Button {
+                    model.sendThumb(.up, assetID: assetID)
+                } label: {
+                    Image(systemName: "hand.thumbsup")
+                        .font(.title3)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
 
-            Button {
-                model.sendThumb(.down, assetID: assetID)
-            } label: {
-                Image(systemName: "hand.thumbsdown")
-                    .font(.title3)
-                    .foregroundStyle(palette.buttonLabelOnColor)
-                    .frame(width: 44, height: 44)
+                Button {
+                    model.sendThumb(.down, assetID: assetID)
+                } label: {
+                    Image(systemName: "hand.thumbsdown")
+                        .font(.title3)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
             }
-            .buttonStyle(.plain)
-            .background(palette.toggleFillColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            HStack(alignment: .center, spacing: 10) {
+                Button {
+                    model.sendThumb(.up, assetID: assetID)
+                } label: {
+                    Image(systemName: "hand.thumbsup")
+                        .font(.title3)
+                        .foregroundStyle(palette.buttonLabelOnColor)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .background(palette.readButtonColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                Button {
+                    model.sendThumb(.down, assetID: assetID)
+                } label: {
+                    Image(systemName: "hand.thumbsdown")
+                        .font(.title3)
+                        .foregroundStyle(palette.buttonLabelOnColor)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .background(palette.toggleFillColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         }
     }
 
@@ -273,58 +324,112 @@ public struct AlbumMediaPane: View {
         }
     }
 
+    @ViewBuilder
     private func focusButton(assetID: String) -> some View {
         let palette = model.palette
 
-        return Button {
-            Task { await model.focusAssetInHistory(assetID: assetID) }
-        } label: {
-            Image(systemName: "scope")
-                .font(.title3)
-                .foregroundStyle(palette.buttonLabelOnColor)
-                .frame(width: 44, height: 44)
+        if usesSubtleButtons {
+            Button {
+                Task { await model.focusAssetInHistory(assetID: assetID) }
+            } label: {
+                Image(systemName: "scope")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
+            .accessibilityLabel("Focus")
+        } else {
+            Button {
+                Task { await model.focusAssetInHistory(assetID: assetID) }
+            } label: {
+                Image(systemName: "scope")
+                    .font(.title3)
+                    .foregroundStyle(palette.buttonLabelOnColor)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .background(palette.historyButtonColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityLabel("Focus")
         }
-        .buttonStyle(.plain)
-        .background(palette.historyButtonColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityLabel("Focus")
     }
 
+    @ViewBuilder
     private func kenBurnsButton() -> some View {
         let palette = model.palette
 
-        return Button {
-            kenBurnsMoveActive.toggle()
-        } label: {
-            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                .font(.title3)
-                .foregroundStyle(palette.buttonLabelOnColor)
-                .frame(width: 44, height: 44)
+        if usesSubtleButtons {
+            let isDark = (model.theme == .dark)
+            let activeFill: Color = isDark ? Color.white.opacity(0.14) : Color.black.opacity(0.30)
+
+            Button {
+                kenBurnsMoveActive.toggle()
+            } label: {
+                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(
+                AlbumSubtleChromeButtonStyle(
+                    isDark: isDark,
+                    horizontalPadding: 0,
+                    verticalPadding: 0,
+                    cornerRadius: 12,
+                    fill: kenBurnsMoveActive ? activeFill : nil
+                )
+            )
+            .accessibilityLabel(kenBurnsMoveActive ? "Move On" : "Move")
+        } else {
+            Button {
+                kenBurnsMoveActive.toggle()
+            } label: {
+                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                    .font(.title3)
+                    .foregroundStyle(palette.buttonLabelOnColor)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .background(
+                (kenBurnsMoveActive ? palette.readButtonColor : palette.copyButtonFill),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .accessibilityLabel(kenBurnsMoveActive ? "Move On" : "Move")
         }
-        .buttonStyle(.plain)
-        .background(
-            (kenBurnsMoveActive ? palette.readButtonColor : palette.copyButtonFill),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-        )
-        .accessibilityLabel(kenBurnsMoveActive ? "Move On" : "Move")
     }
 
+    @ViewBuilder
     private func clipperButton(itemID: UUID, assetID: String) -> some View {
         let palette = model.palette
 
-        return Button {
-            isClipperPresented = true
-        } label: {
-            Image(systemName: "scissors")
-                .font(.title3)
-                .foregroundStyle(palette.buttonLabelOnColor)
-                .frame(width: 44, height: 44)
-        }
-        .buttonStyle(.plain)
-        .background(palette.copyButtonFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityLabel("Clip")
-        .sheet(isPresented: $isClipperPresented) {
-            AlbumVideoClipperSheet(itemID: itemID, assetID: assetID)
-                .environmentObject(model)
+        if usesSubtleButtons {
+            Button {
+                isClipperPresented = true
+            } label: {
+                Image(systemName: "scissors")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
+            .accessibilityLabel("Clip")
+            .sheet(isPresented: $isClipperPresented) {
+                AlbumVideoClipperSheet(itemID: itemID, assetID: assetID)
+                    .environmentObject(model)
+            }
+        } else {
+            Button {
+                isClipperPresented = true
+            } label: {
+                Image(systemName: "scissors")
+                    .font(.title3)
+                    .foregroundStyle(palette.buttonLabelOnColor)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .background(palette.copyButtonFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityLabel("Clip")
+            .sheet(isPresented: $isClipperPresented) {
+                AlbumVideoClipperSheet(itemID: itemID, assetID: assetID)
+                    .environmentObject(model)
+            }
         }
     }
 
@@ -869,10 +974,10 @@ private struct AlbumVideoClipperSheet: View {
 
             HStack(spacing: 12) {
                 Button("Cancel") { dismiss() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
 
                 Button("Apply") { apply() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
                     .disabled(durationSeconds <= 0)
             }
 

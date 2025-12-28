@@ -2,6 +2,48 @@ import SwiftUI
 import UIKit
 import Darwin
 
+struct AlbumSubtleChromeButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    let isDark: Bool
+    let horizontalPadding: CGFloat
+    let verticalPadding: CGFloat
+    let cornerRadius: CGFloat
+    let fillOverride: Color?
+
+    init(
+        isDark: Bool,
+        horizontalPadding: CGFloat = 12,
+        verticalPadding: CGFloat = 8,
+        cornerRadius: CGFloat = 10,
+        fill: Color? = nil
+    ) {
+        self.isDark = isDark
+        self.horizontalPadding = horizontalPadding
+        self.verticalPadding = verticalPadding
+        self.cornerRadius = cornerRadius
+        self.fillOverride = fill
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        let fill: Color = fillOverride ?? (isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.22))
+        let border: Color = Color.white.opacity(configuration.isPressed ? 0.55 : 0.40)
+        let disabledOpacity: Double = isEnabled ? 1.0 : 0.55
+        let pressedOpacity: Double = configuration.isPressed ? 0.86 : 1.0
+
+        return configuration.label
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(border, lineWidth: 1)
+            )
+            .foregroundStyle(Color.white)
+            .opacity(disabledOpacity * pressedOpacity)
+    }
+}
+
 public struct AlbumControlView: View {
     @EnvironmentObject private var model: AlbumModel
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
@@ -28,51 +70,13 @@ public struct AlbumControlView: View {
     @State private var launched = false
     @State private var presentedSheet: PresentedSheet? = nil
     @State private var immersiveOpenStatus: String? = nil
-	@State private var showQuitConfirmation: Bool = false
-	@State private var showHideConfirmation: Bool = false
-	@State private var pendingHideAssetID: String? = nil
+    @State private var showQuitConfirmation: Bool = false
+    @State private var showHideConfirmation: Bool = false
+    @State private var pendingHideAssetID: String? = nil
 
-	public init() {}
+    public init() {}
 
-	private struct SubtleChromeButtonStyle: ButtonStyle {
-		@Environment(\.isEnabled) private var isEnabled
-
-		let isDark: Bool
-		let horizontalPadding: CGFloat
-		let verticalPadding: CGFloat
-		let cornerRadius: CGFloat
-
-		init(
-			isDark: Bool,
-			horizontalPadding: CGFloat = 12,
-			verticalPadding: CGFloat = 8,
-			cornerRadius: CGFloat = 10
-		) {
-			self.isDark = isDark
-			self.horizontalPadding = horizontalPadding
-			self.verticalPadding = verticalPadding
-			self.cornerRadius = cornerRadius
-		}
-
-		func makeBody(configuration: Configuration) -> some View {
-			let fill: Color = isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.22)
-			let border: Color = Color.white.opacity(configuration.isPressed ? 0.55 : 0.40)
-			let foreground: Color = Color.white.opacity(isEnabled ? 1.0 : 0.55)
-
-			return configuration.label
-				.padding(.horizontal, horizontalPadding)
-				.padding(.vertical, verticalPadding)
-				.background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-				.overlay(
-					RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-						.strokeBorder(border, lineWidth: 1)
-				)
-				.foregroundStyle(foreground)
-				.opacity(configuration.isPressed ? 0.86 : 1.0)
-		}
-	}
-
-	public var body: some View {
+    public var body: some View {
 		let palette = model.palette
 
 		ZStack(alignment: .bottomTrailing) {
@@ -228,7 +232,7 @@ public struct AlbumControlView: View {
 						AlbumLog.ui.info("Reload pressed; loadItems(limit: \(limit), query: \(self.model.selectedQuery.id, privacy: .public))")
 						Task { await model.loadItems(limit: limit, query: model.selectedQuery) }
 					}
-					.buttonStyle(SubtleChromeButtonStyle(isDark: model.theme == .dark))
+                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
 
                     Button {
                         presentedSheet = .fileBrowser
@@ -446,7 +450,7 @@ public struct AlbumControlView: View {
 						Image(systemName: "gearshape.fill")
 							.font(.title3.weight(.semibold))
 					}
-					.buttonStyle(SubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 10, verticalPadding: 8, cornerRadius: 10))
+                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 10, verticalPadding: 8, cornerRadius: 10))
 				}
 			} else {
 				VStack(alignment: .leading, spacing: 8) {
@@ -552,7 +556,7 @@ public struct AlbumControlView: View {
 				Label("Bookmark", systemImage: "bookmark.fill")
 					.labelStyle(.titleAndIcon)
 			}
-			.buttonStyle(SubtleChromeButtonStyle(isDark: model.theme == .dark))
+            .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
 			.disabled(model.currentAssetID == nil)
 
             Button {
@@ -597,7 +601,7 @@ public struct AlbumControlView: View {
 		case .memories:
 			HStack(spacing: 12) {
 				Button("Prev") { model.memoryPrevPage() }
-					.buttonStyle(SubtleChromeButtonStyle(isDark: model.theme == .dark))
+                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
 					.disabled(!model.memoryPrevEnabled)
 
 				Text(model.memoryLabel.isEmpty ? " " : model.memoryLabel)
@@ -606,7 +610,7 @@ public struct AlbumControlView: View {
 					.lineLimit(1)
 
 				Button("Next") { model.memoryNextPage() }
-					.buttonStyle(SubtleChromeButtonStyle(isDark: model.theme == .dark))
+                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
 					.disabled(!model.memoryNextEnabled)
 
 				Spacer(minLength: 0)
@@ -742,7 +746,7 @@ public struct AlbumControlView: View {
 				Image(systemName: "xmark.circle.fill")
 					.font(.title3.weight(.semibold))
 			}
-			.buttonStyle(SubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 14, verticalPadding: 10, cornerRadius: 12))
+            .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 14, verticalPadding: 10, cornerRadius: 12))
 			.confirmationDialog(
 				"Quit Gravitas Album?",
 				isPresented: $showQuitConfirmation,
