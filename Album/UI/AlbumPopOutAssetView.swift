@@ -191,6 +191,8 @@ public struct AlbumMovieDraftView: View {
                     .lineLimit(1)
             }
 
+            AlbumMovieMusicPicker(itemID: itemID)
+
             movieControls(draft: draft, exportableCount: exportableCount)
 
             switch draft.renderState.kind {
@@ -482,5 +484,46 @@ public struct AlbumMovieDraftView: View {
             return String(format: "%d:%02d:%02d", hours, minutes, secs)
         }
         return String(format: "%02d:%02d", minutes, secs)
+    }
+}
+
+private struct AlbumMovieMusicPicker: View {
+    @EnvironmentObject private var model: AlbumModel
+    let itemID: UUID
+
+    var body: some View {
+        let draft = model.poppedItem(for: itemID)?.movie ?? AlbumMovieDraft()
+        let song = draft.effectiveBackgroundSong
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Music")
+                .font(.headline)
+
+            Picker(
+                "Song",
+                selection: Binding(
+                    get: { song },
+                    set: { newValue in
+                        model.updatePoppedItem(itemID) { item in
+                            var movie = item.movie ?? AlbumMovieDraft()
+                            movie.backgroundSong = (newValue == .none) ? nil : newValue
+                            item.movie = movie
+                        }
+                    }
+                )
+            ) {
+                ForEach(AlbumMovieBackgroundSong.allCases) { song in
+                    Text(song.displayName).tag(song)
+                }
+            }
+            .pickerStyle(.menu)
+
+            if song != .none {
+                Text("Note: Selecting a song mutes audio from video clips in the montage.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

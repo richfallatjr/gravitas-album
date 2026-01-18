@@ -68,6 +68,7 @@ public struct AlbumMovieDraft: Sendable, Codable, Hashable {
     public var renderState: AlbumMovieRenderState
     public var artifactRelativePath: String?
     public var artifactMetadata: AlbumMovieArtifactMetadata?
+    public var backgroundSong: AlbumMovieBackgroundSong?
 
     public static func clampedTitle(_ raw: String) -> String {
         if raw.count <= maxTitleCharacters { return raw }
@@ -80,7 +81,8 @@ public struct AlbumMovieDraft: Sendable, Codable, Hashable {
         titleUserEdited: Bool = false,
         renderState: AlbumMovieRenderState = .draft,
         artifactRelativePath: String? = nil,
-        artifactMetadata: AlbumMovieArtifactMetadata? = nil
+        artifactMetadata: AlbumMovieArtifactMetadata? = nil,
+        backgroundSong: AlbumMovieBackgroundSong? = nil
     ) {
         self.draftTitle = draftTitle
         self.draftSubtitle = draftSubtitle
@@ -88,6 +90,13 @@ public struct AlbumMovieDraft: Sendable, Codable, Hashable {
         self.renderState = renderState
         self.artifactRelativePath = artifactRelativePath
         self.artifactMetadata = artifactMetadata
+        self.backgroundSong = backgroundSong
+    }
+}
+
+public extension AlbumMovieDraft {
+    var effectiveBackgroundSong: AlbumMovieBackgroundSong {
+        backgroundSong ?? .none
     }
 }
 

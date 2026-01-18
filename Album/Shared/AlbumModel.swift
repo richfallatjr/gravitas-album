@@ -1931,6 +1931,7 @@ public final class AlbumModel: ObservableObject {
         }
         let title = titleClamped.isEmpty ? "Untitled Movie" : titleClamped
         let subtitle = movieItem.movie?.draftSubtitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let backgroundSong = (movieItem.movie ?? AlbumMovieDraft()).effectiveBackgroundSong
 
         appendMovieStatusLine(itemID: itemID, line: "Analyzing media…")
 
@@ -2044,7 +2045,8 @@ public final class AlbumModel: ObservableObject {
             let request = AlbumMovieExportRequest(
                 title: title,
                 subtitle: subtitle?.isEmpty ?? true ? nil : subtitle,
-                segments: segments
+                segments: segments,
+                backgroundSong: backgroundSong
             )
 
             let result = try await AlbumMovieExportPipeline.export(
@@ -3636,6 +3638,7 @@ private struct AlbumMovieExportRequest {
     let title: String
     let subtitle: String?
     let segments: [AlbumMovieExportSegment]
+    let backgroundSong: AlbumMovieBackgroundSong
 }
 
 private struct AlbumMovieExportResult {
@@ -3800,7 +3803,10 @@ private enum AlbumMovieExportPipeline {
             throw ExportError.failed("Failed to create composition video track")
         }
 
-        let compAudioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+        let includeOriginalVideoAudio = !request.backgroundSong.mutesOriginalVideoAudio
+        let compAudioTrack = includeOriginalVideoAudio
+            ? composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+            : nil
 
         struct SegmentInfo {
             let startTime: CMTime
@@ -3852,7 +3858,8 @@ private enum AlbumMovieExportPipeline {
 
                 try compVideoTrack.insertTimeRange(range, of: track, at: cursor)
 
-                if let audioTracks = try? await asset.loadTracks(withMediaType: .audio),
+                if includeOriginalVideoAudio,
+                   let audioTracks = try? await asset.loadTracks(withMediaType: .audio),
                    let sourceAudio = audioTracks.first,
                    let compAudioTrack {
                     try? compAudioTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
@@ -3875,6 +3882,76 @@ private enum AlbumMovieExportPipeline {
         }
 
         let totalDuration = cursor
+
+        var bgTrackForMix: AVAssetTrack? = nil
+        if request.backgroundSong != .none, let bgURL = request.backgroundSong.resolveURL() {
+            await status("Adding background music…")
+
+            if let compBGAudioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                let bgAsset = AVURLAsset(url: bgURL)
+                if let bgSource = try await bgAsset.loadTracks(withMediaType: .audio).first {
+                    let bgDuration = (try? await bgAsset.load(.duration)) ?? .zero
+
+                    if CMTimeCompare(bgDuration, .zero) > 0, CMTimeCompare(totalDuration, .zero) > 0 {
+                        var bgCursor = CMTime.zero
+                        while CMTimeCompare(bgCursor, totalDuration) < 0 {
+                            let remaining = CMTimeSubtract(totalDuration, bgCursor)
+                            let insertDur = CMTimeMinimum(bgDuration, remaining)
+                            let range = CMTimeRange(start: .zero, duration: insertDur)
+                            try? compBGAudioTrack.insertTimeRange(range, of: bgSource, at: bgCursor)
+                            bgCursor = CMTimeAdd(bgCursor, insertDur)
+                        }
+                    }
+
+                    if !compBGAudioTrack.segments.isEmpty {
+                        bgTrackForMix = compBGAudioTrack
+                    }
+                } else {
+                    await status("Background song has no audio track; continuing without music.")
+                }
+            }
+        } else if request.backgroundSong != .none {
+            await status("Background song missing from bundle; continuing without music.")
+        }
+
+        let audioMix: AVAudioMix? = {
+            guard request.backgroundSong != .none else { return nil }
+            guard let bgTrackForMix else { return nil }
+            guard CMTimeCompare(totalDuration, .zero) > 0 else { return nil }
+
+            var mixParams: [AVAudioMixInputParameters] = []
+
+            if let compAudioTrack, !request.backgroundSong.mutesOriginalVideoAudio, !compAudioTrack.segments.isEmpty {
+                let p = AVMutableAudioMixInputParameters(track: compAudioTrack)
+                p.setVolume(1.0, at: .zero)
+                mixParams.append(p)
+            }
+
+            let targetVol: Float = 1.0
+            let p = AVMutableAudioMixInputParameters(track: bgTrackForMix)
+
+            let fadeIn = CMTime(seconds: 0.25, preferredTimescale: 600)
+            let fadeOut = CMTime(seconds: 0.35, preferredTimescale: 600)
+
+            if CMTimeCompare(fadeIn, .zero) > 0 {
+                let r = CMTimeRange(start: .zero, duration: CMTimeMinimum(fadeIn, totalDuration))
+                p.setVolumeRamp(fromStartVolume: 0.0, toEndVolume: targetVol, timeRange: r)
+            } else {
+                p.setVolume(targetVol, at: .zero)
+            }
+
+            if CMTimeCompare(fadeOut, .zero) > 0, CMTimeCompare(totalDuration, fadeOut) > 0 {
+                let start = CMTimeSubtract(totalDuration, fadeOut)
+                let r = CMTimeRange(start: start, duration: fadeOut)
+                p.setVolumeRamp(fromStartVolume: targetVol, toEndVolume: 0.0, timeRange: r)
+            }
+
+            mixParams.append(p)
+
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = mixParams
+            return mix
+        }()
 
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = renderSize
@@ -3945,6 +4022,7 @@ private enum AlbumMovieExportPipeline {
             exportSession.outputURL = tempOutURL
             exportSession.outputFileType = .mp4
             exportSession.videoComposition = videoComposition
+            exportSession.audioMix = audioMix
             exportSession.shouldOptimizeForNetworkUse = true
 
             let pollTask = Task {
@@ -3991,26 +4069,40 @@ private enum AlbumMovieExportPipeline {
             }
             reader.add(readerVideoOutput)
 
-            let shouldIncludeAudio: Bool = {
-                guard let compAudioTrack else { return false }
-                return !compAudioTrack.segments.isEmpty
+            let audioTracks: [AVAssetTrack] = {
+                var tracks: [AVAssetTrack] = []
+                if let compAudioTrack, !compAudioTrack.segments.isEmpty {
+                    tracks.append(compAudioTrack)
+                }
+                if let bgTrackForMix {
+                    tracks.append(bgTrackForMix)
+                }
+                return tracks
             }()
 
-            var readerAudioOutput: AVAssetReaderTrackOutput? = nil
-            if shouldIncludeAudio, let compAudioTrack {
-                let audioOutput = AVAssetReaderTrackOutput(
-                    track: compAudioTrack,
-                    outputSettings: [
-                        AVFormatIDKey: kAudioFormatLinearPCM,
-                        AVLinearPCMIsFloatKey: false,
-                        AVLinearPCMBitDepthKey: 16,
-                        AVLinearPCMIsNonInterleaved: false,
-                        AVLinearPCMIsBigEndianKey: false,
-                    ]
-                )
-                if reader.canAdd(audioOutput) {
-                    reader.add(audioOutput)
-                    readerAudioOutput = audioOutput
+            let audioOutputSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsNonInterleaved: false,
+                AVLinearPCMIsBigEndianKey: false,
+            ]
+
+            var readerAudioOutput: AVAssetReaderOutput? = nil
+            if !audioTracks.isEmpty {
+                if audioMix != nil || audioTracks.count > 1 {
+                    let audioOutput = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: audioOutputSettings)
+                    audioOutput.audioMix = audioMix
+                    if reader.canAdd(audioOutput) {
+                        reader.add(audioOutput)
+                        readerAudioOutput = audioOutput
+                    }
+                } else {
+                    let audioOutput = AVAssetReaderTrackOutput(track: audioTracks[0], outputSettings: audioOutputSettings)
+                    if reader.canAdd(audioOutput) {
+                        reader.add(audioOutput)
+                        readerAudioOutput = audioOutput
+                    }
                 }
             }
 
@@ -4031,12 +4123,12 @@ private enum AlbumMovieExportPipeline {
             writer.add(writerVideoInput)
 
             var writerAudioInput: AVAssetWriterInput? = nil
-            if let readerAudioOutput {
+            if readerAudioOutput != nil {
                 var sampleRate: Double = 44_100
                 var channelCount: Int = 2
 
-                if let compAudioTrack,
-                   let rawDescs = try? await compAudioTrack.load(.formatDescriptions) {
+                if let formatTrack = audioTracks.first,
+                   let rawDescs = try? await formatTrack.load(.formatDescriptions) {
                     for entry in rawDescs {
                         if let desc = entry as? CMAudioFormatDescription,
                            let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc) {

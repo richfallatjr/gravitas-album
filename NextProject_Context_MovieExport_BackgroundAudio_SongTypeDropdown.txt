@@ -1,0 +1,412 @@
+Gravitas Album — Background Audio in Movie Exports (Song Type Dropdown)
+=====================================================================
+
+Goal
+----
+
+Add optional “background music” to exported movies (mp4) and expose a simple UI control
+to choose a song type via a dropdown (SwiftUI Picker).
+
+This document is intentionally copy/paste friendly and includes the minimum set of Swift types
+and AVFoundation patterns needed for an architect to design/size the feature.
+
+
+What we already have (in this repo)
+----------------------------------
+
+Movie generation (square 1080×1080) already exists:
+
+- Export orchestration: `Album/Shared/AlbumModel.swift` (`generateMovie(itemID:)`)
+- Export pipeline: `Album/Shared/AlbumModel.swift` (`AlbumMovieExportPipeline.export`)
+- Movie draft UI: `Album/UI/AlbumPopOutAssetView.swift` (`AlbumMovieDraftView`)
+
+Important: the existing pipeline already adds *source audio* for video segments by inserting
+their audio track into `compAudioTrack` when present.
+
+Background music will be an *additional* audio track in the `AVMutableComposition`, controlled
+via an `AVAudioMix` (volume + fades), and optionally ducked under original video audio.
+
+
+Open decisions (architect input needed)
+--------------------------------------
+
+1) Audio source:
+   - Bundled tracks in app resources (recommended for v1), OR
+   - User-provided files (Files app), OR
+   - Apple Music / streaming (more constraints; not assumed here).
+
+2) Mixing policy:
+   - Replace original video audio, OR
+   - Mix original + background, with configurable ducking.
+
+3) Looping:
+   - Loop the selected track to fill the whole movie, OR
+   - Trim/stop when the track ends.
+
+4) Per-movie vs global:
+   - Store selection on the `AlbumMovieDraft` (per movie), or
+   - Store in `AlbumSettings` (global default for all movies).
+
+
+Minimal data model (per-movie selection)
+---------------------------------------
+
+If you store per-movie selection, the most natural place is `AlbumMovieDraft` in
+`Album/Shared/AlbumSceneStore.swift`.
+
+⚠️ `AlbumMovieDraft` is `Codable` and currently uses synthesized decoding.
+If you add *non-optional* fields, decoding older saved scenes can fail.
+Preferred pattern: store new fields as OPTIONAL, or add a custom `init(from:)` that uses
+`decodeIfPresent` with defaults.
+
+Add these new types (example):
+
+```swift
+import Foundation
+
+enum AlbumMovieSongType: String, Sendable, Codable, CaseIterable, Identifiable {
+    case none
+    case ambient
+    case cinematic
+    case upbeat
+    case mellow
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none: return "None"
+        case .ambient: return "Ambient"
+        case .cinematic: return "Cinematic"
+        case .upbeat: return "Upbeat"
+        case .mellow: return "Mellow"
+        }
+    }
+}
+
+struct AlbumMovieBackgroundAudioSelection: Sendable, Codable, Hashable {
+    var songType: AlbumMovieSongType
+    var volume: Double           // 0...1
+    var fadeInSeconds: Double    // e.g. 0.25
+    var fadeOutSeconds: Double   // e.g. 0.35
+
+    /// If true, keep original video audio and mix background underneath.
+    /// If false, background music becomes the only audio (for videos, skip inserting source audio).
+    var includeOriginalVideoAudio: Bool
+
+    init(
+        songType: AlbumMovieSongType = .none,
+        volume: Double = 0.60,
+        fadeInSeconds: Double = 0.25,
+        fadeOutSeconds: Double = 0.35,
+        includeOriginalVideoAudio: Bool = true
+    ) {
+        self.songType = songType
+        self.volume = volume
+        self.fadeInSeconds = fadeInSeconds
+        self.fadeOutSeconds = fadeOutSeconds
+        self.includeOriginalVideoAudio = includeOriginalVideoAudio
+    }
+}
+```
+
+Then extend `AlbumMovieDraft` (optional field to keep decoding safe):
+
+```swift
+public struct AlbumMovieDraft: Sendable, Codable, Hashable {
+    // ...
+    public var backgroundAudio: AlbumMovieBackgroundAudioSelection?
+}
+```
+
+In code that consumes it, always compute an “effective” selection:
+
+```swift
+extension AlbumMovieDraft {
+    var effectiveBackgroundAudio: AlbumMovieBackgroundAudioSelection {
+        backgroundAudio ?? AlbumMovieBackgroundAudioSelection()
+    }
+}
+```
+
+
+UI: dropdown for song type (SwiftUI)
+-----------------------------------
+
+The simplest UI insertion point is `AlbumMovieDraftView` (movie window) in:
+`Album/UI/AlbumPopOutAssetView.swift`.
+
+Example SwiftUI controls (dropdown + toggles):
+
+```swift
+import SwiftUI
+
+private struct AlbumMovieAudioControls: View {
+    @EnvironmentObject private var model: AlbumModel
+    let itemID: UUID
+
+    var body: some View {
+        let draft = model.poppedItem(for: itemID)?.movie ?? AlbumMovieDraft()
+        let effective = draft.effectiveBackgroundAudio
+
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Music")
+                .font(.headline)
+
+            Picker(
+                "Song",
+                selection: Binding(
+                    get: { effective.songType },
+                    set: { newValue in
+                        model.updatePoppedItem(itemID) { item in
+                            var movie = item.movie ?? AlbumMovieDraft()
+                            var audio = movie.backgroundAudio ?? AlbumMovieBackgroundAudioSelection()
+                            audio.songType = newValue
+                            movie.backgroundAudio = audio
+                            item.movie = movie
+                        }
+                    }
+                )
+            ) {
+                ForEach(AlbumMovieSongType.allCases) { songType in
+                    Text(songType.displayName).tag(songType)
+                }
+            }
+            .pickerStyle(.menu) // dropdown
+
+            Toggle(
+                "Keep original video audio",
+                isOn: Binding(
+                    get: { effective.includeOriginalVideoAudio },
+                    set: { newValue in
+                        model.updatePoppedItem(itemID) { item in
+                            var movie = item.movie ?? AlbumMovieDraft()
+                            var audio = movie.backgroundAudio ?? AlbumMovieBackgroundAudioSelection()
+                            audio.includeOriginalVideoAudio = newValue
+                            movie.backgroundAudio = audio
+                            item.movie = movie
+                        }
+                    }
+                )
+            )
+
+            if effective.songType != .none {
+                HStack {
+                    Text("Music volume")
+                    Spacer()
+                    Text("\(effective.volume, specifier: "%.2f")")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(
+                    value: Binding(
+                        get: { effective.volume },
+                        set: { newValue in
+                            model.updatePoppedItem(itemID) { item in
+                                var movie = item.movie ?? AlbumMovieDraft()
+                                var audio = movie.backgroundAudio ?? AlbumMovieBackgroundAudioSelection()
+                                audio.volume = max(0, min(1, newValue))
+                                movie.backgroundAudio = audio
+                                item.movie = movie
+                            }
+                        }
+                    ),
+                    in: 0...1
+                )
+            }
+        }
+    }
+}
+```
+
+Architect note:
+- The above uses `.pickerStyle(.menu)` to force a dropdown-like Picker.
+- The binding writes into the per-movie draft stored in `poppedItem`.
+
+
+Audio asset catalog (bundle-based, v1)
+--------------------------------------
+
+Define a mapping from `AlbumMovieSongType` to an audio resource file in the app bundle.
+Use a single file format (m4a/aac) for simplicity.
+
+```swift
+import Foundation
+
+enum AlbumMovieAudioCatalog {
+    static func audioURL(for songType: AlbumMovieSongType) -> URL? {
+        switch songType {
+        case .none:
+            return nil
+        case .ambient:
+            return Bundle.main.url(forResource: "ambient_01", withExtension: "m4a")
+        case .cinematic:
+            return Bundle.main.url(forResource: "cinematic_01", withExtension: "m4a")
+        case .upbeat:
+            return Bundle.main.url(forResource: "upbeat_01", withExtension: "m4a")
+        case .mellow:
+            return Bundle.main.url(forResource: "mellow_01", withExtension: "m4a")
+        }
+    }
+}
+```
+
+If the asset is missing, export should proceed with no background audio (and log status).
+
+
+Export pipeline integration (AVMutableComposition + AVAudioMix)
+--------------------------------------------------------------
+
+Current file: `Album/Shared/AlbumModel.swift`
+Current function: `AlbumMovieExportPipeline.export(request:progress:status:)`
+
+You will add:
+- A background audio selection field on `AlbumMovieExportRequest`.
+- A new composition audio track for background audio.
+- A constructed `AVMutableAudioMix` passed into the export session (and fallback path).
+
+1) Extend the export request:
+
+```swift
+private struct AlbumMovieExportRequest {
+    let title: String
+    let subtitle: String?
+    let segments: [AlbumMovieExportSegment]
+    let backgroundAudio: AlbumMovieBackgroundAudioSelection
+}
+```
+
+Then, when building the request in `AlbumModel.generateMovie(itemID:)`, pass:
+`draft.effectiveBackgroundAudio`.
+
+2) Insert original video audio only when desired:
+
+Locate the spot that currently inserts source audio for a video segment:
+
+```swift
+if let audioTracks = try? await asset.loadTracks(withMediaType: .audio),
+   let sourceAudio = audioTracks.first,
+   let compAudioTrack {
+    try? compAudioTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
+}
+```
+
+Wrap it:
+
+```swift
+if request.backgroundAudio.includeOriginalVideoAudio {
+    // insert as today
+}
+```
+
+3) Add background audio track to the composition:
+
+```swift
+let compBGAudioTrack = composition.addMutableTrack(
+    withMediaType: .audio,
+    preferredTrackID: kCMPersistentTrackID_Invalid
+)
+
+if request.backgroundAudio.songType != .none,
+   let bgURL = AlbumMovieAudioCatalog.audioURL(for: request.backgroundAudio.songType),
+   let compBGAudioTrack {
+    let bgAsset = AVURLAsset(url: bgURL)
+    guard let bgSourceTrack = try await bgAsset.loadTracks(withMediaType: .audio).first else {
+        // status("Background audio missing track; continuing without it")
+        // proceed with no BG audio
+        return
+    }
+
+    let bgDuration = ((try? await bgAsset.load(.duration)) ?? bgAsset.duration)
+    let total = totalDuration
+
+    // Loop bg audio to fill totalDuration:
+    var bgCursor = CMTime.zero
+    while bgCursor < total {
+        let remaining = total - bgCursor
+        let insertDur = min(bgDuration, remaining)
+        let range = CMTimeRange(start: .zero, duration: insertDur)
+        try? compBGAudioTrack.insertTimeRange(range, of: bgSourceTrack, at: bgCursor)
+        bgCursor = bgCursor + insertDur
+        if bgDuration <= .zero { break }
+    }
+}
+```
+
+4) Build an `AVAudioMix` for volumes + fades:
+
+```swift
+func makeAudioMix(
+    originalAudioTrack: AVCompositionTrack?,
+    backgroundAudioTrack: AVCompositionTrack?,
+    totalDuration: CMTime,
+    selection: AlbumMovieBackgroundAudioSelection
+) -> AVAudioMix? {
+    let params: [AVAudioMixInputParameters] = [
+        originalAudioTrack.map { track in
+            let p = AVMutableAudioMixInputParameters(track: track)
+            // If you want to duck original under BG, set volume < 1 here.
+            p.setVolume(1.0, at: .zero)
+            return p
+        },
+        backgroundAudioTrack.map { track in
+            let p = AVMutableAudioMixInputParameters(track: track)
+            let vol = Float(max(0, min(1, selection.volume)))
+
+            let fadeIn = CMTime(seconds: max(0, selection.fadeInSeconds), preferredTimescale: 600)
+            let fadeOut = CMTime(seconds: max(0, selection.fadeOutSeconds), preferredTimescale: 600)
+
+            if fadeIn > .zero {
+                p.setVolumeRamp(fromStartVolume: 0, toEndVolume: vol, timeRange: CMTimeRange(start: .zero, duration: fadeIn))
+            } else {
+                p.setVolume(vol, at: .zero)
+            }
+
+            let endStart = max(.zero, totalDuration - fadeOut)
+            if fadeOut > .zero, endStart < totalDuration {
+                p.setVolumeRamp(fromStartVolume: vol, toEndVolume: 0, timeRange: CMTimeRange(start: endStart, duration: fadeOut))
+            }
+            return p
+        },
+    ].compactMap { $0 }
+
+    guard !params.isEmpty else { return nil }
+    let mix = AVMutableAudioMix()
+    mix.inputParameters = params
+    return mix
+}
+```
+
+5) Apply the mix to export:
+
+In `runExport(attempt:)`:
+
+```swift
+exportSession.audioMix = audioMix
+```
+
+For the reader/writer fallback:
+- If audioMix is needed, prefer `AVAssetReaderAudioMixOutput(audioTracks:audioSettings:)`
+  rather than `AVAssetReaderTrackOutput`, so the mix is applied consistently.
+
+
+UX notes (architect)
+--------------------
+
+- Default should be `.none` (no background audio) to avoid surprising sound.
+- If a background song is selected, show volume slider and “keep original video audio” toggle.
+- Consider a “preview” button that plays the selected track (optional, not required for export).
+
+
+Production checklist
+--------------------
+
+- Validate export with:
+  - photos-only movie (no original audio), + background audio
+  - video-only movie (original audio), background off
+  - video-only movie (original audio), background on + mixing policy on/off
+  - long movie where BG audio must loop
+- Confirm the mp4 has exactly one mixed audio track and plays on target social apps.
+- Ensure added `Codable` fields do not break loading old scenes (make optional or custom decode).
+
