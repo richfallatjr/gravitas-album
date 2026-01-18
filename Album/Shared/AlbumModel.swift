@@ -202,8 +202,8 @@ public final class AlbumModel: ObservableObject {
                     assetLoadLimit: Int = 250,
                     showFacesDebugUI: Bool = true,
                     faceClusterT1: Float = 0.42,
-                    faceClusterT2: Float = 0.50,
-                    faceClusterT3: Float = 0.60,
+                    faceClusterT2: Float = 0.46,
+                    faceClusterT3: Float = 0.50,
                     faceHierarchyRepCap: Int = 8
                 ) {
 		            self.autofillOnThumbUp = autofillOnThumbUp
@@ -241,8 +241,8 @@ public final class AlbumModel: ObservableObject {
                     }
 
                     faceClusterT1 = clamp(try container.decodeIfPresent(Float.self, forKey: .faceClusterT1) ?? 0.42)
-                    let rawT2 = clamp(try container.decodeIfPresent(Float.self, forKey: .faceClusterT2) ?? 0.50)
-                    let rawT3 = clamp(try container.decodeIfPresent(Float.self, forKey: .faceClusterT3) ?? 0.60)
+                    let rawT2 = clamp(try container.decodeIfPresent(Float.self, forKey: .faceClusterT2) ?? 0.46)
+                    let rawT3 = clamp(try container.decodeIfPresent(Float.self, forKey: .faceClusterT3) ?? 0.50)
                     faceClusterT2 = max(faceClusterT1, rawT2)
                     faceClusterT3 = max(faceClusterT2, rawT3)
 
