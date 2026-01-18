@@ -290,7 +290,7 @@ public struct AlbumSettingsSheet: View {
                 model.refreshVisionCoverage()
             }
         }
-        .preferredColorScheme(model.theme == .dark ? .dark : .light)
+        .preferredColorScheme(.dark)
         .foregroundStyle(palette.panelPrimaryText)
     }
 }

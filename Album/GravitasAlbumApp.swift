@@ -19,6 +19,7 @@ struct GravitasAlbumApp: App {
         WindowGroup(id: "album-control") {
             AlbumControlView()
                 .environmentObject(model)
+                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 1080, height: 1140)
         .windowResizability(.contentSize)
@@ -26,6 +27,7 @@ struct GravitasAlbumApp: App {
         WindowGroup(for: AlbumPopOutPayload.self) { binding in
             AlbumPopOutWindowRootView(payload: binding)
                 .environmentObject(model)
+                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 1080, height: 780)
         .restorationBehavior(.disabled)
@@ -33,6 +35,7 @@ struct GravitasAlbumApp: App {
 
         WindowGroup(for: AlbumSharePayload.self) { binding in
             AlbumShareWindowRootView(payload: binding)
+                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 660, height: 660)
         .restorationBehavior(.disabled)
@@ -41,6 +44,7 @@ struct GravitasAlbumApp: App {
         WindowGroup(id: "album-scene-manager") {
             AlbumSceneManagerView()
                 .environmentObject(model)
+                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 630, height: 690)
         .restorationBehavior(.disabled)
@@ -49,6 +53,7 @@ struct GravitasAlbumApp: App {
         ImmersiveSpace(id: "album-space") {
             AlbumImmersiveRootView()
                 .environmentObject(model)
+                .preferredColorScheme(.dark)
         }
         .immersiveEnvironmentBehavior(.coexist)
     }
@@ -196,15 +201,12 @@ private struct AlbumPopOutWindowRootView: View {
 private struct AlbumShareWindowRootView: View {
     @Binding var payload: AlbumSharePayload?
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
 
     init(payload: Binding<AlbumSharePayload?>) {
         self._payload = payload
     }
 
     var body: some View {
-        let isDark = (colorScheme == .dark)
-
         VStack(spacing: 0) {
             HStack {
                 Text(titleText)
@@ -213,7 +215,7 @@ private struct AlbumShareWindowRootView: View {
                 Spacer(minLength: 0)
 
                 Button("Close") { dismiss() }
-                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: isDark))
+                    .buttonStyle(AlbumSubtleChromeButtonStyle())
             }
             .padding(16)
 
@@ -226,7 +228,7 @@ private struct AlbumShareWindowRootView: View {
                             Label("Share", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: isDark))
+                        .buttonStyle(AlbumSubtleChromeButtonStyle())
 
                         Text(payload.url.lastPathComponent)
                             .font(.caption2)

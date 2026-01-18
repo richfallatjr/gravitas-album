@@ -47,8 +47,7 @@ public final class AlbumModel: ObservableObject {
     private let faceEngine: AlbumFaceEngine
     public let oracle: AlbumOracle
 
-    @Published public var theme: AlbumTheme = .dark
-    public var palette: AlbumThemePalette { theme.palette }
+    public var palette: AlbumThemePalette { AlbumTheme.dark.palette }
 
     // MARK: Hub state (required)
 

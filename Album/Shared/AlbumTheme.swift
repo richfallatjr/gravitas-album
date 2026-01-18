@@ -1,7 +1,6 @@
 import SwiftUI
 
-public enum AlbumTheme: String, Codable, CaseIterable, Sendable {
-    case light
+public enum AlbumTheme: String, Codable, Sendable {
     case dark
 
     public var palette: AlbumThemePalette {
@@ -11,56 +10,29 @@ public enum AlbumTheme: String, Codable, CaseIterable, Sendable {
         let toggleAccent = Color(red: 255.0 / 255.0, green: 216.0 / 255.0, blue: 102.0 / 255.0)
         let copyAccent = Color(red: 120.0 / 255.0, green: 220.0 / 255.0, blue: 232.0 / 255.0)
 
-        switch self {
-        case .light:
-            return AlbumThemePalette(
-                cardBackground: Color(.sRGB, white: 1.0, opacity: 1.0),
-                cardBorder: Color.black.opacity(0.08),
-                primaryText: .black,
-                secondaryText: Color(.sRGB, white: 0.35, opacity: 1.0),
-                captionText: Color(.sRGB, white: 0.42, opacity: 1.0),
-                overlayText: Color(.sRGB, white: 0.45, opacity: 1.0),
-                navBackground: Color(.sRGB, white: 0.98, opacity: 0.97),
-                navBorder: Color.black.opacity(0.08),
-                navIconActive: .black,
-                navIconDisabled: .black.opacity(0.35),
-                panelBackground: Color(.sRGB, white: 0.95, opacity: 1.0),
-                panelPrimaryText: .black,
-                panelSecondaryText: Color(.sRGB, white: 0.35, opacity: 1.0),
-                readButtonColor: readAccent,
-                historyButtonColor: historyAccent,
-                openButtonColor: openAccent,
-                toggleFillColor: toggleAccent,
-                toggleIconColor: .white,
-                copyButtonFill: copyAccent,
-                copyIconColor: .black,
-                buttonLabelOnColor: .black
-            )
-        case .dark:
-            return AlbumThemePalette(
-                cardBackground: Color(.sRGB, white: 0.10, opacity: 0.92),
-                cardBorder: Color.white.opacity(0.16),
-                primaryText: .white,
-                secondaryText: Color.white.opacity(0.72),
-                captionText: Color.white.opacity(0.60),
-                overlayText: Color.white.opacity(0.70),
-                navBackground: Color(.sRGB, white: 0.08, opacity: 0.92),
-                navBorder: Color.white.opacity(0.18),
-                navIconActive: .white,
-                navIconDisabled: Color.white.opacity(0.38),
-                panelBackground: Color(.sRGB, white: 0.12, opacity: 0.94),
-                panelPrimaryText: .white,
-                panelSecondaryText: Color.white.opacity(0.72),
-                readButtonColor: readAccent,
-                historyButtonColor: historyAccent,
-                openButtonColor: openAccent,
-                toggleFillColor: toggleAccent,
-                toggleIconColor: .black,
-                copyButtonFill: copyAccent,
-                copyIconColor: .black,
-                buttonLabelOnColor: .black
-            )
-        }
+        return AlbumThemePalette(
+            cardBackground: Color(.sRGB, white: 0.10, opacity: 0.92),
+            cardBorder: Color.white.opacity(0.16),
+            primaryText: .white,
+            secondaryText: Color.white.opacity(0.72),
+            captionText: Color.white.opacity(0.60),
+            overlayText: Color.white.opacity(0.70),
+            navBackground: Color(.sRGB, white: 0.08, opacity: 0.92),
+            navBorder: Color.white.opacity(0.18),
+            navIconActive: .white,
+            navIconDisabled: Color.white.opacity(0.38),
+            panelBackground: Color(.sRGB, white: 0.12, opacity: 0.94),
+            panelPrimaryText: .white,
+            panelSecondaryText: Color.white.opacity(0.72),
+            readButtonColor: readAccent,
+            historyButtonColor: historyAccent,
+            openButtonColor: openAccent,
+            toggleFillColor: toggleAccent,
+            toggleIconColor: .black,
+            copyButtonFill: copyAccent,
+            copyIconColor: .black,
+            buttonLabelOnColor: .black
+        )
     }
 }
 

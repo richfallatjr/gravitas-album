@@ -36,7 +36,7 @@ public struct AlbumPopOutAssetView: View {
                     Label(isPreparingShare ? "Preparing…" : "Share", systemImage: "square.and.arrow.up")
                         .labelStyle(.titleAndIcon)
                 }
-                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
+                .buttonStyle(AlbumSubtleChromeButtonStyle())
                 .disabled(isPreparingShare)
 
                 if let shareStatus, !shareStatus.isEmpty {
@@ -221,7 +221,7 @@ public struct AlbumMovieDraftView: View {
                     Label(isPreparingShare ? "Preparing…" : "Share Movie", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
+                .buttonStyle(AlbumSubtleChromeButtonStyle())
                 .disabled(isPreparingShare)
 
                 if let shareStatus, !shareStatus.isEmpty {
@@ -298,7 +298,7 @@ public struct AlbumMovieDraftView: View {
                 Label("Generate Movie", systemImage: "sparkles.tv")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
+            .buttonStyle(AlbumSubtleChromeButtonStyle())
             .disabled(generateDisabled)
         }
     }

@@ -1,0 +1,1519 @@
+Next Project — Vertical “Square-Top + Caption” Movie Export (1080×1920)
+=====================================================================
+
+Goal
+----
+
+In another app, we want to generate a vertical “story-style” movie from a *specified grouping* and
+*explicit ordering* of Photos assets (typically `PHAsset.localIdentifier`). Each “cut” is 7 seconds.
+
+Visual format requirements:
+
+- Output video: 1080×1920 (vertical).
+- The animated media (photo pans / videos) is rendered *cropped to a square*.
+- That square is placed at the *top* of the vertical frame.
+- The rest of the frame is black.
+- The square gets a “slight” border.
+- The bottom black area displays a provided caption (no animation on the caption).
+
+Interaction requirements:
+
+- For vertically oriented images, the user marks *start* and *end* points in our UI to define the
+  square pan (“Ken Burns”).
+- Title + subtitle are provided, but the user can edit both before export.
+- Export multiple movies in parallel (one movie per grouping).
+- Provide share for the resulting movie(s).
+
+This document is intentionally copy/paste-friendly and includes the core code patterns we use in
+this repo.
+
+
+What this feature is (and isn’t)
+--------------------------------
+
+- This is still “Photos library access” (`Photos` / `PHAsset`); iCloud-only items require network
+  access on the relevant `PHImageRequestOptions` / `PHVideoRequestOptions`.
+- Photos does not give you a stable file path for images. For export, you request image/video data
+  and/or an `AVAsset` and then render/export into your app sandbox.
+
+
+App setup (new project checklist)
+---------------------------------
+
+1) Add usage strings (Info.plist)
+
+- `NSPhotoLibraryUsageDescription` (required if you access `PHAsset` / `PHPhotoLibrary`)
+- If you will *write* to Photos, also add: `NSPhotoLibraryAddUsageDescription`
+
+Note: In this repo we follow the rule “never edit Info.plist without explicit approval”; this file
+only documents what your *other project* needs.
+
+2) Import frameworks
+
+- `Photos`
+- `AVFoundation`
+- `SwiftUI`
+- `QuartzCore` (for caption/border overlay via `CALayer`)
+- `UIKit` (if you use `UIImage` / `UIFont` / `UIGraphicsImageRenderer`)
+
+
+Implementation summary (how Gravitas Album does the similar parts)
+------------------------------------------------------------------
+
+Key behaviors we already have in this repo:
+
+- “Ken Burns” start/end anchors stored as *normalized points* (`CGPoint` in 0…1 space).
+- UI overlay with draggable “S” and “E” handles that clamps to an allowed region so a square crop
+  never leaves the image bounds.
+- A movie export pipeline that:
+  - renders still-image clips (mp4) in parallel via `withThrowingTaskGroup`
+  - assembles a timeline via `AVMutableComposition`
+  - exports via `AVAssetExportSession` (with retry + reader/writer fallback)
+
+Source-of-truth files in this repo:
+
+- Ken Burns UI (start/end points): `Album/UI/AlbumMediaPane.swift` (`AlbumKenBurnsMoveOverlay`)
+- Movie export pipeline: `Album/Shared/AlbumModel.swift` (`AlbumMovieExportPipeline`)
+- Share sheet wrapper: `Album/UI/AlbumShareSheet.swift`
+
+
+Data model (grouping + ordering + pan points)
+---------------------------------------------
+
+At minimum, you need:
+
+- An *ordered list* of asset IDs per movie.
+- Per-photo pan definition: start anchor + end anchor (`CGPoint` normalized).
+- Per-video crop anchor (`CGPoint` normalized) (so “animated images” crop to square).
+- Movie metadata: title, subtitle, caption.
+
+Example minimal model:
+
+```swift
+import Foundation
+import CoreGraphics
+
+struct SquarePan: Sendable, Hashable {
+    var start: CGPoint   // normalized (0…1)
+    var end: CGPoint     // normalized (0…1)
+}
+
+enum MovieCut: Sendable, Hashable {
+    case photo(assetID: String, pan: SquarePan?)
+    case video(assetID: String, cropAnchor: CGPoint?) // normalized (0…1)
+}
+
+struct VerticalMovieRequest: Sendable, Hashable, Identifiable {
+    let id: UUID
+    var title: String
+    var subtitle: String?
+    var caption: String
+    var cuts: [MovieCut]         // ORDER MATTERS (this is the timeline)
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        subtitle: String? = nil,
+        caption: String,
+        cuts: [MovieCut]
+    ) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.caption = caption
+        self.cuts = cuts
+    }
+}
+```
+
+
+UI: Mark start/end points to pan a square crop
+----------------------------------------------
+
+This is a lightly generalized version of `AlbumKenBurnsMoveOverlay` (same math + behavior, but uses
+`@Binding` instead of `AlbumModel`).
+
+1) SquarePanEditor.swift
+------------------------
+
+```swift
+import SwiftUI
+
+#if canImport(UIKit)
+import UIKit
+#endif
+
+struct SquarePan: Sendable, Hashable {
+    var start: CGPoint
+    var end: CGPoint
+}
+
+/// Overlay UI to set start/end anchors for a square crop pan.
+/// - Anchors are normalized (0…1) in the *source image* coordinate space.
+/// - Anchors are clamped to an allowed region so a square crop never exceeds bounds.
+struct SquarePanEditor: View {
+#if canImport(UIKit)
+    let image: UIImage
+#endif
+    @Binding var pan: SquarePan
+
+    @State private var dragging: DragTarget?
+
+    private enum DragTarget { case start, end }
+    private enum HandleShape { case circle, diamond }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let bounds = CGRect(origin: .zero, size: proxy.size)
+
+#if canImport(UIKit)
+            let imgAspect = imageAspectRatio(image: image)
+            let imageRect = fittedRect(container: bounds, imageAspect: imgAspect)
+
+            let imagePixelSize = CGSize(
+                width: image.size.width * image.scale,
+                height: image.size.height * image.scale
+            )
+            let allowedNorm = allowedNormalizedRect(imageSize: imagePixelSize, squareRenderSize: 1080)
+            let allowedRect = rectFromNormalized(allowedNorm, in: imageRect)
+
+            let effective = effectivePan(allowedNorm: allowedNorm)
+            let startPt = pointFromNormalized(effective.start, in: imageRect)
+            let endPt = pointFromNormalized(effective.end, in: imageRect)
+
+            ZStack {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: bounds.width, height: bounds.height)
+
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .path(in: allowedRect)
+                    .stroke(
+                        Color.white.opacity(0.55),
+                        style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [6, 5])
+                    )
+
+                Path { path in
+                    path.move(to: startPt)
+                    path.addLine(to: endPt)
+                }
+                .stroke(Color.white.opacity(0.25), style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [3, 6]))
+
+                if dragging != nil {
+                    thirdsGuides(in: imageRect)
+                        .stroke(Color.white.opacity(0.20), lineWidth: 1)
+                }
+
+                handle(
+                    label: "S",
+                    shape: .circle,
+                    fill: Color(.sRGB, red: 0.15, green: 0.86, blue: 0.93, opacity: 0.95),
+                    center: startPt,
+                    dragTarget: .start,
+                    imageRect: imageRect,
+                    allowedNorm: allowedNorm
+                )
+
+                handle(
+                    label: "E",
+                    shape: .diamond,
+                    fill: Color(.sRGB, red: 0.74, green: 0.26, blue: 0.98, opacity: 0.95),
+                    center: endPt,
+                    dragTarget: .end,
+                    imageRect: imageRect,
+                    allowedNorm: allowedNorm
+                )
+            }
+#else
+            Color.black
+#endif
+        }
+    }
+
+    private func effectivePan(allowedNorm: CGRect) -> SquarePan {
+        let start = clampNormalized(pan.start, to: allowedNorm)
+        let end = clampNormalized(pan.end, to: allowedNorm)
+        return SquarePan(start: start, end: end)
+    }
+
+    private func handle(
+        label: String,
+        shape: HandleShape,
+        fill: Color,
+        center: CGPoint,
+        dragTarget: DragTarget,
+        imageRect: CGRect,
+        allowedNorm: CGRect
+    ) -> some View {
+        let size: CGFloat = 36
+        let hitSize: CGFloat = 56
+
+        return ZStack {
+            switch shape {
+            case .circle:
+                Circle().fill(fill)
+            case .diamond:
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(fill)
+                    .rotationEffect(.degrees(45))
+            }
+
+            Text(label)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.black.opacity(0.78))
+                .rotationEffect(shape == .diamond ? .degrees(-45) : .degrees(0))
+        }
+        .frame(width: size, height: size)
+        .frame(width: hitSize, height: hitSize)
+        .contentShape(Rectangle())
+        .position(center)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    dragging = dragTarget
+                    let norm = normalizedPoint(from: value.location, in: imageRect)
+                    let snapped = snapToThirds(norm, threshold: 0.03)
+                    let clamped = clampNormalized(snapped, to: allowedNorm)
+                    applyAnchor(dragTarget: dragTarget, normalized: clamped)
+                }
+                .onEnded { _ in
+                    dragging = nil
+                }
+        )
+        .shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 2)
+    }
+
+    private func applyAnchor(dragTarget: DragTarget, normalized: CGPoint) {
+        switch dragTarget {
+        case .start:
+            pan = SquarePan(start: normalized, end: pan.end)
+        case .end:
+            pan = SquarePan(start: pan.start, end: normalized)
+        }
+    }
+
+    // MARK: - Geometry helpers (same core logic as Gravitas Album)
+
+#if canImport(UIKit)
+    private func imageAspectRatio(image: UIImage) -> CGFloat {
+        let w = image.size.width
+        let h = image.size.height
+        guard w > 0, h > 0 else { return 1 }
+        return w / h
+    }
+#endif
+
+    private func fittedRect(container: CGRect, imageAspect: CGFloat) -> CGRect {
+        let containerAspect = container.width / max(0.001, container.height)
+
+        if imageAspect > containerAspect {
+            let width = container.width
+            let height = width / max(0.001, imageAspect)
+            let y = container.midY - (height / 2)
+            return CGRect(x: container.minX, y: y, width: width, height: height)
+        } else {
+            let height = container.height
+            let width = height * imageAspect
+            let x = container.midX - (width / 2)
+            return CGRect(x: x, y: container.minY, width: width, height: height)
+        }
+    }
+
+    private func allowedNormalizedRect(imageSize: CGSize, squareRenderSize: Double) -> CGRect {
+        let w = Double(imageSize.width)
+        let h = Double(imageSize.height)
+        guard w > 0, h > 0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+
+        let scale = max(squareRenderSize / w, squareRenderSize / h)
+        let cropSizePx = squareRenderSize / max(0.000_001, scale)
+        let halfX = (cropSizePx / 2) / w
+        let halfY = (cropSizePx / 2) / h
+
+        let minX = min(max(halfX, 0), 0.5)
+        let maxX = max(min(1 - halfX, 1), 0.5)
+        let minY = min(max(halfY, 0), 0.5)
+        let maxY = max(min(1 - halfY, 1), 0.5)
+
+        return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+    }
+
+    private func clampNormalized(_ point: CGPoint, to rect: CGRect) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, rect.minX), rect.maxX),
+            y: min(max(point.y, rect.minY), rect.maxY)
+        )
+    }
+
+    private func snapToThirds(_ point: CGPoint, threshold: CGFloat) -> CGPoint {
+        let thirds: [CGFloat] = [1.0 / 3.0, 2.0 / 3.0]
+        var x = point.x
+        var y = point.y
+
+        for t in thirds {
+            if abs(point.x - t) < threshold { x = t }
+            if abs(point.y - t) < threshold { y = t }
+        }
+        return CGPoint(x: x, y: y)
+    }
+
+    private func normalizedPoint(from location: CGPoint, in rect: CGRect) -> CGPoint {
+        let x = (location.x - rect.minX) / max(0.000_001, rect.width)
+        let y = (location.y - rect.minY) / max(0.000_001, rect.height)
+        return CGPoint(x: x, y: y)
+    }
+
+    private func pointFromNormalized(_ point: CGPoint, in rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.minX + point.x * rect.width, y: rect.minY + point.y * rect.height)
+    }
+
+    private func rectFromNormalized(_ rect: CGRect, in bounds: CGRect) -> CGRect {
+        CGRect(
+            x: bounds.minX + rect.minX * bounds.width,
+            y: bounds.minY + rect.minY * bounds.height,
+            width: rect.width * bounds.width,
+            height: rect.height * bounds.height
+        )
+    }
+
+    private func thirdsGuides(in rect: CGRect) -> Path {
+        Path { path in
+            let x1 = rect.minX + rect.width / 3
+            let x2 = rect.minX + (rect.width * 2 / 3)
+            let y1 = rect.minY + rect.height / 3
+            let y2 = rect.minY + (rect.height * 2 / 3)
+
+            path.move(to: CGPoint(x: x1, y: rect.minY))
+            path.addLine(to: CGPoint(x: x1, y: rect.maxY))
+            path.move(to: CGPoint(x: x2, y: rect.minY))
+            path.addLine(to: CGPoint(x: x2, y: rect.maxY))
+            path.move(to: CGPoint(x: rect.minX, y: y1))
+            path.addLine(to: CGPoint(x: rect.maxX, y: y1))
+            path.move(to: CGPoint(x: rect.minX, y: y2))
+            path.addLine(to: CGPoint(x: rect.maxX, y: y2))
+        }
+    }
+}
+```
+
+
+Movie export: 1080×1920 with square-top media + caption
+------------------------------------------------------
+
+We recommend the same overall pipeline as Gravitas Album:
+
+1) Build segments from your ordered cuts:
+   - For photos: request a reasonably large `UIImage`, convert to `CGImage`, and render a 7-second
+     square clip with pan anchors.
+   - For videos: request an `AVURLAsset` URL and trim/crop it to square for the cut.
+2) Assemble segments via `AVMutableComposition`.
+3) Apply a `AVMutableVideoComposition` that:
+   - sets `renderSize = 1080×1920`
+   - crops/positions each segment into the top square
+   - applies a subtle zoom ramp for videos if desired (optional)
+4) Add a Core Animation overlay (border + caption) via
+   `AVVideoCompositionCoreAnimationTool` (no caption animation).
+5) Export to mp4.
+
+
+2) VerticalSquareTopMovieExportPipeline.swift
+--------------------------------------------
+
+```swift
+import AVFoundation
+import CoreGraphics
+import Photos
+import QuartzCore
+
+#if canImport(UIKit)
+import UIKit
+#endif
+
+enum VerticalSquareTopMovieExportPipeline {
+    static let outputSize = CGSize(width: 1080, height: 1920)
+    static let squareSize = CGSize(width: 1080, height: 1080)
+    static let fps: Int32 = 30
+    static let secondsPerCut: Double = 7.0
+    static let titleCardDurationSeconds: Double = 2.0
+
+    struct SquarePan: Sendable, Hashable {
+        var start: CGPoint
+        var end: CGPoint
+    }
+
+    enum Cut: Sendable, Hashable {
+        case photo(assetID: String, pan: SquarePan?)
+        case video(assetID: String, cropAnchor: CGPoint?)
+    }
+
+    struct Request: Sendable, Hashable {
+        let title: String
+        let subtitle: String?
+        let caption: String
+        let cuts: [Cut] // ORDER MATTERS
+
+        init(title: String, subtitle: String? = nil, caption: String, cuts: [Cut]) {
+            self.title = title
+            self.subtitle = subtitle
+            self.caption = caption
+            self.cuts = cuts
+        }
+    }
+
+    private enum ExportError: Error, LocalizedError {
+        case photosAccessDenied
+        case exportSessionUnavailable
+        case unsupportedOutputType
+        case failed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .photosAccessDenied: return "Photos access is required to export."
+            case .exportSessionUnavailable: return "Movie export session unavailable"
+            case .unsupportedOutputType: return "Movie export does not support mp4 output"
+            case .failed(let message): return message
+            }
+        }
+    }
+
+    static func export(
+        request: Request,
+        includeTitleCard: Bool = true,
+        progress: @escaping @MainActor @Sendable (Double) -> Void,
+        status: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> URL {
+        await status("Requesting Photos access…")
+        await progress(0.02)
+
+        guard await requestPhotosAccessIfNeeded() else {
+            throw ExportError.photosAccessDenied
+        }
+
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw ExportError.failed("Application Support directory unavailable")
+        }
+
+        let moviesDir = appSupport.appendingPathComponent("Movies", isDirectory: true)
+        try fm.createDirectory(at: moviesDir, withIntermediateDirectories: true)
+
+        let safeBase = sanitizeFileBase(request.title)
+        let finalURL = uniqueOutputURL(in: moviesDir, baseName: safeBase, ext: "mp4")
+
+        let tempDir = fm.temporaryDirectory.appendingPathComponent("vertical_movie_\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        // 1) Render title card clip (square), if desired.
+        var titleCardURL: URL? = nil
+        if includeTitleCard {
+            await status("Rendering title card…")
+            await progress(0.06)
+
+#if canImport(UIKit)
+            let titleCardImage = makeSquareTitleCardImage(title: request.title, subtitle: request.subtitle)
+            let url = tempDir.appendingPathComponent("title_card.mp4", isDirectory: false)
+            try await renderImageClip(
+                cgImage: titleCardImage,
+                to: url,
+                durationSeconds: titleCardDurationSeconds,
+                fps: fps,
+                startAnchor: CGPoint(x: 0.5, y: 0.5),
+                endAnchor: CGPoint(x: 0.5, y: 0.5),
+                startZoom: 1.0,
+                endZoom: 1.0
+            )
+            titleCardURL = url
+#else
+            // If UIKit is unavailable, skip title card generation.
+            titleCardURL = nil
+#endif
+        }
+
+        // 2) Resolve cuts into export segments.
+        await status("Analyzing media…")
+        await progress(0.10)
+
+        enum Segment {
+            case image(instanceID: UUID, cgImage: CGImage, pan: SquarePan)
+            case video(instanceID: UUID, url: URL, cropAnchor: CGPoint)
+        }
+
+        var segments: [Segment] = []
+        segments.reserveCapacity(request.cuts.count)
+
+        for cut in request.cuts {
+            switch cut {
+            case .photo(let assetID, let pan):
+                let instanceID = UUID()
+#if canImport(UIKit)
+                guard let uiImage = await requestExportImage(assetID: assetID, targetMaxSide: 2400) else { continue }
+                guard let cg = cgImage(from: uiImage) else { continue }
+
+                let imageSize = CGSize(width: cg.width, height: cg.height)
+                let effective = effectivePan(pan, assetID: assetID, imageSize: imageSize)
+                segments.append(.image(instanceID: instanceID, cgImage: cg, pan: effective))
+#endif
+
+            case .video(let assetID, let cropAnchor):
+                let instanceID = UUID()
+                guard let url = await requestVideoURL(assetID: assetID) else { continue }
+                let effective = await clampVideoCropAnchor(cropAnchor ?? CGPoint(x: 0.5, y: 0.5), assetURL: url)
+                segments.append(.video(instanceID: instanceID, url: url, cropAnchor: effective))
+            }
+        }
+
+        guard !segments.isEmpty else {
+            throw ExportError.failed("No usable media items to export.")
+        }
+
+        // 3) Render all still-image clips (square 1080×1080), in parallel.
+        await status("Rendering image cuts…")
+        await progress(0.14)
+
+        var renderedClipURLByID: [UUID: URL] = [:]
+        renderedClipURLByID.reserveCapacity(segments.count)
+
+        let imageSegments: [(id: UUID, cgImage: CGImage, pan: SquarePan)] = segments.compactMap { seg in
+            if case .image(let id, let cgImage, let pan) = seg { return (id, cgImage, pan) }
+            return nil
+        }
+
+        if !imageSegments.isEmpty {
+            struct ImageJob: Sendable {
+                let index: Int
+                let id: UUID
+                let cgImage: CGImage
+                let pan: SquarePan
+            }
+
+            let jobs = imageSegments.enumerated().map { idx, seg in
+                ImageJob(index: idx, id: seg.id, cgImage: seg.cgImage, pan: seg.pan)
+            }
+
+            let cpuCount = max(1, ProcessInfo.processInfo.activeProcessorCount)
+            let maxConcurrency = min(8, jobs.count, max(1, cpuCount / 2))
+            var nextJobIndex = 0
+            var completedCount = 0
+
+            try await withThrowingTaskGroup(of: (UUID, URL).self) { group in
+                func enqueue(_ job: ImageJob) {
+                    group.addTask {
+                        let url = tempDir.appendingPathComponent("img_\(job.index).mp4", isDirectory: false)
+                        try await renderImageClip(
+                            cgImage: job.cgImage,
+                            to: url,
+                            durationSeconds: secondsPerCut,
+                            fps: fps,
+                            startAnchor: job.pan.start,
+                            endAnchor: job.pan.end,
+                            startZoom: 1.02,
+                            endZoom: 1.06
+                        )
+                        return (job.id, url)
+                    }
+                }
+
+                for _ in 0..<maxConcurrency {
+                    guard nextJobIndex < jobs.count else { break }
+                    enqueue(jobs[nextJobIndex])
+                    nextJobIndex += 1
+                }
+
+                while let (id, url) = try await group.next() {
+                    renderedClipURLByID[id] = url
+                    completedCount += 1
+                    await status("Rendering image cuts (\(completedCount)/\(jobs.count))…")
+                    await progress(0.14 + (0.42 * (Double(completedCount) / Double(max(1, jobs.count)))))
+
+                    if nextJobIndex < jobs.count {
+                        enqueue(jobs[nextJobIndex])
+                        nextJobIndex += 1
+                    }
+                }
+            }
+        }
+
+        // 4) Assemble timeline.
+        await status("Assembling timeline…")
+        await progress(0.60)
+
+        let composition = AVMutableComposition()
+        guard let compVideoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw ExportError.failed("Failed to create composition video track")
+        }
+
+        struct SegmentInfo {
+            let startTime: CMTime
+            let duration: CMTime
+            let sourceTrack: AVAssetTrack
+            let cropAnchor: CGPoint?
+            let zoomStart: CGFloat?
+            let zoomEnd: CGFloat?
+        }
+
+        var infos: [SegmentInfo] = []
+        infos.reserveCapacity(segments.count + 1)
+
+        var cursor = CMTime.zero
+
+        func insertClipAsset(url: URL) async throws {
+            let asset = AVURLAsset(url: url)
+            guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+                throw ExportError.failed("Clip missing video track")
+            }
+            let duration = (try? await asset.load(.duration)) ?? .zero
+            let range = CMTimeRange(start: .zero, duration: duration)
+            try compVideoTrack.insertTimeRange(range, of: track, at: cursor)
+            infos.append(SegmentInfo(startTime: cursor, duration: range.duration, sourceTrack: track, cropAnchor: nil, zoomStart: nil, zoomEnd: nil))
+            cursor = cursor + range.duration
+        }
+
+        if let titleCardURL {
+            try await insertClipAsset(url: titleCardURL)
+        }
+
+        var nextVideoZoomIn = true
+        for seg in segments {
+            switch seg {
+            case .image(let instanceID, _, _):
+                guard let clipURL = renderedClipURLByID[instanceID] else { continue }
+                try await insertClipAsset(url: clipURL)
+
+            case .video(_, let url, let cropAnchor):
+                let asset = AVURLAsset(url: url)
+                guard let track = try await asset.loadTracks(withMediaType: .video).first else { continue }
+                let assetDuration = ((try? await asset.load(.duration)) ?? .zero).seconds
+
+                // Enforce ~7s cuts for videos by default (clamped to available duration).
+                let startSeconds = 0.0
+                let endSeconds = min(startSeconds + secondsPerCut, max(0.5, assetDuration))
+                let durationSeconds = max(0.5, endSeconds - startSeconds)
+
+                let start = CMTime(seconds: startSeconds, preferredTimescale: 600)
+                let dur = CMTime(seconds: durationSeconds, preferredTimescale: 600)
+                let range = CMTimeRange(start: start, duration: dur)
+
+                try compVideoTrack.insertTimeRange(range, of: track, at: cursor)
+
+                let zoomStart: CGFloat = nextVideoZoomIn ? 1.0 : 1.06
+                let zoomEnd: CGFloat = nextVideoZoomIn ? 1.06 : 1.0
+                nextVideoZoomIn.toggle()
+
+                infos.append(SegmentInfo(
+                    startTime: cursor,
+                    duration: range.duration,
+                    sourceTrack: track,
+                    cropAnchor: cropAnchor,
+                    zoomStart: zoomStart,
+                    zoomEnd: zoomEnd
+                ))
+                cursor = cursor + range.duration
+            }
+        }
+
+        let totalDuration = cursor
+
+        // 5) Build vertical video composition: render 1080×1920, but place all media into the top square.
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.renderSize = outputSize
+        videoComposition.frameDuration = CMTime(value: 1, timescale: fps)
+
+        let squareRect = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.width) // TOP square
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: totalDuration)
+
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoTrack)
+
+        for info in infos {
+            let baseTransform = aspectFillTransform(for: info.sourceTrack, targetSize: squareRect.size, cropAnchor: info.cropAnchor)
+            if let zoomStart = info.zoomStart, let zoomEnd = info.zoomEnd {
+                let center = CGPoint(x: squareRect.midX, y: squareRect.midY)
+                let startTransform = zoomTransform(baseTransform, scale: zoomStart, around: center)
+                let endTransform = zoomTransform(baseTransform, scale: zoomEnd, around: center)
+                let range = CMTimeRange(start: info.startTime, duration: info.duration)
+                layerInstruction.setTransformRamp(fromStart: startTransform, toEnd: endTransform, timeRange: range)
+            } else {
+                layerInstruction.setTransform(baseTransform, at: info.startTime)
+            }
+        }
+
+        instruction.layerInstructions = [layerInstruction]
+        videoComposition.instructions = [instruction]
+
+        // 6) Add border + caption overlay (no animation).
+        videoComposition.animationTool = makeBorderAndCaptionOverlay(
+            outputSize: outputSize,
+            squareRect: squareRect,
+            caption: request.caption
+        )
+
+        // 7) Export.
+        await status("Encoding mp4…")
+        await progress(0.70)
+
+        let tempOutURL = tempDir.appendingPathComponent("movie.mp4", isDirectory: false)
+        if fm.fileExists(atPath: tempOutURL.path) {
+            try? fm.removeItem(at: tempOutURL)
+        }
+
+        guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+            throw ExportError.exportSessionUnavailable
+        }
+        guard exportSession.supportedFileTypes.contains(.mp4) else {
+            throw ExportError.unsupportedOutputType
+        }
+
+        exportSession.outputURL = tempOutURL
+        exportSession.outputFileType = .mp4
+        exportSession.videoComposition = videoComposition
+        exportSession.shouldOptimizeForNetworkUse = true
+
+        let pollTask = Task {
+            while exportSession.status == .exporting || exportSession.status == .waiting {
+                await progress(0.70 + (0.28 * max(0, min(1, Double(exportSession.progress)))))
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+        defer { pollTask.cancel() }
+
+        try await export(exportSession)
+
+        await status("Finalizing…")
+        await progress(0.99)
+
+        if fm.fileExists(atPath: finalURL.path) {
+            try? fm.removeItem(at: finalURL)
+        }
+        try fm.moveItem(at: tempOutURL, to: finalURL)
+
+        await progress(1)
+        return finalURL
+    }
+
+    // MARK: - Photos helpers
+
+    private static func requestPhotosAccessIfNeeded() async -> Bool {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .authorized || status == .limited { return true }
+        let newStatus = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        return newStatus == .authorized || newStatus == .limited
+    }
+
+#if canImport(UIKit)
+    private static func requestExportImage(assetID: String, targetMaxSide: CGFloat) async -> UIImage? {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return nil }
+
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+        guard let asset = assets.firstObject else { return nil }
+        guard asset.mediaType == .image else { return nil }
+
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .exact
+        options.version = .current
+        options.isSynchronous = false
+
+        let size = CGSize(width: targetMaxSide, height: targetMaxSide)
+
+        return await withCheckedContinuation { continuation in
+            var didResume = false
+            PHImageManager.default().requestImage(for: asset, targetSize: size, contentMode: .aspectFit, options: options) { image, info in
+                guard !didResume else { return }
+                let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
+                let error = info?[PHImageErrorKey] as? NSError
+                guard !cancelled, error == nil else {
+                    didResume = true
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                guard !isDegraded else { return }
+                didResume = true
+                continuation.resume(returning: image)
+            }
+        }
+    }
+
+    private static func cgImage(from image: UIImage) -> CGImage? {
+        let pixelSize = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        guard pixelSize.width > 0, pixelSize.height > 0 else { return nil }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
+
+        let rendered = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: pixelSize))
+        }
+        return rendered.cgImage
+    }
+#endif
+
+    private static func requestVideoURL(assetID: String) async -> URL? {
+        let id = assetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return nil }
+
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+        guard let asset = assets.firstObject else { return nil }
+        guard asset.mediaType == .video else { return nil }
+
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .automatic
+
+        return await withCheckedContinuation { continuation in
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+                if let urlAsset = avAsset as? AVURLAsset {
+                    continuation.resume(returning: urlAsset.url)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
+    // MARK: - Still rendering (square clips, with ease-in/out pan)
+
+    private static func renderImageClip(
+        cgImage: CGImage,
+        to url: URL,
+        durationSeconds: Double,
+        fps: Int32,
+        startAnchor: CGPoint,
+        endAnchor: CGPoint,
+        startZoom: Double,
+        endZoom: Double
+    ) async throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: url.path) {
+            try? fm.removeItem(at: url)
+        }
+
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(squareSize.width),
+            AVVideoHeightKey: Int(squareSize.height),
+        ]
+
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        input.expectsMediaDataInRealTime = false
+
+        let attrs: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+            kCVPixelBufferWidthKey as String: Int(squareSize.width),
+            kCVPixelBufferHeightKey as String: Int(squareSize.height),
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+        ]
+
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: attrs)
+        guard writer.canAdd(input) else {
+            throw ExportError.failed("Movie clip writer cannot add input")
+        }
+        writer.add(input)
+
+        guard writer.startWriting() else {
+            throw writer.error ?? ExportError.failed("Movie clip writer failed to start")
+        }
+        writer.startSession(atSourceTime: .zero)
+
+        let totalFrames = max(1, Int((durationSeconds * Double(fps)).rounded(.up)))
+        let w = Double(cgImage.width)
+        let h = Double(cgImage.height)
+
+        let baseScale = max(Double(squareSize.width) / w, Double(squareSize.height) / h)
+        let baseCropSize = Double(squareSize.width) / max(0.000_001, baseScale)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+
+        func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
+        func easeInOut(_ t: CGFloat) -> CGFloat {
+            let x = max(0, min(1, t))
+            return x * x * (3 - 2 * x) // smoothstep
+        }
+
+        for frameIndex in 0..<totalFrames {
+            while !input.isReadyForMoreMediaData {
+                try? await Task.sleep(nanoseconds: 2_000_000)
+            }
+
+            guard let pool = adaptor.pixelBufferPool else {
+                throw ExportError.failed("Pixel buffer pool unavailable")
+            }
+
+            var buffer: CVPixelBuffer?
+            let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer)
+            guard status == kCVReturnSuccess, let pixelBuffer = buffer else {
+                throw ExportError.failed("Failed to allocate pixel buffer")
+            }
+
+            CVPixelBufferLockBaseAddress(pixelBuffer, [])
+            defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+
+            let t = totalFrames <= 1 ? CGFloat(0) : CGFloat(frameIndex) / CGFloat(totalFrames - 1)
+            let e = easeInOut(t)
+
+            let anchor = CGPoint(
+                x: lerp(startAnchor.x, endAnchor.x, e),
+                y: lerp(startAnchor.y, endAnchor.y, e)
+            )
+            let zoom = Double(lerp(CGFloat(startZoom), CGFloat(endZoom), e))
+            let cropSize = baseCropSize / max(0.000_001, zoom)
+
+            var cx = Double(anchor.x) * w
+            var cy = Double(anchor.y) * h
+            cx = min(max(cx, cropSize / 2), max(cropSize / 2, w - cropSize / 2))
+            cy = min(max(cy, cropSize / 2), max(cropSize / 2, h - cropSize / 2))
+
+            var originX = cx - (cropSize / 2)
+            var originY = cy - (cropSize / 2)
+            originX = min(max(0, originX), max(0, w - cropSize))
+            originY = min(max(0, originY), max(0, h - cropSize))
+
+            let scale = Double(squareSize.width) / max(0.000_001, cropSize)
+            let originYBottom = (h - cropSize) - originY
+            let drawRect = CGRect(
+                x: -originX * scale,
+                y: -originYBottom * scale,
+                width: w * scale,
+                height: h * scale
+            )
+
+            guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+                throw ExportError.failed("Pixel buffer base address unavailable")
+            }
+
+            let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+            let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            guard let ctx = CGContext(
+                data: baseAddress,
+                width: Int(squareSize.width),
+                height: Int(squareSize.height),
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo
+            ) else {
+                throw ExportError.failed("Failed to create pixel buffer context")
+            }
+
+            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+            ctx.fill(CGRect(origin: .zero, size: squareSize))
+
+            ctx.interpolationQuality = .high
+            ctx.draw(cgImage, in: drawRect)
+
+            let presentationTime = CMTime(value: Int64(frameIndex), timescale: fps)
+            guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
+                throw writer.error ?? ExportError.failed("Failed to append frame")
+            }
+        }
+
+        input.markAsFinished()
+
+        try await withCheckedThrowingContinuation { continuation in
+            writer.finishWriting {
+                if writer.status == .completed {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: writer.error ?? ExportError.failed("Movie clip writer failed"))
+                }
+            }
+        }
+    }
+
+    // MARK: - Crop anchors (same math as Gravitas Album)
+
+    private static func effectivePan(_ pan: SquarePan?, assetID: String, imageSize: CGSize) -> SquarePan {
+        let start = pan?.start ?? CGPoint(x: 0.5, y: 0.5)
+        let end = pan?.end ?? defaultKenBurnsEndAnchor(assetID: assetID)
+        let allowed = allowedKenBurnsNormalizedRect(imageSize: imageSize, squareRenderSize: 1080)
+        return SquarePan(
+            start: clampKenBurnsAnchor(start, to: allowed),
+            end: clampKenBurnsAnchor(end, to: allowed)
+        )
+    }
+
+    private static func clampVideoCropAnchor(_ requested: CGPoint, assetURL: URL) async -> CGPoint {
+        let asset = AVURLAsset(url: assetURL)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first else { return requested }
+
+        let rect = CGRect(origin: .zero, size: track.naturalSize).applying(track.preferredTransform)
+        let orientedSize = CGSize(width: abs(rect.width), height: abs(rect.height))
+        guard orientedSize.width > 0, orientedSize.height > 0 else { return requested }
+
+        let allowed = allowedKenBurnsNormalizedRect(imageSize: orientedSize, squareRenderSize: 1080)
+        return clampKenBurnsAnchor(requested, to: allowed)
+    }
+
+    private static func allowedKenBurnsNormalizedRect(imageSize: CGSize, squareRenderSize: Double) -> CGRect {
+        let w = Double(imageSize.width)
+        let h = Double(imageSize.height)
+        guard w > 0, h > 0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+
+        let scale = max(squareRenderSize / w, squareRenderSize / h)
+        let cropSizePx = squareRenderSize / max(0.000_001, scale)
+        let halfX = (cropSizePx / 2) / w
+        let halfY = (cropSizePx / 2) / h
+
+        let minX = min(max(halfX, 0), 0.5)
+        let maxX = max(min(1 - halfX, 1), 0.5)
+        let minY = min(max(halfY, 0), 0.5)
+        let maxY = max(min(1 - halfY, 1), 0.5)
+
+        return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+    }
+
+    private static func clampKenBurnsAnchor(_ point: CGPoint, to rect: CGRect) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, rect.minX), rect.maxX),
+            y: min(max(point.y, rect.minY), rect.maxY)
+        )
+    }
+
+    private static func defaultKenBurnsEndAnchor(assetID: String) -> CGPoint {
+        let options: [CGPoint] = [
+            CGPoint(x: 1.0 / 3.0, y: 1.0 / 3.0),
+            CGPoint(x: 2.0 / 3.0, y: 1.0 / 3.0),
+            CGPoint(x: 1.0 / 3.0, y: 2.0 / 3.0),
+            CGPoint(x: 2.0 / 3.0, y: 2.0 / 3.0),
+        ]
+        return options[stableHashMod4(assetID)]
+    }
+
+    private static func stableHashMod4(_ input: String) -> Int {
+        var hash: UInt64 = 14695981039346656037
+        for byte in input.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211
+        }
+        return Int(hash % 4)
+    }
+
+    // MARK: - Video composition transforms
+
+    private static func aspectFillTransform(for track: AVAssetTrack, targetSize: CGSize, cropAnchor: CGPoint?) -> CGAffineTransform {
+        let natural = track.naturalSize
+        guard natural.width > 0, natural.height > 0 else { return .identity }
+
+        let preferred = track.preferredTransform
+        let rect = CGRect(origin: .zero, size: natural).applying(preferred)
+        let orientedSize = CGSize(width: abs(rect.width), height: abs(rect.height))
+        guard orientedSize.width > 0, orientedSize.height > 0 else { return .identity }
+
+        let normalize = CGAffineTransform(translationX: -rect.origin.x, y: -rect.origin.y)
+        var transform = preferred.concatenating(normalize)
+
+        let scale = max(targetSize.width / orientedSize.width, targetSize.height / orientedSize.height)
+        transform = transform.concatenating(CGAffineTransform(scaleX: scale, y: scale))
+
+        let scaledSize = CGSize(width: orientedSize.width * scale, height: orientedSize.height * scale)
+
+        func allowedCropRect(source: CGSize, targetSize: CGSize, scale: CGFloat) -> CGRect {
+            let w = Double(source.width)
+            let h = Double(source.height)
+            guard w > 0, h > 0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+
+            let s = Double(targetSize.width)
+            let cropSizePx = s / max(0.000_001, Double(scale))
+            let halfX = (cropSizePx / 2) / w
+            let halfY = (cropSizePx / 2) / h
+
+            let minX = min(max(halfX, 0), 0.5)
+            let maxX = max(min(1 - halfX, 1), 0.5)
+            let minY = min(max(halfY, 0), 0.5)
+            let maxY = max(min(1 - halfY, 1), 0.5)
+
+            return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+        }
+
+        func clamp(_ point: CGPoint, to rect: CGRect) -> CGPoint {
+            CGPoint(
+                x: min(max(point.x, rect.minX), rect.maxX),
+                y: min(max(point.y, rect.minY), rect.maxY)
+            )
+        }
+
+        let requestedAnchor = cropAnchor ?? CGPoint(x: 0.5, y: 0.5)
+        let allowedNorm = allowedCropRect(source: orientedSize, targetSize: targetSize, scale: scale)
+        let anchor = clamp(requestedAnchor, to: allowedNorm)
+
+        let tx = (targetSize.width / 2) - (scaledSize.width * anchor.x)
+        let ty = (targetSize.height / 2) - (scaledSize.height * anchor.y)
+        transform = transform.concatenating(CGAffineTransform(translationX: tx, y: ty))
+        return transform
+    }
+
+    private static func zoomTransform(_ transform: CGAffineTransform, scale: CGFloat, around center: CGPoint) -> CGAffineTransform {
+        var zoom = CGAffineTransform.identity
+        zoom = zoom.translatedBy(x: center.x, y: center.y)
+        zoom = zoom.scaledBy(x: scale, y: scale)
+        zoom = zoom.translatedBy(x: -center.x, y: -center.y)
+        return transform.concatenating(zoom)
+    }
+
+    // MARK: - Overlay (border + caption)
+
+    private static func makeBorderAndCaptionOverlay(
+        outputSize: CGSize,
+        squareRect: CGRect,
+        caption: String
+    ) -> AVVideoCompositionCoreAnimationTool? {
+#if canImport(UIKit)
+        let parent = CALayer()
+        parent.frame = CGRect(origin: .zero, size: outputSize)
+        parent.backgroundColor = UIColor.black.cgColor
+
+        let videoLayer = CALayer()
+        videoLayer.frame = parent.bounds
+        parent.addSublayer(videoLayer)
+
+        let overlay = CALayer()
+        overlay.frame = parent.bounds
+        parent.addSublayer(overlay)
+
+        let border = CAShapeLayer()
+        border.frame = overlay.bounds
+        border.path = UIBezierPath(rect: squareRect).cgPath
+        border.strokeColor = UIColor.white.withAlphaComponent(0.14).cgColor
+        border.fillColor = UIColor.clear.cgColor
+        border.lineWidth = 2
+        overlay.addSublayer(border)
+
+        let trimmed = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            let captionRect = CGRect(
+                x: 0,
+                y: squareRect.maxY,
+                width: outputSize.width,
+                height: outputSize.height - squareRect.maxY
+            )
+
+            let padX: CGFloat = 84
+            let padY: CGFloat = 72
+            let textFrame = captionRect.insetBy(dx: padX, dy: padY)
+
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 46, weight: .regular),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.92),
+                .paragraphStyle: paragraph,
+            ]
+
+            let textLayer = CATextLayer()
+            textLayer.frame = textFrame
+            textLayer.isWrapped = true
+            textLayer.alignmentMode = .center
+            textLayer.contentsScale = UIScreen.main.scale
+            textLayer.string = NSAttributedString(string: trimmed, attributes: attrs)
+            overlay.addSublayer(textLayer)
+        }
+
+        return AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parent)
+#else
+        return nil
+#endif
+    }
+
+    // MARK: - Export helpers
+
+    private static func export(_ session: AVAssetExportSession) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            session.exportAsynchronously {
+                switch session.status {
+                case .completed:
+                    continuation.resume()
+                case .failed:
+                    continuation.resume(throwing: session.error ?? ExportError.failed("Export failed"))
+                case .cancelled:
+                    continuation.resume(throwing: ExportError.failed("Export cancelled"))
+                default:
+                    continuation.resume(throwing: session.error ?? ExportError.failed("Export failed"))
+                }
+            }
+        }
+    }
+
+    private static func sanitizeFileBase(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Movie" }
+
+        let allowed = CharacterSet.alphanumerics.union(.whitespaces)
+        let filtered = trimmed.unicodeScalars.map { allowed.contains($0) ? Character($0) : " " }
+        let squashed = String(filtered)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let underscored = squashed.replacingOccurrences(of: " ", with: "_")
+        if underscored.isEmpty { return "Movie" }
+        return String(underscored.prefix(64))
+    }
+
+    private static func uniqueOutputURL(in dir: URL, baseName: String, ext: String) -> URL {
+        let fm = FileManager.default
+        let base = baseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Movie" : baseName
+        var candidate = dir.appendingPathComponent("\(base).\(ext)", isDirectory: false)
+        if !fm.fileExists(atPath: candidate.path) { return candidate }
+
+        for n in 2...999 {
+            let name = "\(base)-\(n).\(ext)"
+            candidate = dir.appendingPathComponent(name, isDirectory: false)
+            if !fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+
+        return dir.appendingPathComponent("\(base)-\(UUID().uuidString).\(ext)", isDirectory: false)
+    }
+
+#if canImport(UIKit)
+    private static func makeSquareTitleCardImage(title: String, subtitle: String?) -> CGImage {
+        let width = Int(squareSize.width)
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: squareSize, format: format)
+
+        let image = renderer.image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(origin: .zero, size: squareSize))
+
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+
+            let titleFont = UIFont.systemFont(ofSize: 72, weight: .semibold)
+            let subtitleFont = UIFont.systemFont(ofSize: 34, weight: .regular)
+
+            let titleAttrs: [NSAttributedString.Key: Any] = [
+                .font: titleFont,
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraph,
+            ]
+
+            let subtitleAttrs: [NSAttributedString.Key: Any] = [
+                .font: subtitleFont,
+                .foregroundColor: UIColor.white.withAlphaComponent(0.82),
+                .paragraphStyle: paragraph,
+            ]
+
+            let safeTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let subtitleText = subtitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            let titleRect = CGRect(x: 80, y: 420, width: width - 160, height: 160)
+            (safeTitle as NSString).draw(in: titleRect, withAttributes: titleAttrs)
+
+            if !subtitleText.isEmpty {
+                let subtitleRect = CGRect(x: 120, y: 560, width: width - 240, height: 90)
+                (subtitleText as NSString).draw(in: subtitleRect, withAttributes: subtitleAttrs)
+            }
+        }
+
+        return image.cgImage!
+    }
+#endif
+}
+```
+
+
+Parallel processing (multiple movies at once)
+---------------------------------------------
+
+If you have multiple groupings (one movie per grouping), export them in parallel with a concurrency
+cap (AVFoundation encoding is CPU heavy).
+
+```swift
+func exportAll(_ requests: [VerticalSquareTopMovieExportPipeline.Request]) async throws -> [URL] {
+    let cpuCount = max(1, ProcessInfo.processInfo.activeProcessorCount)
+    let maxConcurrency = min(3, requests.count, max(1, cpuCount / 2))
+
+    var out: [URL] = []
+    out.reserveCapacity(requests.count)
+
+    try await withThrowingTaskGroup(of: URL.self) { group in
+        var next = 0
+
+        func enqueue(_ req: VerticalSquareTopMovieExportPipeline.Request) {
+            group.addTask {
+                try await VerticalSquareTopMovieExportPipeline.export(
+                    request: req,
+                    progress: { _ in },
+                    status: { _ in }
+                )
+            }
+        }
+
+        for _ in 0..<maxConcurrency {
+            guard next < requests.count else { break }
+            enqueue(requests[next])
+            next += 1
+        }
+
+        while let url = try await group.next() {
+            out.append(url)
+            if next < requests.count {
+                enqueue(requests[next])
+                next += 1
+            }
+        }
+    }
+
+    return out
+}
+```
+
+
+Share the exported movie
+------------------------
+
+Reuse the same pattern as `Album/UI/AlbumShareSheet.swift`:
+
+```swift
+import SwiftUI
+
+#if canImport(UIKit)
+import UIKit
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#endif
+```
+
+
+Editing title, subtitle, caption (example export sheet)
+------------------------------------------------------
+
+```swift
+import SwiftUI
+
+struct VerticalMovieExportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title: String
+    @State private var subtitle: String
+    @State private var caption: String
+
+    @State private var isExporting = false
+    @State private var status = ""
+    @State private var progress: Double = 0
+    @State private var exportedURL: URL?
+    @State private var errorMessage: String?
+#if canImport(UIKit)
+    @State private var showShareSheet = false
+#endif
+
+    let cuts: [VerticalSquareTopMovieExportPipeline.Cut]
+
+    init(title: String, subtitle: String = "", caption: String, cuts: [VerticalSquareTopMovieExportPipeline.Cut]) {
+        _title = State(initialValue: title)
+        _subtitle = State(initialValue: subtitle)
+        _caption = State(initialValue: caption)
+        self.cuts = cuts
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Text") {
+                    TextField("Title", text: $title)
+                    TextField("Subtitle", text: $subtitle)
+                    TextField("Caption", text: $caption, axis: .vertical)
+                        .lineLimit(3...8)
+                }
+
+                if isExporting {
+                    Section("Export") {
+                        ProgressView(value: progress)
+                        Text(status).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                if let url = exportedURL {
+                    Section("Result") {
+                        Text(url.lastPathComponent).font(.caption)
+#if canImport(UIKit)
+                        Button("Share") { showShareSheet = true }
+                            .sheet(isPresented: $showShareSheet) {
+                                if let url = exportedURL {
+                                    ShareSheet(items: [url])
+                                }
+                            }
+#endif
+                    }
+                }
+
+                if let errorMessage {
+                    Section("Error") {
+                        Text(errorMessage).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Export Movie")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isExporting ? "Exporting…" : "Export") {
+                        Task { await export() }
+                    }
+                    .disabled(isExporting)
+                }
+            }
+        }
+    }
+
+    private func export() async {
+        isExporting = true
+        exportedURL = nil
+        errorMessage = nil
+        status = "Starting…"
+        progress = 0
+
+        do {
+            let req = VerticalSquareTopMovieExportPipeline.Request(
+                title: title,
+                subtitle: subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : subtitle,
+                caption: caption,
+                cuts: cuts
+            )
+
+            let url = try await VerticalSquareTopMovieExportPipeline.export(
+                request: req,
+                progress: { progress = $0 },
+                status: { status = $0 }
+            )
+            exportedURL = url
+        } catch {
+            errorMessage = String(describing: error)
+        }
+
+        isExporting = false
+    }
+}
+```
+
+
+Gotchas / production notes
+--------------------------
+
+- `limited` Photos auth is a valid success state; you only see assets the user allowed.
+- iCloud-only assets require `isNetworkAccessAllowed = true` (images + video).
+- Cap concurrency for exports and image rendering; encoding is CPU/memory heavy.
+- If you see sporadic export session failures, copy the retry + reader/writer fallback logic from:
+  `Album/Shared/AlbumModel.swift` (`AlbumMovieExportPipeline.export`).
+- Per-cut captions are a different design (caption overlay would need to change per time range);
+  easiest is “one caption per movie” as shown above.

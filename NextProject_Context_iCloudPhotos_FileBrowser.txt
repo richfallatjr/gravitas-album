@@ -1,0 +1,413 @@
+Next Project — iCloud Photos “File Browser” (SwiftUI + Photos.framework)
+======================================================================
+
+Goal
+----
+
+In another app, we want to “tap into iCloud Photos” the same way Gravitas Album does: open a sheet
+that looks/behaves like our in-app file browser, and show the *latest* assets first (newest →
+oldest). Tapping a tile selects the asset (typically via `PHAsset.localIdentifier`).
+
+This document is intentionally copy/paste-friendly and includes the core code patterns we use in this
+repo.
+
+
+What “iCloud Photos access” actually means (Apple Photos)
+---------------------------------------------------------
+
+- There is no separate “iCloud Photos API”. You browse the user’s Photos library via `Photos` /
+  `PHAsset`.
+- Assets may be local or “in iCloud only”. To make thumbnails/full-res content download when needed,
+  you must set `PHImageRequestOptions.isNetworkAccessAllowed = true` (and similarly for video).
+
+
+App setup (new project checklist)
+---------------------------------
+
+1) Add usage strings (Info.plist)
+
+- `NSPhotoLibraryUsageDescription` (required if you access `PHAsset` / `PHPhotoLibrary`)
+- If you will *write* to Photos, also add: `NSPhotoLibraryAddUsageDescription`
+
+Note: In this repo we follow the rule “never edit Info.plist without explicit approval”; this file
+only documents what your *other project* needs.
+
+2) Import frameworks
+
+- `Photos`
+- `SwiftUI`
+- `UIKit` (only if you render thumbnails as `UIImage` in SwiftUI)
+
+
+Implementation summary (how Gravitas Album does it)
+--------------------------------------------------
+
+Key behaviors:
+
+- Request Photos authorization (`authorized` or `limited` are OK).
+- Fetch assets sorted by `creationDate` descending (latest first).
+- Render a grid of square thumbnails using `PHCachingImageManager`.
+- Allow network downloads so iCloud-only assets can appear.
+- Cancel thumbnail requests when tiles disappear.
+
+The “source of truth” in this repo:
+
+- `Album/UI/AlbumFileBrowserViewModel.swift`
+- `Album/UI/AlbumFileBrowserSheet.swift`
+- `Album/UI/AlbumFileBrowserAssetTile.swift`
+
+
+Drop-in code for another project (minimal + generic)
+----------------------------------------------------
+
+Use the following three Swift files in the new project. They are a lightly generalized version of
+Gravitas Album’s implementation (same core logic, but uses a closure instead of `AlbumModel`).
+
+
+1) PhotoBrowserViewModel.swift
+-----------------------------
+
+```swift
+import Foundation
+import Photos
+
+@MainActor
+final class PhotoBrowserViewModel: ObservableObject {
+    let imageManager = PHCachingImageManager()
+
+    private var fetchResult: PHFetchResult<PHAsset>?
+
+    @Published private(set) var isLoading: Bool = false
+    @Published private(set) var errorMessage: String?
+
+    var count: Int { fetchResult?.count ?? 0 }
+
+    func asset(at index: Int) -> PHAsset? {
+        guard let fetchResult, index >= 0, index < fetchResult.count else { return nil }
+        return fetchResult.object(at: index)
+    }
+
+    /// Loads the newest assets first.
+    /// - Parameters:
+    ///   - fetchLimit: Optional cap to keep UI fast (ex: 500).
+    ///   - excludingAssetIDs: Optional localIdentifiers to exclude (ex: hidden/history).
+    func loadLatest(fetchLimit: Int? = nil, excludingAssetIDs: Set<String> = []) async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        imageManager.stopCachingImagesForAllAssets()
+
+        let canReadPhotos = await requestPhotosAccessIfNeeded()
+        guard canReadPhotos else {
+            fetchResult = nil
+            errorMessage = "Photos access is required to browse."
+            return
+        }
+
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        if let fetchLimit, fetchLimit > 0 { options.fetchLimit = fetchLimit }
+
+        let trimmedHiddenIDs = excludingAssetIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if !trimmedHiddenIDs.isEmpty, trimmedHiddenIDs.count <= 512 {
+            options.predicate = NSPredicate(format: "NOT (localIdentifier IN %@)", trimmedHiddenIDs)
+        }
+
+        let result = PHAsset.fetchAssets(with: options)
+        fetchResult = result
+        errorMessage = nil
+
+        // Warm the cache for the first page so the grid draws quickly.
+        let initialCount = min(result.count, 200)
+        if initialCount > 0 {
+            var assets: [PHAsset] = []
+            assets.reserveCapacity(initialCount)
+            for idx in 0..<initialCount { assets.append(result.object(at: idx)) }
+
+            let targetSize = CGSize(width: 240, height: 240)
+            imageManager.startCachingImages(
+                for: assets,
+                targetSize: targetSize,
+                contentMode: .aspectFill,
+                options: nil
+            )
+        }
+    }
+
+    private func requestPhotosAccessIfNeeded() async -> Bool {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .authorized || status == .limited { return true }
+
+        let newStatus = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        return newStatus == .authorized || newStatus == .limited
+    }
+}
+```
+
+
+2) PhotoBrowserSheet.swift
+-------------------------
+
+```swift
+import Photos
+import SwiftUI
+
+struct PhotoBrowserSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @StateObject private var vm = PhotoBrowserViewModel()
+
+    let title: String
+    let onPick: (PHAsset) -> Void
+
+    private let columns: [GridItem] = Array(repeating: .init(.flexible(), spacing: 4), count: 5)
+
+    init(title: String = "Photos", onPick: @escaping (PHAsset) -> Void) {
+        self.title = title
+        self.onPick = onPick
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let error = vm.errorMessage {
+                    ContentUnavailableView(
+                        "Photos unavailable",
+                        systemImage: "photo.on.rectangle",
+                        description: Text(error)
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if vm.isLoading {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if vm.count == 0 {
+                    ContentUnavailableView(
+                        "No assets",
+                        systemImage: "photo.on.rectangle",
+                        description: Text("Try a different dataset.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 4) {
+                            ForEach(0..<vm.count, id: \.self) { idx in
+                                if let asset = vm.asset(at: idx) {
+                                    Button {
+                                        onPick(asset)
+                                        dismiss()
+                                    } label: {
+                                        PhotoBrowserAssetTile(asset: asset, manager: vm.imageManager)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        .padding(10)
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .task {
+            await vm.loadLatest(fetchLimit: 500)
+        }
+    }
+}
+```
+
+
+3) PhotoBrowserAssetTile.swift
+-----------------------------
+
+```swift
+import Photos
+import SwiftUI
+
+#if canImport(UIKit)
+import UIKit
+#endif
+
+struct PhotoBrowserAssetTile: View {
+    let asset: PHAsset
+    let manager: PHCachingImageManager
+
+#if canImport(UIKit)
+    @State private var image: UIImage?
+#endif
+    @State private var requestID: PHImageRequestID?
+
+    var body: some View {
+        ZStack {
+#if canImport(UIKit)
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Rectangle().fill(.thinMaterial)
+            }
+#else
+            Rectangle().fill(.thinMaterial)
+#endif
+
+            if asset.mediaType == .video {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Image(systemName: "video.fill")
+                            .font(.caption)
+                            .padding(6)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule(style: .continuous))
+                        Spacer()
+                    }
+                    .padding(6)
+                }
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .task(id: asset.localIdentifier) {
+            loadThumbnail()
+        }
+        .onDisappear {
+            cancelRequest()
+#if canImport(UIKit)
+            image = nil
+#endif
+        }
+    }
+
+    private func cancelRequest() {
+        if let requestID {
+            manager.cancelImageRequest(requestID)
+            self.requestID = nil
+        }
+    }
+
+    private func loadThumbnail() {
+        cancelRequest()
+
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .opportunistic
+        options.resizeMode = .fast
+        options.version = .current
+        options.isSynchronous = false
+
+        let targetSize = CGSize(width: 240, height: 240)
+
+        requestID = manager.requestImage(
+            for: asset,
+            targetSize: targetSize,
+            contentMode: .aspectFill,
+            options: options
+        ) { img, info in
+#if canImport(UIKit)
+            let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
+            let error = info?[PHImageErrorKey] as? NSError
+            guard !cancelled, error == nil else { return }
+            guard let img else { return }
+
+            Task { @MainActor in
+                self.image = img
+            }
+#endif
+        }
+    }
+}
+```
+
+
+How to present the sheet (example)
+----------------------------------
+
+```swift
+import Photos
+import SwiftUI
+
+struct ContentView: View {
+    @State private var showBrowser = false
+    @State private var pickedAssetID: String?
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Button("Browse Photos") { showBrowser = true }
+
+            if let pickedAssetID {
+                Text("Picked: \(pickedAssetID)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .sheet(isPresented: $showBrowser) {
+            PhotoBrowserSheet { asset in
+                // Store localIdentifier; resolve it later as needed.
+                pickedAssetID = asset.localIdentifier
+            }
+        }
+    }
+}
+```
+
+
+Loading full-resolution data (when you actually need pixels)
+-----------------------------------------------------------
+
+Important: Photos does not give you a stable “file path” into the library. You request image/video
+data and/or export it to your own app sandbox.
+
+Example: Full-res image data (downloads from iCloud if needed)
+
+```swift
+import Photos
+
+func requestFullImageData(for asset: PHAsset) async throws -> Data {
+    try await withCheckedThrowingContinuation { continuation in
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .none
+        options.isSynchronous = false
+
+        PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
+            let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
+            let error = info?[PHImageErrorKey] as? NSError
+            if cancelled { return }
+            if let error { continuation.resume(throwing: error); return }
+            guard let data else {
+                continuation.resume(throwing: NSError(domain: "PhotoBrowser", code: -1))
+                return
+            }
+            continuation.resume(returning: data)
+        }
+    }
+}
+```
+
+
+Gotchas / production notes
+--------------------------
+
+- `limited` auth is a valid “success” state; you only see assets the user allowed.
+- Some assets can have missing `creationDate`; the sort descriptor still works, but be aware of edge
+  cases.
+- iCloud-only assets may take time to appear; `isNetworkAccessAllowed = true` is required.
+- Avoid fetching/caching too aggressively; use `fetchLimit` and thumbnail target sizes appropriate to
+  your UI.
+

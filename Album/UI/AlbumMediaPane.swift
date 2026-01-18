@@ -199,7 +199,7 @@ public struct AlbumMediaPane: View {
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 10))
+                .buttonStyle(AlbumSubtleChromeButtonStyle(horizontalPadding: 0, verticalPadding: 0, cornerRadius: 10))
             } else {
                 Button {
                     model.currentAssetID = nextID
@@ -269,7 +269,7 @@ public struct AlbumMediaPane: View {
                         .font(.title3)
                         .frame(width: 44, height: 44)
                 }
-                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
+                .buttonStyle(AlbumSubtleChromeButtonStyle(horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
 
                 Button {
                     model.sendThumb(.down, assetID: assetID)
@@ -278,7 +278,7 @@ public struct AlbumMediaPane: View {
                         .font(.title3)
                         .frame(width: 44, height: 44)
                 }
-                .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
+                .buttonStyle(AlbumSubtleChromeButtonStyle(horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
             }
         } else {
             HStack(alignment: .center, spacing: 10) {
@@ -336,7 +336,7 @@ public struct AlbumMediaPane: View {
                     .font(.title3)
                     .frame(width: 44, height: 44)
             }
-            .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
+            .buttonStyle(AlbumSubtleChromeButtonStyle(horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
             .accessibilityLabel("Focus")
         } else {
             Button {
@@ -358,8 +358,7 @@ public struct AlbumMediaPane: View {
         let palette = model.palette
 
         if usesSubtleButtons {
-            let isDark = (model.theme == .dark)
-            let activeFill: Color = isDark ? Color.white.opacity(0.14) : Color.black.opacity(0.30)
+            let activeFill: Color = Color.white.opacity(0.14)
 
             Button {
                 kenBurnsMoveActive.toggle()
@@ -370,7 +369,6 @@ public struct AlbumMediaPane: View {
             }
             .buttonStyle(
                 AlbumSubtleChromeButtonStyle(
-                    isDark: isDark,
                     horizontalPadding: 0,
                     verticalPadding: 0,
                     cornerRadius: 12,
@@ -408,7 +406,7 @@ public struct AlbumMediaPane: View {
                     .font(.title3)
                     .frame(width: 44, height: 44)
             }
-            .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark, horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
+            .buttonStyle(AlbumSubtleChromeButtonStyle(horizontalPadding: 0, verticalPadding: 0, cornerRadius: 12))
             .accessibilityLabel("Clip")
             .sheet(isPresented: $isClipperPresented) {
                 AlbumVideoClipperSheet(itemID: itemID, assetID: assetID)
@@ -974,10 +972,10 @@ private struct AlbumVideoClipperSheet: View {
 
             HStack(spacing: 12) {
                 Button("Cancel") { dismiss() }
-                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
+                    .buttonStyle(AlbumSubtleChromeButtonStyle())
 
                 Button("Apply") { apply() }
-                    .buttonStyle(AlbumSubtleChromeButtonStyle(isDark: model.theme == .dark))
+                    .buttonStyle(AlbumSubtleChromeButtonStyle())
                     .disabled(durationSeconds <= 0)
             }
 
