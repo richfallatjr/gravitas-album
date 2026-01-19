@@ -145,6 +145,8 @@ public final class AlbumModel: ObservableObject {
                 currentItem = nil
             }
             isSyncingSelection = false
+
+            syncCurvedWallToCurrentAssetIfLoadedLayoutVisible()
         }
     }
 
@@ -356,6 +358,12 @@ public final class AlbumModel: ObservableObject {
     }
 
     private struct CurvedWallOverride: Sendable, Equatable {
+        enum Kind: String, Sendable, Equatable {
+            case faceBucket
+            case loadedItems
+        }
+
+        var kind: Kind
         var title: String
         var assetIDs: [String]
     }
@@ -741,6 +749,7 @@ public final class AlbumModel: ObservableObject {
             lastAssetFetchCount = fetched.count
             items = fetched.filter { !hiddenIDs.contains($0.id) }
             AlbumLog.photos.info("loadAssets fetched: \(fetched.count) filtered: \(self.items.count) hiddenIDs: \(self.hiddenIDs.count)")
+            syncCurvedWallLoadedItemsOverrideIfNeeded(reason: "load_assets")
             if let id = currentAssetID, let item = item(for: id) {
                 currentItem = item
             }
@@ -804,6 +813,7 @@ public final class AlbumModel: ObservableObject {
             if panelMode == .memories {
                 rebuildMemoryWindow(resetToAnchor: memoryWindowItems.isEmpty)
             }
+            syncCurvedWallLoadedItemsOverrideIfNeeded(reason: "load_items")
 
             Task(priority: .background) { [backfillManager] in
                 await backfillManager.bootstrapOnLaunch()
@@ -825,6 +835,7 @@ public final class AlbumModel: ObservableObject {
 
         items = fetched.filter { !hiddenIDs.contains($0.id) }
         AlbumLog.model.info("loadDemoItems loaded: \(self.items.count) hiddenIDs: \(self.hiddenIDs.count)")
+        syncCurvedWallLoadedItemsOverrideIfNeeded(reason: "load_demo_items")
 
         if let id = currentAssetID, let item = item(for: id) {
             currentItem = item
@@ -1346,7 +1357,7 @@ public final class AlbumModel: ObservableObject {
         }
 
         let title = await faceIndexStore.displayName(for: normalizedFaceID)
-        curvedWallOverride = CurvedWallOverride(title: title.isEmpty ? normalizedFaceID : title, assetIDs: orderedIDs)
+        curvedWallOverride = CurvedWallOverride(kind: .faceBucket, title: title.isEmpty ? normalizedFaceID : title, assetIDs: orderedIDs)
         curvedWallPageWindows[Self.curvedWallOverridePlacementID] = 0
         curvedCanvasEnabled = true
     }
@@ -1393,45 +1404,110 @@ public final class AlbumModel: ObservableObject {
             return a < b
         }
 
-        curvedWallOverride = CurvedWallOverride(title: resolvedTitle, assetIDs: orderedIDs)
+        curvedWallOverride = CurvedWallOverride(kind: .faceBucket, title: resolvedTitle, assetIDs: orderedIDs)
         curvedWallPageWindows[Self.curvedWallOverridePlacementID] = 0
         curvedCanvasEnabled = true
     }
 
     public func dumpFocusedNeighborsToCurvedWall() {
-        curvedWallOverride = nil
-        guard panelMode == .recommends else {
-            AlbumLog.model.info("CurvedWall dump (memories): open anchor=\(self.memoryAnchorID ?? "nil", privacy: .public) window=\(self.memoryWindowItems.count) start=\(self.memoryPageStartIndex) label=\(self.memoryLabel, privacy: .public)")
-            if let placementID = curvedWallPlacementID {
-                let ids = curvedWallMemoriesAllAssetIDs
-                if let anchorID = memoryAnchorID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   let anchorIndex = ids.firstIndex(of: anchorID) {
-                    let starts = curvedWallPageStartIndices(for: ids)
-                    curvedWallPageWindows[placementID] = curvedWallPageIndex(for: anchorIndex, pageStarts: starts)
-                } else {
-                    curvedWallPageWindows[placementID] = 0
-                }
-            }
+        showLoadedItemsInCurvedWall(reason: "layout_pressed", openCanvas: true)
+    }
+
+    private func showLoadedItemsInCurvedWall(reason: String, openCanvas: Bool) {
+        let orderedIDs = orderedLoadedItemIDsForCurvedWall()
+        guard !orderedIDs.isEmpty else {
+            thumbStatusMessage = "No loaded items"
+            return
+        }
+
+        let trimmedTitle = selectedQuery.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmedTitle.isEmpty ? "Loaded" : trimmedTitle
+
+        let anchor = currentAssetID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let anchorIndex = orderedIDs.firstIndex(of: anchor) ?? max(0, orderedIDs.count - 1)
+        let starts = curvedWallPageStartIndices(for: orderedIDs)
+        let page = curvedWallPageIndex(for: anchorIndex, pageStarts: starts)
+
+        curvedWallOverride = CurvedWallOverride(kind: .loadedItems, title: title, assetIDs: orderedIDs)
+        curvedWallPageWindows[Self.curvedWallOverridePlacementID] = page
+        AlbumLog.model.info(
+            "CurvedWall dump (loaded) reason=\(reason, privacy: .public) query=\(self.selectedQuery.id, privacy: .public) items=\(orderedIDs.count) anchorIndex=\(anchorIndex) page=\(page)"
+        )
+
+        if openCanvas {
             curvedCanvasEnabled = true
+        }
+    }
+
+    private func orderedLoadedItemIDsForCurvedWall() -> [String] {
+        let candidates = items.compactMap { item -> (id: String, createdAt: Date)? in
+            let id = item.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else { return nil }
+            guard !hiddenIDs.contains(id) else { return nil }
+            return (id: id, createdAt: item.creationDate ?? .distantPast)
+        }
+
+        guard !candidates.isEmpty else { return [] }
+
+        let sorted = candidates.sorted { a, b in
+            if a.createdAt != b.createdAt { return a.createdAt < b.createdAt }
+            return a.id < b.id
+        }
+
+        var seen: Set<String> = []
+        seen.reserveCapacity(min(sorted.count, 512))
+
+        var ordered: [String] = []
+        ordered.reserveCapacity(sorted.count)
+
+        for entry in sorted {
+            guard seen.insert(entry.id).inserted else { continue }
+            ordered.append(entry.id)
+        }
+
+        return ordered
+    }
+
+    private func syncCurvedWallLoadedItemsOverrideIfNeeded(reason: String) {
+        guard curvedCanvasEnabled else { return }
+        guard curvedWallOverride?.kind == .loadedItems else { return }
+
+        let orderedIDs = orderedLoadedItemIDsForCurvedWall()
+        let trimmedTitle = selectedQuery.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmedTitle.isEmpty ? "Loaded" : trimmedTitle
+
+        if curvedWallOverride?.title != title || curvedWallOverride?.assetIDs != orderedIDs {
+            curvedWallOverride = CurvedWallOverride(kind: .loadedItems, title: title, assetIDs: orderedIDs)
+        }
+
+        guard !orderedIDs.isEmpty else {
+            curvedWallPageWindows[Self.curvedWallOverridePlacementID] = 0
             return
         }
 
-        guard let anchorID = currentAssetID?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !anchorID.isEmpty else {
-            thumbStatusMessage = "No focused asset"
-            return
-        }
+        let anchor = currentAssetID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let anchorIndex = orderedIDs.firstIndex(of: anchor) ?? max(0, orderedIDs.count - 1)
+        let starts = curvedWallPageStartIndices(for: orderedIDs)
+        let page = curvedWallPageIndex(for: anchorIndex, pageStarts: starts)
+        curvedWallPageWindows[Self.curvedWallOverridePlacementID] = page
 
-        if recommendAnchorID != anchorID {
-            restoreCachedRecommendsIfAvailable(for: anchorID)
-        }
+        AlbumLog.model.info(
+            "CurvedWall sync (loaded) reason=\(reason, privacy: .public) items=\(orderedIDs.count) anchorIndex=\(anchorIndex) page=\(page)"
+        )
+    }
 
-        guard recommendAnchorID == anchorID else {
-            thumbStatusMessage = "No neighbors for focused asset"
-            return
-        }
+    private func syncCurvedWallToCurrentAssetIfLoadedLayoutVisible() {
+        guard curvedCanvasEnabled else { return }
+        guard curvedWallOverride?.kind == .loadedItems else { return }
+        guard let orderedIDs = curvedWallOverride?.assetIDs, !orderedIDs.isEmpty else { return }
 
-        dumpRecommendsNeighborsToCurvedWall(anchorID: anchorID, neighborIDs: recommendItems.map(\.id), openCanvas: true, jumpToNewContent: true)
+        let anchor = currentAssetID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !anchor.isEmpty else { return }
+        guard let anchorIndex = orderedIDs.firstIndex(of: anchor) else { return }
+
+        let starts = curvedWallPageStartIndices(for: orderedIDs)
+        let page = curvedWallPageIndex(for: anchorIndex, pageStarts: starts)
+        curvedWallPageWindows[Self.curvedWallOverridePlacementID] = page
     }
 
     private func dumpRecommendsNeighborsToCurvedWall(anchorID: String, neighborIDs rawNeighborIDs: [String], openCanvas: Bool, jumpToNewContent: Bool) {
@@ -2529,6 +2605,8 @@ public final class AlbumModel: ObservableObject {
         if panelMode == .memories {
             rebuildMemoryWindow(resetToAnchor: false)
         }
+
+        syncCurvedWallLoadedItemsOverrideIfNeeded(reason: "hide_asset")
     }
 
     @discardableResult
