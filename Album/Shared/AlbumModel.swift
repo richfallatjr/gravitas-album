@@ -1410,7 +1410,57 @@ public final class AlbumModel: ObservableObject {
     }
 
     public func dumpFocusedNeighborsToCurvedWall() {
-        showLoadedItemsInCurvedWall(reason: "layout_pressed", openCanvas: true)
+        curvedWallOverride = nil
+
+        switch panelMode {
+        case .memories:
+            if let focused = currentAssetID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !focused.isEmpty,
+               memoryAnchorID != focused {
+                memoryAnchorID = focused
+                rebuildMemoryWindow(resetToAnchor: true)
+            }
+
+            AlbumLog.model.info(
+                "CurvedWall dump (memories) anchor=\(self.memoryAnchorID ?? "nil", privacy: .public) window=\(self.memoryWindowItems.count) start=\(self.memoryPageStartIndex) label=\(self.memoryLabel, privacy: .public)"
+            )
+
+            if let placementID = curvedWallPlacementID {
+                let ids = curvedWallMemoriesAllAssetIDs
+                if let anchorID = memoryAnchorID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   let anchorIndex = ids.firstIndex(of: anchorID) {
+                    let starts = curvedWallPageStartIndices(for: ids)
+                    curvedWallPageWindows[placementID] = curvedWallPageIndex(for: anchorIndex, pageStarts: starts)
+                } else {
+                    curvedWallPageWindows[placementID] = 0
+                }
+            }
+
+            curvedCanvasEnabled = true
+
+        case .recommends:
+            guard let anchorID = currentAssetID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !anchorID.isEmpty else {
+                thumbStatusMessage = "No focused asset"
+                return
+            }
+
+            if recommendAnchorID != anchorID {
+                restoreCachedRecommendsIfAvailable(for: anchorID)
+            }
+
+            guard recommendAnchorID == anchorID else {
+                thumbStatusMessage = "No neighbors for focused asset"
+                return
+            }
+
+            dumpRecommendsNeighborsToCurvedWall(
+                anchorID: anchorID,
+                neighborIDs: recommendItems.map(\.id),
+                openCanvas: true,
+                jumpToNewContent: true
+            )
+        }
     }
 
     private func showLoadedItemsInCurvedWall(reason: String, openCanvas: Bool) {

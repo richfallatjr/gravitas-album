@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -158,15 +158,15 @@
 		64FC6A7451CA6F0F50453668 /* AlbumLayoutSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumLayoutSheet.swift; sourceTree = "<group>"; };
 		6891B1BD1CF0068E02767549 /* PeopleTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleTreeView.swift; sourceTree = "<group>"; };
 		6BF2122B71B8B4D1A039B0A2 /* NextProject_Context_PanelSpawning.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = NextProject_Context_PanelSpawning.txt; sourceTree = "<group>"; };
-		74345E0F963CE5EC8C0CACBB /* Sunny_Morning_Montage_2026-01-18T194746.m4a */ = {isa = PBXFileReference; path = "Sunny_Morning_Montage_2026-01-18T194746.m4a"; sourceTree = "<group>"; };
+		74345E0F963CE5EC8C0CACBB /* Sunny_Morning_Montage_2026-01-18T194746.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Sunny_Morning_Montage_2026-01-18T194746.m4a"; sourceTree = "<group>"; };
 		74F51D848557F9C1E8F0B696 /* BubbleBillboardSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleBillboardSystem.swift; sourceTree = "<group>"; };
 		76ABF5D96E49C19E9D6A5F3D /* PhotosAlbumAssetProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosAlbumAssetProvider.swift; sourceTree = "<group>"; };
-		7B09EDEC252C48AEAC8D506C /* Corporate_Focus_Loop_2026-01-18T194430.m4a */ = {isa = PBXFileReference; path = "Corporate_Focus_Loop_2026-01-18T194430.m4a"; sourceTree = "<group>"; };
+		7B09EDEC252C48AEAC8D506C /* Corporate_Focus_Loop_2026-01-18T194430.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Corporate_Focus_Loop_2026-01-18T194430.m4a"; sourceTree = "<group>"; };
 		7B0E2F31F72AC01E0EE46822 /* AlbumLLMDebugDump.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumLLMDebugDump.swift; sourceTree = "<group>"; };
 		7B5132E99D021A1112304934 /* AlbumCurvedLayoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCurvedLayoutModels.swift; sourceTree = "<group>"; };
 		7B527E1ADA8D7DB684D248B2 /* ClusterRenameSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClusterRenameSheet.swift; sourceTree = "<group>"; };
 		7C2ADE9155595B1FEDD4DE44 /* AlbumAutoOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumAutoOracle.swift; sourceTree = "<group>"; };
-		7C87F4F86EB70ED3836CA1E2 /* Heartfelt_Montage_Loop_2026-01-18T193700.m4a */ = {isa = PBXFileReference; path = "Heartfelt_Montage_Loop_2026-01-18T193700.m4a"; sourceTree = "<group>"; };
+		7C87F4F86EB70ED3836CA1E2 /* Heartfelt_Montage_Loop_2026-01-18T193700.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Heartfelt_Montage_Loop_2026-01-18T193700.m4a"; sourceTree = "<group>"; };
 		7DF758D4AB021318D7D4F8DD /* AlbumSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSettingsStore.swift; sourceTree = "<group>"; };
 		7F2414F03CE0B7AA9F377F9F /* AlbumRealityKitComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumRealityKitComponents.swift; sourceTree = "<group>"; };
 		8538D3EED24ECD7E1DEB909D /* AlbumBackfillCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumBackfillCoordinator.swift; sourceTree = "<group>"; };
@@ -184,7 +184,7 @@
 		A698BDF127E28CCD8F299BB6 /* UI_STYLE_GUIDE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = UI_STYLE_GUIDE.txt; sourceTree = "<group>"; };
 		A8D541EFEDD9CD2FA916ED24 /* ContactClusterLabeler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactClusterLabeler.swift; sourceTree = "<group>"; };
 		A9198ABFA084347F23636ADB /* AlbumVisionQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionQueue.swift; sourceTree = "<group>"; };
-		AFEB51F586AD9B9DF88943D7 /* Preteen_Birthday_Beat_2026-01-18T194051.m4a */ = {isa = PBXFileReference; path = "Preteen_Birthday_Beat_2026-01-18T194051.m4a"; sourceTree = "<group>"; };
+		AFEB51F586AD9B9DF88943D7 /* Preteen_Birthday_Beat_2026-01-18T194051.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Preteen_Birthday_Beat_2026-01-18T194051.m4a"; sourceTree = "<group>"; };
 		B04DFC0A91C890CE2C57D05E /* BubbleAnimatedAtlasGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleAnimatedAtlasGenerator.swift; sourceTree = "<group>"; };
 		B2B6B9F4CC0F9DDD532AAC5D /* RadialFeatherMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialFeatherMask.swift; sourceTree = "<group>"; };
 		B8BF3109B530261DC6BCBBD5 /* AlbumSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSettingsSheet.swift; sourceTree = "<group>"; };
@@ -196,7 +196,7 @@
 		BDC799549DBFE01D888F603E /* GravitasThreads_NextUp_Absorption_History_Ordering.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = GravitasThreads_NextUp_Absorption_History_Ordering.txt; sourceTree = "<group>"; };
 		D1662B5E5B780F071B10A5CF /* AlbumHeuristicOracle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumHeuristicOracle.swift; sourceTree = "<group>"; };
 		D4E3AD7B137BCC9EF20517DA /* GravitasAlbumApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GravitasAlbumApp.swift; sourceTree = "<group>"; };
-		D5964FEA3D836A0C1BC0863D /* GravitasAlbum.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GravitasAlbum.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D5964FEA3D836A0C1BC0863D /* GravitasAlbum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GravitasAlbum.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC238A13C94293D4E2E4E554 /* AlbumSceneStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumSceneStore.swift; sourceTree = "<group>"; };
 		E126FCB3E31D34FD717A1630 /* AlbumVisionSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumVisionSummarizer.swift; sourceTree = "<group>"; };
 		E591919E454D3F5470E73F78 /* AlbumShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumShareSheet.swift; sourceTree = "<group>"; };
@@ -208,7 +208,7 @@
 		EC42F7648D254E7284D953AE /* BubbleFresnelMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleFresnelMask.swift; sourceTree = "<group>"; };
 		EC505166E6E86AE193870785 /* AlbumPopOutAssetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumPopOutAssetView.swift; sourceTree = "<group>"; };
 		ED357F7814566660C2FFF2DC /* AlbumBackfillManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumBackfillManager.swift; sourceTree = "<group>"; };
-		EF698F56FEE007DC51AC0A96 /* Faded_Polaroid_2026-01-18T195127.m4a */ = {isa = PBXFileReference; path = "Faded_Polaroid_2026-01-18T195127.m4a"; sourceTree = "<group>"; };
+		EF698F56FEE007DC51AC0A96 /* Faded_Polaroid_2026-01-18T195127.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Faded_Polaroid_2026-01-18T195127.m4a"; sourceTree = "<group>"; };
 		EFBDDE560B3260E37092A64A /* AlbumControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumControlView.swift; sourceTree = "<group>"; };
 		F04B2D41E93237025E1D52E0 /* ContactsAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactsAuth.swift; sourceTree = "<group>"; };
 		F0A244A510D0168E38C25572 /* FaceHierarchyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceHierarchyModels.swift; sourceTree = "<group>"; };
@@ -487,11 +487,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-					28C048D4271BEF946E117CC7 = {
-						DevelopmentTeam = X7LJQ9VB44;
-					};
-				};
 			};
 			buildConfigurationList = 8C31BE0F3DF33735E3E061F6 /* Build configuration list for PBXProject "GravitasAlbum" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -503,7 +498,6 @@
 			);
 			mainGroup = 8A3B24C699FF996B172228CE;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -786,15 +780,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 23;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
@@ -806,15 +801,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 23;
 				DEVELOPMENT_TEAM = X7LJQ9VB44;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Gravitas Album";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gravitas.GravitasAlbum;
 				SDKROOT = xros;
 				TARGETED_DEVICE_FAMILY = 7;
